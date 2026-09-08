@@ -15,7 +15,7 @@
 ## Behaviour
 
 - Functions are pure and JAX-transformable: `jit`, `vmap`, `grad`.
-- Out-of-domain inputs return `nan`/`inf` rather than raising -- traced code cannot raise. See [Sharp bits](guides/sharp-bits.md).
+- Out-of-domain _array_ inputs return `nan`/`inf` rather than raising -- traced code cannot raise. A static Python parameter can still be validated eagerly, and is: `Li` raises `ValueError` for a non-integer or non-positive order. See [Sharp bits](guides/sharp-bits.md).
 - Double precision is assumed. Accuracy claims hold with `jax_enable_x64`.
 
 ## Docstrings

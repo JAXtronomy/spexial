@@ -21,20 +21,19 @@ Two things to watch:
 - **It is process-global and order-sensitive.** Arrays created before the `update` call stay float32. Set it at the top of your entry point, or use the `JAX_ENABLE_X64=1` environment variable, which applies from interpreter start.
 - **NumPy inputs are silently downcast.** A `numpy.float64` array passed into a JAX function becomes float32 without x64 enabled, and no warning is issued.
 
-## Not every function accepts arrays
+## `Li` accepts only a scalar `z`
 
-Some implementations branch internally on the value of their argument (`lax.cond` needs a scalar predicate), so they only accept a _scalar_ input. Passing an array raises a `TypeError` about a non-scalar predicate rather than broadcasting.
+Every function broadcasts over its evaluation point except [`Li`][spexial.Li]. Its intermediate branch builds a length-60 vector of powers of $\\log z$, so an array argument collides with that axis and raises a broadcasting `TypeError` from `pow` rather than mapping elementwise.
 
-The fix is `vmap`, not a loop:
+The fix is `vmap`, not a Python loop:
 
 ```pycon
 >>> import spexial as sp
->>> f = lambda x: sp.eval_gegenbauer(3, 0.5, x)
->>> jax.vmap(f)(jnp.linspace(-1.0, 1.0, 5))
-Array([-1.    ,  0.4375, -0.    , -0.4375,  1.    ], dtype=float64)
+>>> jax.vmap(lambda z: sp.Li(2, z))(jnp.array([0.25, 0.5]))
+Array([0.26765264, 0.58224053], dtype=float64)
 ```
 
-Which functions are scalar-only is recorded per function in [Accuracy and domains](accuracy-and-domains.md).
+This is the only such restriction, and it is recorded in [Accuracy and domains](accuracy-and-domains.md). It is a property of the algorithm, not a general pattern to expect elsewhere.
 
 ## Integer parameters are static, and each value recompiles
 
@@ -48,9 +47,11 @@ Degrees and orders control the _length_ of a recurrence, so they must be Python 
 
 Traced code cannot raise. Out-of-domain inputs return `nan` or `inf`, and those propagate quietly through `jit`, `vmap` and `grad` -- often turning an entire gradient into `nan` from a single bad element. Validate inputs before the call, or check the output with `jnp.isnan`.
 
-## Gradients at the edges
+## Gradients at the edges -- and a gradient that lies
 
 A function can be accurate at a point and still have a `nan` gradient there: branch boundaries, series cutoffs and endpoints of the domain are the usual culprits. If `jax.grad` returns `nan` where the forward pass is fine, suspect a boundary before suspecting your model.
+
+Worse than a `nan` is a plausible number that is not the derivative. `zeta` is evaluated on the negative line by looking up a Bernoulli number, and a table lookup carries no derivative information -- so `jax.grad(sp.zeta)` returns a finite value there that is **not** $\\zeta'$. It will not warn you. Differentiate `zeta` only for $n > 1$.
 
 ## Debugging inside `jit`
 

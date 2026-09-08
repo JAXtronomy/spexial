@@ -6,6 +6,8 @@
 
 Where a function has a `scipy.special` counterpart, `spexial` matches its name, its argument order, and its convention. Porting a `scipy.special` call is usually a matter of changing the import.
 
+It is not always only that, though. Some routines are less accurate than their SciPy counterparts, and `zeta` does not cover every argument SciPy does. [Accuracy and domains](guides/accuracy-and-domains.md) states, per function, the domain it is tested over and the tolerance it actually meets -- read it before swapping an import in work you care about.
+
 ## Installation
 
 ```bash
