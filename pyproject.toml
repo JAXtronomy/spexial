@@ -50,6 +50,9 @@ filterwarnings = [
     "ignore:ast\\.Str is deprecated and will be removed in Python 3\\.14:DeprecationWarning",   # from Sybil
     # jax
     "ignore:jax\\.core\\.pp_eqn_rules is deprecated:DeprecationWarning",
+    # numpy cannot probe `longdouble` when running under valgrind, which is how
+    # the benchmarks are measured in CodSpeed's simulation mode.
+    "ignore:Signature .* for <class 'numpy\\.longdouble'>:UserWarning",
 ]
 testpaths = ["docs", "src/", "tests/"]
 xfail_strict = true
@@ -88,6 +91,7 @@ known-local-folder = ["spexial"]
 [tool.uv]
 dev-dependencies = [
     "hypothesis>=6.115.3",
+    "pytest-codspeed>=5.0.3",
     "pytest-cov>=5.0.0",
     "pytest-env>=1.1.5",
     "pytest>=8.3.3",
