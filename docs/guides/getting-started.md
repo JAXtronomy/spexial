@@ -34,10 +34,17 @@ Everything is a normal JAX function, so the usual transforms apply.
 Array(-0.4375, dtype=float64, weak_type=True)
 ```
 
-`vmap` vectorises over an argument that a function only accepts as a scalar:
+Most functions already broadcast over their evaluation point, so you often need no transform at all:
 
 ```pycon
 >>> xs = jnp.linspace(-1.0, 1.0, 5)
+>>> sp.eval_gegenbauer(3, 0.5, xs)
+Array([-1.    ,  0.4375, -0.    , -0.4375,  1.    ], dtype=float64)
+```
+
+`vmap` gives the same result, and is the tool you need for [`Li`][spexial.Li], the one function that accepts only a scalar `z`:
+
+```pycon
 >>> jax.vmap(f)(xs)
 Array([-1.    ,  0.4375, -0.    , -0.4375,  1.    ], dtype=float64)
 ```
@@ -57,4 +64,4 @@ Degrees and orders (the `n` of $C_n^{(\alpha)}$, for instance) are Python `int`s
 
 ## Coming from SciPy
 
-Where a function exists in `scipy.special`, `spexial` keeps the same name and argument order, so the port is normally an import swap plus `jnp` arrays. A few functions have no SciPy counterpart; those are flagged in [Accuracy and domains](accuracy-and-domains.md) and in the [API reference](../api/index.md).
+Where a function exists in `scipy.special`, `spexial` keeps the same name and argument order, so the port is normally an import swap plus `jnp` arrays. Two things it is worth checking first: a few functions have no SciPy counterpart, and a few are less accurate than SciPy's or cover less of the argument range (`zeta` has real gaps; the modified Bessel functions are good to about $10^{-7}$, not machine precision). Both are recorded per function in [Accuracy and domains](accuracy-and-domains.md).
