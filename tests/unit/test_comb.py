@@ -76,3 +76,9 @@ def test_grad():
     """d/dN comb(N, 2) at N=5 is comb(5,2) * (psi(6) - psi(4)) == 4.5."""
     got = jax.grad(lambda n: sp.comb(n, 2.0))(5.0)
     np.testing.assert_allclose(got, 4.5, rtol=1e-10)
+
+
+def test_infinite_n_is_infinity():
+    """`comb(inf, k)` is `inf`, as in scipy; `gammaln` alone gives `inf - inf`."""
+    assert jnp.isinf(sp.comb(jnp.inf, 2.0))
+    assert float(sp.comb(jnp.inf, 2.0)) == scipy_comb(np.inf, 2)

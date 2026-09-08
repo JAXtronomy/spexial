@@ -82,3 +82,18 @@ def test_grad(x):
     """gamma'(x) == gamma(x) * digamma(x)."""
     got = jax.grad(sp.gamma)(x)
     np.testing.assert_allclose(got, scipy_gamma(x) * digamma(x), rtol=1e-9)
+
+
+def test_positive_infinity_is_infinity():
+    """`gamma(+inf)` is `inf`; the Lanczos series alone gives `nan`."""
+    assert jnp.isinf(sp.gamma(jnp.inf))
+    assert sp.gamma(jnp.inf) > 0
+
+
+def test_negative_infinity_is_nan():
+    """Deliberate divergence: scipy returns -inf, but the limit does not exist.
+
+    Gamma has a pole at every negative integer, so there is no limit at -inf to
+    return. Documented in `docs/reference/accuracy-and-domains.md`.
+    """
+    assert jnp.isnan(sp.gamma(-jnp.inf))

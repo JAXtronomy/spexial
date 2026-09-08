@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import mpmath as mp
 import numpy as np
 import pytest
 from scipy.special import kn as scipy_kn
@@ -101,3 +102,21 @@ def test_grad_k0_is_minus_k1(z):
 def test_dtype_is_float_for_integer_input(func):
     """Integer input is promoted to float."""
     assert jnp.issubdtype(func(jnp.asarray([1, 2])).dtype, jnp.floating)
+
+
+@pytest.mark.parametrize("z", [699.5, 701.0, 705.0])
+def test_k2_keeps_its_recurrence_term_in_the_subnormal_tail(z):
+    """REGRESSION: `(2/z) * K1` was flushed to zero, silently dropping 0.3%.
+
+    `K2 = K0 + (2/z) K1` computed directly puts that second term into the
+    subnormal range around z = 699, and XLA on CPU flushes subnormal results to
+    zero -- so `K2` returned exactly `K0` while still looking plausible, a 2.85e-3
+    relative error against a documented 1e-6. Evaluating as
+    `K0 * (1 + (2/z)(K1/K0))` keeps every intermediate normal.
+    """
+    # mpmath, not `scipy.kn`: the reference itself underflows to 0 at z ~ 698,
+    # which is exactly the region under test.
+    with mp.workdps(40):
+        expected = float(mp.besselk(2, z))
+    assert float(sp.K2(z)) > float(sp.K0(z))
+    np.testing.assert_allclose(sp.K2(z), expected, rtol=1e-6)

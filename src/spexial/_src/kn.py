@@ -15,7 +15,10 @@ _EULER_GAMMA: Final = 0.57721566490153286061
 _SMALL_Z: Final = 9.0
 """Cross-over between the ascending series and the asymptotic expansion."""
 
-_MAX_Z: Final = 700.0
+# `i0` overflows just above z = 709.78, which is what bounds the closed form
+# for `K1`. K0 itself underflows to 0 near z = 706, so that is the practical
+# ceiling; this constant only needs to stay below the `i0` limit.
+_MAX_Z: Final = 709.0
 """Above this `jax.scipy.special.i0` overflows, so `K1` is taken to underflow.
 
 `scipy.special.kn` also returns 0 from ~700 upwards, so this matches it.
@@ -164,6 +167,18 @@ def K2(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
 
     """
     z_arr = jnp.asarray(z) * 1.0
-    # `K0(0) + 2/0 * K1(0)` is `inf + inf` once K1 returns the pole rather than
-    # `nan`, so 0 needs no special case here -- but it does need K1's.
-    return K0(z_arr) + 2.0 / z_arr * K1(z_arr)
+    k0, k1 = K0(z_arr), K1(z_arr)
+    # Evaluated as `K0 * (1 + (2/z)(K1/K0))` rather than `K0 + (2/z) K1`.
+    # Algebraically identical, but the direct form's `(2/z) * K1` term drops into
+    # the subnormal range around z = 699 -- where XLA on CPU flushes it to zero,
+    # silently losing a 0.3% contribution (2850x the documented tolerance) while
+    # still returning a plausible number. The ratio keeps every intermediate
+    # normal. Guarded because `K1/K0` is `0/0` or `inf/inf` outside the range
+    # where both are finite and positive; there the direct form is correct.
+    usable = (k0 > 0) & jnp.isfinite(k0) & jnp.isfinite(k1)
+    safe_k0 = jnp.where(usable, k0, 1.0)
+    return jnp.where(
+        usable,
+        safe_k0 * (1.0 + (2.0 / z_arr) * (k1 / safe_k0)),
+        k0 + 2.0 / z_arr * k1,
+    )

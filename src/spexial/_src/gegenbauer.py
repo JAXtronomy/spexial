@@ -44,7 +44,10 @@ def C1(alpha: ScalarLike, x: AnyArrayLike, /) -> AnyArray:  # noqa: N802
     [0.30000000000000004, 0.6000000000000001]
 
     """
-    return 2 * jnp.asarray(alpha) * jnp.asarray(x)
+    # `* 1.0` promotes: with integer `alpha` *and* integer `x` this stays int64,
+    # while `C0` is always float, and `lax.scan` then rejects the carry as having
+    # mismatched types. scipy promotes integer input to float, so we do too.
+    return 2 * jnp.asarray(alpha) * jnp.asarray(x) * 1.0
 
 
 def _C_n_plus_1(carry: _Carry, n: AnyArray) -> tuple[_Carry, AnyArray]:  # noqa: N802

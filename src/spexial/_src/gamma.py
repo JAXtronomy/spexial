@@ -91,4 +91,11 @@ def gamma(x: RealArrayLike, /) -> AnyArray:
     # `sin(pi * x)` is only ~1e-16, not 0, at the negative integers, so the
     # poles need to be put in by hand.
     is_pole = (x_arr <= 0) & (x_arr == jnp.floor(x_arr))
-    return jnp.where(is_pole, jnp.inf, out)
+    out = jnp.where(is_pole, jnp.inf, out)
+    # The Lanczos series gives `nan` at +inf, where the limit is plainly +inf and
+    # scipy agrees. -inf is left as `nan`: `floor(-inf) == -inf` makes the pole
+    # test above fire, but Gamma has a pole at *every* negative integer, so the
+    # limit does not exist and `nan` is the honest answer. scipy returns -inf
+    # there; this is a deliberate divergence, recorded in the accuracy docs.
+    out = jnp.where(x_arr == jnp.inf, jnp.inf, out)
+    return jnp.where(x_arr == -jnp.inf, jnp.nan, out)

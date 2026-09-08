@@ -92,3 +92,17 @@ def test_grad(x):
 def test_grad_at_degree_zero_is_zero():
     """Degree 0 is constant, so its gradient is 0 -- and defined at all."""
     assert float(jax.grad(partial(sp.eval_gegenbauer, 0, 1.0))(0.5)) == 0.0
+
+
+@pytest.mark.parametrize("n", [0, 1, 2, 5])
+def test_integer_alpha_and_integer_x(n):
+    """REGRESSION: integer `alpha` *and* integer `x` used to raise.
+
+    `C0` promoted to float while `C1` (`2 * alpha * x`) stayed int64, so from
+    n >= 2 `lax.scan` rejected the carry as having mismatched types. scipy
+    promotes integer input, so we do too.
+    """
+    got = sp.eval_gegenbauer(n, 1, jnp.asarray([0, 1]))
+    expected = scipy_eval_gegenbauer(n, 1, np.array([0, 1]))
+    assert jnp.issubdtype(got.dtype, jnp.floating)
+    np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-13)

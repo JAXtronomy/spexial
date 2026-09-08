@@ -61,4 +61,7 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     n_safe = jnp.where(in_domain, n_arr, 0.0)
     k_safe = jnp.where(in_domain, k_arr, 0.0)
     log_comb = gammaln(n_safe + 1) - gammaln(k_safe + 1) - gammaln(n_safe - k_safe + 1)
-    return jnp.where(in_domain, jnp.exp(log_comb), 0.0)
+    out = jnp.where(in_domain, jnp.exp(log_comb), 0.0)
+    # `gammaln(inf) - gammaln(inf) - ...` is `inf - inf == nan`; the limit is
+    # plainly +inf and scipy returns that.
+    return jnp.where(in_domain & jnp.isinf(n_arr), jnp.inf, out)

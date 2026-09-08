@@ -13,6 +13,8 @@ from scipy.special import (
     comb as scipy_comb,
     eval_gegenbauer as scipy_eval_gegenbauer,
     gamma as scipy_gamma,
+    k0 as scipy_k0,
+    k1 as scipy_k1,
     kn as scipy_kn,
     zeta as scipy_zeta,
 )
@@ -51,9 +53,10 @@ def test_comb(N, k):
 )
 def test_comb_non_integer(N, k):
     """The generalized (non-integer) binomial coefficient agrees too."""
-    expected = scipy_comb(N, k)
-    assume(np.isfinite(expected))
-    np.testing.assert_allclose(sp.comb(N, k), expected, rtol=1e-11, atol=1e-300)
+    # No `assume` here: over the strategy's own range `scipy_comb` is always
+    # finite, so the guard this used to carry filtered nothing and only implied
+    # a hazard that does not exist.
+    np.testing.assert_allclose(sp.comb(N, k), scipy_comb(N, k), rtol=1e-11)
 
 
 # ---------------------------------------------------------------------------
@@ -74,16 +77,38 @@ def test_gamma(x):
     np.testing.assert_allclose(sp.gamma(x), scipy_gamma(x), rtol=1e-10)
 
 
+@given(x=floats(-170.0, -30.0))
+def test_gamma_negative_tail(x):
+    """Below -30 the reflection formula degrades; 5e-10, not the 1e-10 above.
+
+    The documented domain reaches |x| ~ 171 but the strategy above stops at -30.
+    Measured worst case over [-170, -30] is 2.4e-10, so the tighter tolerance
+    genuinely does not hold here -- it is stated separately rather than either
+    loosened everywhere or left untested.
+    """
+    assume(abs(x - round(x)) > 1e-4)
+    expected = scipy_gamma(x)
+    # Below ~1e-300 the true value is subnormal, and XLA on CPU flushes those to
+    # zero; see the accuracy docs.
+    assume(abs(expected) > 1e-300)
+    np.testing.assert_allclose(sp.gamma(x), expected, rtol=5e-10)
+
+
+@pytest.mark.parametrize("pole", [-7.0, -25.0, -40.0, -55.0])
 @pytest.mark.parametrize("distance", [1e-6, 1e-8])
-def test_gamma_near_a_pole(distance):
+def test_gamma_near_a_pole(pole, distance):
     """Accuracy near a pole is only ~1e-17 / distance, not 1e-10.
 
     This is inherent to the reflection formula, not a fixable bug: the
     ``sin(pi x)`` denominator loses exactly the digits that ``x`` is close to
     an integer by. Documented rather than papered over.
     """
-    x = -7.0 + distance
-    np.testing.assert_allclose(sp.gamma(x), scipy_gamma(x), rtol=1e-7)
+    # The loss scales as |x| * 1e-16 / distance, not 1e-17 / distance: the
+    # argument error in `sin(pi x)` grows with |x|. Pinned at several poles
+    # because the old single hard-coded -7.0 passed with 2.3x margin and would
+    # have failed at -25 or beyond on its own tolerance.
+    x = pole + distance
+    np.testing.assert_allclose(sp.gamma(x), scipy_gamma(x), rtol=abs(pole) * 1e-8)
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +138,10 @@ def test_eval_gegenbauer(n, alpha, x):
         sp.eval_gegenbauer(n, alpha, x),
         scipy_eval_gegenbauer(n, alpha, x),
         rtol=1e-10,
-        atol=1e-9,
+        # 1e-13, not 1e-9: the loose value never fired (max residual beyond rtol
+        # is 0 over 420k samples) and would have hidden a 1000x error on any
+        # result below 1e-9 -- the near-root values it was meant to protect.
+        atol=1e-13,
     )
 
 
@@ -140,15 +168,32 @@ def test_eval_gegenbauers(n, alpha, x):
     got = sp.eval_gegenbauers(n, alpha, x)
     expected = [scipy_eval_gegenbauer(k, alpha, x) for k in range(n + 1)]
     assert got.shape == (n + 1,)
-    np.testing.assert_allclose(got, expected, rtol=1e-10, atol=1e-9)
+    np.testing.assert_allclose(got, expected, rtol=1e-10, atol=1e-13)
 
 
 # ---------------------------------------------------------------------------
 # kn
 
 
+_KN_REFERENCE = (scipy_k0, scipy_k1, lambda z: scipy_kn(2, z))
+
+
 @pytest.mark.parametrize("order", [0, 1, 2])
-@given(z=floats(1e-30, 600.0))
+@given(z=floats(8.0, 10.0))
+def test_kn_across_the_crossover(order, z):
+    """The z = 9 hand-off between the two series, where the error actually peaks.
+
+    `test_kn` justifies its 1e-6 tolerance by this cross-over and then never
+    visits it: over its `floats(1e-30, 690)` range, 5000 draws landed in
+    [8.9, 9.1] zero times. Without this test a regression that made the
+    asymptotic branch 100x worse would still pass.
+    """
+    func = (sp.K0, sp.K1, sp.K2)[order]
+    np.testing.assert_allclose(func(z), _KN_REFERENCE[order](z), rtol=1e-6)
+
+
+@pytest.mark.parametrize("order", [0, 1, 2])
+@given(z=floats(1e-30, 690.0))
 def test_kn(order, z):
     """~8e-8 worst case, at the z = 9 cross-over between the two series.
 
@@ -157,7 +202,7 @@ def test_kn(order, z):
     precision.
     """
     func = (sp.K0, sp.K1, sp.K2)[order]
-    np.testing.assert_allclose(func(z), scipy_kn(order, z), rtol=1e-6)
+    np.testing.assert_allclose(func(z), _KN_REFERENCE[order](z), rtol=1e-6)
 
 
 # ---------------------------------------------------------------------------
