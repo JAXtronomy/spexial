@@ -140,13 +140,21 @@ def docs(s: nox.Session, /) -> None:
         default=DEFAULT_DOCS_OUTPUT,
         help=f"Move the built site here (default: {DEFAULT_DOCS_OUTPUT})",
     )
+    parser.add_argument(
+        "--no-strict",
+        action="store_true",
+        help="Do not fail the build on warnings (unresolved cross-references, ...)",
+    )
     args, posargs = parser.parse_known_args(s.posargs)
 
     if args.serve:
         s.run("zensical", "serve", *posargs)
         return
 
-    s.run("zensical", "build", "--clean", *posargs)
+    # `zensical build` exits 0 even when it reports unresolved cross-references,
+    # so without `--strict` a broken link is invisible to CI and to this session.
+    strict = [] if args.no_strict else ["--strict"]
+    s.run("zensical", "build", "--clean", *strict, *posargs)
 
     built = DIR / DEFAULT_DOCS_OUTPUT
     dest = DIR / args.output_dir

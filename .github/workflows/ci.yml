@@ -179,9 +179,10 @@ jobs:
       - name: Test package
         run: uv run --no-sync pytest -n logical --dist=loadfile
 
-  # Gate on the docs building at all. `zensical build` exits non-zero on a
-  # broken build, so no log-scraping is needed -- but `set -o pipefail`-style
-  # indirection must not be introduced here either, or that exit code is lost.
+  # Gate on the docs building cleanly. `--strict` is load-bearing: a plain
+  # `zensical build` exits 0 even when it reports unresolved cross-references,
+  # so without it a broken link never fails CI -- it just renders as unlinked
+  # text that nobody notices.
   docs:
     name: Docs
     runs-on: ubuntu-latest
@@ -200,7 +201,7 @@ jobs:
         run: uv sync --no-default-groups --group docs --locked
 
       - name: Build docs
-        run: uv run --frozen zensical build --clean
+        run: uv run --frozen zensical build --clean --strict
 
   ci-pass:
     name: CI Pass

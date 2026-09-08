@@ -39,8 +39,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --no-default-groups --group docs --locked
 
+      # `--strict` for the same reason as ci.yml: a plain build exits 0 on
+      # unresolved cross-references, and this one is about to be published.
       - name: Build docs
-        run: uv run --frozen zensical build --clean
+        run: uv run --frozen zensical build --clean --strict
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

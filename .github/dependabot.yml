@@ -16,6 +16,6 @@ updates:
     schedule:
       interval: "monthly"
     groups:
-      pip:
+      uv:
         patterns:
           - "*"
