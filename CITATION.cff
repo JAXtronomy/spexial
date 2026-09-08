@@ -36,8 +36,8 @@ abstract: >-
   automatic differentiation and vectorisation, and run on CPU,
   GPU and TPU. spexial fills gaps in jax.scipy.special and
   extends some routines beyond their scipy counterparts, for
-  example to negative or complex arguments. Several routines
-  originate in the LINX code.
+  example gamma to negative real arguments and zeta to negative
+  integers. Several routines originate in the LINX code.
 keywords:
   - special-functions
   - jax

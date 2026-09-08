@@ -56,7 +56,6 @@ def _bernoulli_poly(n: int, x: AnyArray) -> AnyArray:
     )
 
 
-@partial(jax.jit, static_argnums=(0,))
 def Li(n: int, z: ScalarLike, /) -> Scalar:  # noqa: N802
     r"""Compute the polylogarithm :math:`\mathrm{Li}_n(z)`.
 
@@ -108,9 +107,18 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:  # noqa: N802
     -0.90154268
 
     """
+    # Validated here rather than inside `_li`, so the error is raised eagerly at
+    # call time instead of during tracing -- a `ValueError` from inside a jitted
+    # body surfaces with a confusing traceback and only when the trace happens.
     if n < 1:
         msg = f"Li is only implemented for integer order n >= 1, got {n}"
         raise ValueError(msg)
+    return _li(n, z)
+
+
+@partial(jax.jit, static_argnums=(0,))
+def _li(n: int, z: ScalarLike) -> Scalar:
+    """Evaluate the polylogarithm; see `Li`, which validates ``n`` first."""
 
     def series(z: AnyArray) -> AnyArray:
         """Evaluate the defining series, for |z| <= 1/2."""

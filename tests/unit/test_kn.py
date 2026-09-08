@@ -41,6 +41,18 @@ def test_array_input_spans_both_branches():
     np.testing.assert_allclose(sp.K0(z), scipy_kn(0, np.asarray(z)), rtol=RTOL)
 
 
+@pytest.mark.parametrize(("func", "order"), [(sp.K0, 0), (sp.K1, 1), (sp.K2, 2)])
+def test_all_orders_at_zero_are_inf(func, order):
+    """REGRESSION: every K_n diverges at 0, and scipy returns `inf` for each.
+
+    `K1`'s closed form is `1/z - i1(z) * K0(z)`, which at 0 evaluates to
+    `inf - 0 * inf == nan`; `K2` inherited that through the recurrence. Both
+    returned `nan` where scipy returns `inf`.
+    """
+    assert jnp.isinf(func(0.0))
+    assert jnp.isinf(scipy_kn(order, 0.0))
+
+
 def test_k0_at_zero_is_inf():
     """K0(0) diverges, as in scipy."""
     assert jnp.isinf(sp.K0(0.0))
@@ -64,7 +76,12 @@ def test_k1_underflows_above_700():
 @pytest.mark.parametrize("func", [sp.K0, sp.K1, sp.K2])
 def test_jit(func):
     """The Bessel functions are jittable."""
-    np.testing.assert_allclose(jax.jit(func)(2.0), float(func(2.0)), rtol=1e-14)
+    # 1e-12, not bit-equality: XLA may fuse and reassociate the series
+    # differently from the eager path, and JAX does not promise the two agree to
+    # the last ulp. On the oldest supported jax they differ by 1.5e-14. This is
+    # still four orders tighter than the function's own documented accuracy, so
+    # it remains a real check that `jit` does not change the answer.
+    np.testing.assert_allclose(jax.jit(func)(2.0), float(func(2.0)), rtol=1e-12)
 
 
 @pytest.mark.parametrize("func", [sp.K0, sp.K1, sp.K2])

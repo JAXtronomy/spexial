@@ -60,8 +60,9 @@ def K0(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
     Parameters
     ----------
     z
-        Real positive argument, of any shape. Evaluated elementwise. ``z <= 0``
-        is outside the domain and gives ``inf`` (at 0) or `nan`.
+        Real positive argument, of any shape. Evaluated elementwise. ``z == 0``
+        is the pole and gives ``inf``; ``z < 0`` is outside the domain and gives
+        `nan`.
 
     Returns
     -------
@@ -101,8 +102,9 @@ def K1(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
     Parameters
     ----------
     z
-        Real positive argument, of any shape. Evaluated elementwise. ``z <= 0``
-        is outside the domain and gives `nan`.
+        Real positive argument, of any shape. Evaluated elementwise. ``z == 0``
+        is the pole and gives ``inf``; ``z < 0`` is outside the domain and gives
+        `nan`.
 
     Returns
     -------
@@ -124,9 +126,12 @@ def K1(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
     """
     z_arr = jnp.asarray(z) * 1.0
     finite = z_arr < _MAX_Z
-    z_safe = jnp.where(finite, z_arr, 1.0)
+    # K1 diverges at 0, but the closed form evaluates to
+    # `1/0 - i1(0) * K0(0) == inf - 0 * inf == nan` there. Substitute the pole.
+    at_zero = z_arr == 0.0
+    z_safe = jnp.where(finite & ~at_zero, z_arr, 1.0)
     k1 = (1.0 / z_safe - i1(z_safe) * K0(z_safe)) / i0(z_safe)
-    return jnp.where(finite, k1, 0.0)
+    return jnp.where(at_zero, jnp.inf, jnp.where(finite, k1, 0.0))
 
 
 def K2(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
@@ -137,8 +142,9 @@ def K2(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
     Parameters
     ----------
     z
-        Real positive argument, of any shape. Evaluated elementwise. ``z <= 0``
-        is outside the domain and gives `nan`.
+        Real positive argument, of any shape. Evaluated elementwise. ``z == 0``
+        is the pole and gives ``inf``; ``z < 0`` is outside the domain and gives
+        `nan`.
 
     Returns
     -------
@@ -158,4 +164,6 @@ def K2(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
 
     """
     z_arr = jnp.asarray(z) * 1.0
+    # `K0(0) + 2/0 * K1(0)` is `inf + inf` once K1 returns the pole rather than
+    # `nan`, so 0 needs no special case here -- but it does need K1's.
     return K0(z_arr) + 2.0 / z_arr * K1(z_arr)

@@ -226,6 +226,13 @@ filterwarnings = [
   "ignore:ast\\.Str is deprecated and will be removed in Python 3\\.14:DeprecationWarning",
   # jax
   "ignore:jax\\.core\\.pp_eqn_rules is deprecated:DeprecationWarning",
+  # numpy on the Windows runners is built with MINGW-W64 and cannot probe
+  # `longdouble`. Importing it emits RuntimeWarnings from `numpy._core.getlimits`
+  # plus an experimental-build Warning; with `error` above, those abort
+  # *collection* before a single test runs. Platform noise, not our code.
+  "ignore:invalid value encountered in:RuntimeWarning:numpy._core.getlimits",
+  "ignore:.*built with MINGW-W64 on Windows 64 bits is experimental:Warning",
+  "ignore:Signature .* for <class 'numpy\\.longdouble'> does not match any known type:UserWarning",
   # numpy cannot probe `longdouble` when running under valgrind, which is how
   # the benchmarks are measured in CodSpeed's simulation mode.
   "ignore:Signature .* for <class 'numpy\\.longdouble'>:UserWarning",
