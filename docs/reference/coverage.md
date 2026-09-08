@@ -16,15 +16,15 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 
 | Function | In JAX | JAX autodiff | scipy on JAX arrays | Custom JVP | Grad speed | Grad memory | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `K0` | -- | -- | value only | yes | 0.48x (2.1x better) | 0.01x (67.4x better) | only here |
-| `K1` | -- | -- | value only | yes | -- | 0.06x (16.6x better) | only here |
-| `K2` | -- | -- | -- | yes | -- | 0.08x (12.1x better) | only here |
-| `Li` | -- | -- | -- | available | -- | -- | only here |
+| `K0` | -- | -- | value only | yes | 0.483x (2.1x better) | 0.0148x (67.4x better) | only here |
+| `K1` | -- | -- | value only | yes | -- | 0.0602x (16.6x better) | only here |
+| `K2` | -- | -- | -- | yes | -- | 0.0826x (12.1x better) | only here |
+| `Li` | -- | -- | -- | yes | 1.73x (1.7x worse) | 0.00373x (268.0x better) | only here |
 | `eval_gegenbauer` | -- | -- | -- | available | -- | -- | only here |
 | `eval_gegenbauers` | -- | -- | -- | -- | -- | -- | only here |
 | `zeta` | yes (all >= 0.7.2) | value + autodiff | -- | -- | 1.15x (1.1x worse) | -- | extends upstream |
 | `comb` | yes (>= 0.10.2) | value + autodiff | -- | -- | 0.97x (1.0x better) | -- | redundant above floor |
-| `gamma` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.23x (4.3x better) | 0.33x (3.0x better) | delegates + our JVP |
+| `gamma` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.235x (4.3x better) | 0.333x (3.0x better) | delegates + our JVP |
 
 ## Per-function detail
 
@@ -33,29 +33,31 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 
     Derivative: `-K1(z)`.
 
-    Gradient cost vs differentiating our own series: speed 0.48x (2.1x better), memory 0.01x (67.4x better).
+    Gradient cost vs differentiating our own series: speed 0.483x (2.1x better), memory 0.0148x (67.4x better).
 
 `K1`
 :   As `K0`. K1'(z) = -(K0(z) + K2(z)) / 2.
 
     Derivative: `-(K0(z) + K2(z)) / 2`.
 
-    Gradient cost vs differentiating our own series: speed --, memory 0.06x (16.6x better).
+    Gradient cost vs differentiating our own series: speed --, memory 0.0602x (16.6x better).
 
 `K2`
 :   `scipy.special.kn` does not dispatch on JAX arrays at all, even with the array API enabled. K2'(z) = -K1(z) - (2/z) K2(z).
 
     Derivative: `-K1(z) - (2/z) K2(z)`.
 
-    Gradient cost vs differentiating our own series: speed --, memory 0.08x (12.1x better).
+    Gradient cost vs differentiating our own series: speed --, memory 0.0826x (12.1x better).
 
 `Li`
-:   No general polylogarithm anywhere. `jax.scipy.special.spence` is the n = 2 case only, and scipy has no polylog. d/dz Li_n(z) = Li_{n-1}(z) / z.
+:   No general polylogarithm anywhere. `jax.scipy.special.spence` is the n = 2 case only, and scipy has no polylog. The custom JVP is the one row where the two cost columns disagree: it keeps 268x less residual (4.2 MB -> 16 kB over 2000 points) but runs 1.7x slower, because Li_{n-1} must be evaluated afresh rather than reusing saved intermediates. Kept for the memory, which is the binding constraint when vmapping over a large batch.
 
     Derivative: `Li_{n-1}(z) / z`.
 
+    Gradient cost vs differentiating our own series: speed 1.73x (1.7x worse), memory 0.00373x (268.0x better).
+
 `eval_gegenbauer`
-:   Absent from JAX. scipy's does not dispatch on JAX arrays. d/dx C_n^a(x) = 2a C_{n-1}^{a+1}(x).
+:   Absent from JAX. scipy's does not dispatch on JAX arrays. The derivative in x is 2a C_{n-1}^{a+1}(x), but a custom JVP is *not* wired up: `alpha` is traced too and dC/da has no closed form, so a rule supplying only the x-tangent would silently break `grad` with respect to `alpha`. The saving on offer is modest anyway -- 6 residual leaves, against 29 for `Li`.
 
     Derivative: `2a C_{n-1}^{a+1}(x)`.
 
@@ -77,7 +79,7 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 
     Derivative: `gamma(x) psi(x)`.
 
-    Gradient cost vs jax.scipy.special.gamma: speed 0.23x (4.3x better), memory 0.33x (3.0x better).
+    Gradient cost vs jax.scipy.special.gamma: speed 0.235x (4.3x better), memory 0.333x (3.0x better).
 
 <!-- END GENERATED TABLE -->
 

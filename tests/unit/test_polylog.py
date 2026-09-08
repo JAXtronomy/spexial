@@ -129,3 +129,37 @@ def test_high_order_still_works_below_the_inversion_branch(n):
     with mp.workdps(30):
         expected = float(complex(mp.polylog(n, 0.5)).real)
     np.testing.assert_allclose(sp.Li(n, 0.5), expected, rtol=1e-11)
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 5, 12])
+@pytest.mark.parametrize("z", [-2.5, -0.3, 0.2, 0.45, 0.9])
+def test_custom_jvp_matches_a_finite_difference(n, z):
+    """The analytic derivative must be the real one, not merely self-consistent.
+
+    A wrong `custom_jvp` leaves every value correct and every gradient silently
+    wrong, so this is pinned against a central difference rather than against
+    the identity it was derived from.
+    """
+    h = 1e-6
+    analytic = float(jax.grad(lambda a: sp.Li(n, a))(z))
+    numeric = float((sp.Li(n, z + h) - sp.Li(n, z - h)) / (2 * h))
+    np.testing.assert_allclose(analytic, numeric, rtol=1e-6)
+
+
+@pytest.mark.parametrize("n", [2, 4, 7])
+def test_derivative_is_the_lower_order_polylog(n):
+    """d/dz Li_n(z) = Li_{n-1}(z) / z for n >= 2."""
+    z = 0.35
+    got = jax.grad(lambda a: sp.Li(n, a))(z)
+    np.testing.assert_allclose(got, sp.Li(n - 1, z) / z, rtol=1e-12)
+
+
+def test_order_one_derivative_is_the_special_case():
+    """Li_1(z) = -log(1-z), so its derivative is 1/(1-z).
+
+    The general identity would need `Li_0`, which `Li` refuses to compute.
+    """
+    z = 0.35
+    np.testing.assert_allclose(
+        jax.grad(lambda a: sp.Li(1, a))(z), 1 / (1 - z), rtol=1e-12
+    )

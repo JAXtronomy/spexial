@@ -231,13 +231,21 @@ _ROWS: Final = (
         scipy_name=None,
         scipy_array_api=Support.NONE,
         status=Status.UNIQUE,
-        custom_jvp=False,
+        custom_jvp=True,
         derivative="Li_{n-1}(z) / z",
-        cost=None,
+        cost=Cost(
+            speed=1.73,
+            memory=1 / 268.0,
+            against="differentiating our own series",
+        ),
         notes=(
             "No general polylogarithm anywhere. `jax.scipy.special.spence` is "
-            "the n = 2 case only, and scipy has no polylog. "
-            "d/dz Li_n(z) = Li_{n-1}(z) / z."
+            "the n = 2 case only, and scipy has no polylog. The custom JVP is "
+            "the one row where the two cost columns disagree: it keeps 268x "
+            "less residual (4.2 MB -> 16 kB over 2000 points) but runs 1.7x "
+            "slower, because Li_{n-1} must be evaluated afresh rather than "
+            "reusing saved intermediates. Kept for the memory, which is the "
+            "binding constraint when vmapping over a large batch."
         ),
     ),
     Coverage(
@@ -252,8 +260,12 @@ _ROWS: Final = (
         derivative="2a C_{n-1}^{a+1}(x)",
         cost=None,
         notes=(
-            "Absent from JAX. scipy's does not dispatch on JAX arrays. "
-            "d/dx C_n^a(x) = 2a C_{n-1}^{a+1}(x)."
+            "Absent from JAX. scipy's does not dispatch on JAX arrays. The "
+            "derivative in x is 2a C_{n-1}^{a+1}(x), but a custom JVP is *not* "
+            "wired up: `alpha` is traced too and dC/da has no closed form, so a "
+            "rule supplying only the x-tangent would silently break `grad` with "
+            "respect to `alpha`. The saving on offer is modest anyway -- 6 "
+            "residual leaves, against 29 for `Li`."
         ),
     ),
     Coverage(
@@ -360,7 +372,8 @@ def _ratio(value: float | None) -> str:
         return "--"
     better = 1.0 / value
     direction = "better" if better > 1 else "worse"
-    return f"{value:.2f}x ({max(better, 1 / better):.1f}x {direction})"
+    magnitude = max(better, 1 / better)
+    return f"{value:.3g}x ({magnitude:.1f}x {direction})"
 
 
 def render_markdown() -> str:
