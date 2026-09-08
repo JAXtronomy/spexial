@@ -1,10 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="spexial">
   <title>spexial</title>
-  <!-- Capital gamma: the emblem of the special functions this library implements.
-       Drawn as a path rather than <text> so it renders identically without
-       depending on a font being present. The glyph's bounding box (17,16)-(47,48)
-       is centred on the 64x64 plate; strokes are 12 units so the stem still reads
-       at a 16px favicon size. Amber matches the docs accent colour. -->
+  <!-- Capital gamma: the emblem of the special functions this library
+       implements. Drawn as a path rather than <text> so it renders identically
+       without depending on a font being present.
+
+       Proportions matter here: an earlier version used 12-unit strokes, which
+       left a counter almost as wide as it was tall and read as an arrowhead
+       rather than a letter. The bar is now 8 units thick and overhangs the
+       9-unit stem to x=48, so the counter is 21x32 -- clearly taller than wide,
+       which is what makes it read as a letterform.
+
+       The gradient is JAX's own logo palette (teal -> blue -> purple), taken
+       from jax-ml/jax images/jax_logo.svg. -->
+  <defs>
+    <linearGradient id="jax" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#26a69a"/>
+      <stop offset="0.5" stop-color="#5e97f6"/>
+      <stop offset="1" stop-color="#9c27b0"/>
+    </linearGradient>
+  </defs>
   <rect width="64" height="64" rx="14" fill="#14161a"/>
-  <path d="M17 16 H47 V28 H29 V48 H17 Z" fill="#ffc107"/>
+  <path d="M18 12 H48 V20 H27 V52 H18 Z" fill="url(#jax)"/>
 </svg>
