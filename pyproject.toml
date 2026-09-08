@@ -220,7 +220,7 @@ filterwarnings = [
   # the benchmarks are measured in CodSpeed's simulation mode.
   "ignore:Signature .* for <class 'numpy\\.longdouble'>:UserWarning",
 ]
-log_cli_level = "INFO"
+log_level = "INFO"
 minversion = "8.3"
 norecursedirs = [".*", "__pycache__", "site"]
 testpaths = ["README.md", "docs", "src/", "tests/"]
@@ -234,7 +234,10 @@ SPEXIAL_ENABLE_RUNTIME_TYPECHECKING = "beartype.beartype"
 
 [tool.repo-review]
 # RTD100: this project publishes to GitHub Pages via Zensical, not Read the Docs.
-ignore = ["PC140", "PC901", "PC902", "PC903", "RTD100"]
+# NOX103: `nox.options.sessions = ["all"]` is deliberate. Per-session
+# `default=` does not achieve the same thing -- nox's `default` is True
+# unless set, so relying on it selects every session, not just `all`.
+ignore = ["NOX103", "PC140", "PC901", "PC902", "PC903", "RTD100"]
 
 
 [tool.ruff.lint]
@@ -242,6 +245,7 @@ extend-select = ["ALL"]
 ignore = [
   "ANN401",  # Dynamically typed expressions (typing.Any) are disallowed
   "COM812",  # <- for ruff.format
+  "CPY001",  # Missing copyright notice at top of file -- not a convention here
   "D203",    # 1 blank line required before class docstring
   "D213",    # Multi-line docstring summary should start at the second line
   "F722",    # Syntax error in forward annotation <- jaxtyping

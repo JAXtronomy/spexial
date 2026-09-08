@@ -7,55 +7,208 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Keyed on the event as well as the ref: a `push` to main and a
+  # `workflow_dispatch` on the same ref otherwise share a group and, with
+  # `cancel-in-progress`, cancel each other.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   # Many color libraries just need this to be set to any value, but at least
   # one distinguishes color depth, where "3" -> "256-bit color".
   FORCE_COLOR: 3
+  # Single source of truth for the supported Python versions. The `tests` job's
+  # exclude list below hardcodes the non-newest entries; update it if this
+  # changes, or macOS/Windows will silently run the full matrix (GitHub Actions
+  # does not warn when exclude entries go stale).
+  PYTHON_VERSIONS: '["3.11", "3.13", "3.14"]'
 
 jobs:
-  checks:
-    name: Check Python ${{ matrix.python-version }} on ${{ matrix.runs-on }}
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    outputs:
+      python-versions: ${{ env.PYTHON_VERSIONS }}
+      oldest-python: ${{ steps.versions.outputs.oldest }}
+      newest-python: ${{ steps.versions.outputs.newest }}
+    steps:
+      - id: versions
+        run: |
+          versions='${{ env.PYTHON_VERSIONS }}'
+          oldest=$(echo "$versions" | jq -r '.[0]')
+          newest=$(echo "$versions" | jq -r '.[-1]')
+          echo "oldest=$oldest" >> $GITHUB_OUTPUT
+          echo "newest=$newest" >> $GITHUB_OUTPUT
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # hatch-vcs needs the tags to derive a version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: Install
+        run: uv sync --no-default-groups --group lint --locked
+
+      # Runs every hook in .pre-commit-config.yaml, including the pinned
+      # pyright/ty/mypy typing guards scoped to `tests/typing/`. Deliberately
+      # not split into per-checker jobs -- that would just double-run the hooks.
+      - name: Checks with prek
+        run: uv run --frozen prek run --all-files
+
+  # Fast, broad checks -- the package imports and its public API re-exports.
+  # Gates the full multi-OS/multi-Python matrix below: catches "the package is
+  # broken" in well under a minute instead of waiting on the whole matrix.
+  smoke:
+    name: Smoke test
+    runs-on: ubuntu-latest
+    needs: [setup, lint]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # hatch-vcs needs the tags to derive a version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: ${{ needs.setup.outputs.newest-python }}
+
+      - name: Install
+        run: uv sync --no-default-groups --group test --locked
+
+      - name: Smoke test
+        run: uv run --frozen pytest -x tests/smoke
+
+  tests:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.runs-on }}
     runs-on: ${{ matrix.runs-on }}
+    needs: [setup, lint, smoke]
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        python-version: ${{ fromJson(needs.setup.outputs.python-versions) }}
         runs-on: [ubuntu-latest, macos-latest, windows-latest]
-
-        # include:
-        #   - python-version: pypy-3.10
-        #     runs-on: ubuntu-latest
+        # macOS runners bill at 10x the Linux rate and Windows at 2x
+        # (https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions).
+        # All 3 Python versions are already fully exercised on Linux; running
+        # them again on macOS/Windows is cross-OS coverage, not cross-version
+        # coverage, so one version per non-Linux OS is enough to catch a
+        # platform-specific break. Pin it to the newest version so it also
+        # doubles as a "does the latest supported Python work on this OS" check.
+        exclude:
+          - runs-on: macos-latest
+            python-version: "3.11"
+          - runs-on: macos-latest
+            python-version: "3.13"
+          - runs-on: windows-latest
+            python-version: "3.11"
+          - runs-on: windows-latest
+            python-version: "3.13"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # hatch-vcs needs the tags to derive a version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: uv sync --no-default-groups --group test --locked
+
+      # --dist=loadfile is required, not tuning: Sybil's doctest regions within
+      # one document share a namespace and must run in order in a single
+      # worker. The default --dist=load would shard them and break those tests.
+      - name: Test with pytest
+        run: >-
+          uv run --frozen pytest --cov --cov-report=xml --cov-report=term
+          --durations=20 -n logical --dist=loadfile
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  oldest-supported:
+    name: Oldest supported deps
+    runs-on: ubuntu-latest
+    needs: [setup, lint, smoke]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: "Set up Python"
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          allow-prereleases: true
+          python-version: ${{ needs.setup.outputs.oldest-python }}
 
       - name: Install the project
-        run: uv sync --all-extras --dev
+        run: uv sync --no-default-groups --group test --resolution lowest-direct
 
-      - name: Run tests
-        run: >-
-          uv run pytest src docs tests --cov --cov-report=xml --cov-report=term
-          --durations=20
+      - name: Test package
+        run: uv run --no-sync pytest -n logical --dist=loadfile
 
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v5.4.0
+  newest-supported:
+    name: Newest supported deps
+    runs-on: ubuntu-latest
+    needs: [setup, lint, smoke]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: ${{ needs.setup.outputs.newest-python }}
+
+      - name: Install the project
+        run: uv sync --no-default-groups --group test --upgrade
+
+      - name: Test package
+        run: uv run --no-sync pytest -n logical --dist=loadfile
+
+  # Gate on the docs building at all. `zensical build` exits non-zero on a
+  # broken build, so no log-scraping is needed -- but `set -o pipefail`-style
+  # indirection must not be introduced here either, or that exit code is lost.
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    needs: [setup, lint]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: ${{ needs.setup.outputs.newest-python }}
+
+      - name: Install
+        run: uv sync --no-default-groups --group docs --locked
+
+      - name: Build docs
+        run: uv run --frozen zensical build --clean
+
+  ci-pass:
+    name: CI Pass
+    runs-on: ubuntu-latest
+    needs: [setup, lint, smoke, tests, oldest-supported, newest-supported, docs]
+    if: ${{ !cancelled() }}
+    steps:
+      - name: All required jobs passed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}

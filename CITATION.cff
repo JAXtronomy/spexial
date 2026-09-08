@@ -1,0 +1,46 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+#
+# TODO: add Cara Giovanetti's ORCID before the first tagged release; it could
+# not be verified from repository metadata, and the field is omitted rather
+# than guessed.
+
+cff-version: 1.2.0
+title: spexial
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Cara
+    family-names: Giovanetti
+    email: 52010580+cgiovanetti@users.noreply.github.com
+    affiliation: New York University
+  - given-names: Jacob
+    family-names: Nibauer
+    email: jnibauer@princeton.edu
+    affiliation: Princeton
+    orcid: "https://orcid.org/0000-0001-8042-5794"
+  - given-names: Nathaniel
+    family-names: Starkman
+    email: nstarman@users.noreply.github.com
+    affiliation: MIT
+    orcid: "https://orcid.org/0000-0003-3954-3291"
+repository-code: "https://github.com/JAXtronomy/spexial/"
+url: "https://jaxtronomy.github.io/spexial"
+repository-artifact: "https://pypi.org/project/spexial/"
+abstract: >-
+  spexial provides special functions for JAX, following the
+  scipy.special API. The implementations are written in terms
+  of JAX primitives, so they compose with jit compilation,
+  automatic differentiation and vectorisation, and run on CPU,
+  GPU and TPU. spexial fills gaps in jax.scipy.special and
+  extends some routines beyond their scipy counterparts, for
+  example to negative or complex arguments. Several routines
+  originate in the LINX code.
+keywords:
+  - special-functions
+  - jax
+  - scipy
+  - scientific computing
+license: MIT

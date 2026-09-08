@@ -1,0 +1,92 @@
+site_name: spexial
+site_description: scipy.special in JAX.
+site_author: Spexial Maintainers
+site_url: https://jaxtronomy.github.io/spexial
+
+repo_url: https://github.com/JAXtronomy/spexial
+repo_name: JAXtronomy/spexial
+edit_uri: ""
+
+theme:
+  name: material
+  features:
+    - navigation.sections # Sections are included in the navigation on the left.
+    - toc.integrate # Table of contents is integrated on the left; does not appear separately on the right.
+    - header.autohide # header disappears as you scroll
+  palette:
+    # Light mode / dark mode. Deliberately no `media` auto-detection: default
+    # to light mode, which is more obvious about offering a toggle.
+    - scheme: default
+      primary: white
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github # GitHub logo in top right
+    logo: "material/function-variant" # spexial logo in top left
+  favicon: "_static/favicon.png"
+  custom_dir: "docs/_overrides" # Overriding part of the HTML
+
+extra_javascript:
+  # The below two make MathJax work, see https://squidfunk.github.io/mkdocs-material/reference/mathjax/
+  - _static/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+extra_css:
+  - _static/custom_css.css
+
+markdown_extensions:
+  - pymdownx.arithmatex: # Render LaTeX via MathJax. Load-bearing: this is a special-functions library.
+      generic: true
+  - pymdownx.superfences # Syntax highlighting when used with the Material theme.
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details # Hidden expandable regions denoted by ???
+  - pymdownx.snippets: # Include one Markdown file into another
+      base_path: docs
+  - admonition
+  - toc:
+      permalink: "¤" # Adds a clickable permalink to each section heading
+      toc_depth: 4
+
+plugins:
+  - search:
+      # See https://github.com/squidfunk/mkdocs-material/discussions/8116#discussioncomment-12632752
+      # In particular this allows searching e.g. 'eval_gegenbauer' and matching
+      # 'spexial.eval_gegenbauer'.
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  - hippogriffe
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            force_inspection: true
+            heading_level: 4
+            inherited_members: true
+            members_order: source
+            show_bases: false
+            show_if_no_docstring: true
+            show_overloads: false
+            show_root_heading: true
+            show_signature_annotations: true
+            show_source: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+
+nav:
+  - "index.md"
+  - Guides:
+      - "guides/getting-started.md"
+      - "guides/accuracy-and-domains.md"
+      - "guides/sharp-bits.md"
+  - API:
+      - "api/index.md"
+  - "conventions.md"
+  - "contributing.md"
