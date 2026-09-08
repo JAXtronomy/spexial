@@ -3,3 +3,5 @@
 *.pyc
 /src/spexial/_version.py
 .mypy_cache
+.hypothesis
+.coverage
