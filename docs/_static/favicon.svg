@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="spexial">
+  <title>spexial</title>
+  <!-- Capital gamma: the emblem of the special functions this library implements.
+       Drawn as a path rather than <text> so it renders identically without
+       depending on a font being present. The glyph's bounding box (17,16)-(47,48)
+       is centred on the 64x64 plate; strokes are 12 units so the stem still reads
+       at a 16px favicon size. Amber matches the docs accent colour. -->
+  <rect width="64" height="64" rx="14" fill="#14161a"/>
+  <path d="M17 16 H47 V28 H29 V48 H17 Z" fill="#ffc107"/>
+</svg>

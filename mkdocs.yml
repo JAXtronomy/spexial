@@ -31,7 +31,7 @@ theme:
   icon:
     repo: fontawesome/brands/github # GitHub logo in top right
     logo: "material/function-variant" # spexial logo in top left
-  favicon: "_static/favicon.png"
+  favicon: "_static/favicon.svg"
   custom_dir: "docs/_overrides" # Overriding part of the HTML
 
 extra_javascript:
