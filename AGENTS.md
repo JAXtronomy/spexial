@@ -49,7 +49,7 @@ This is a numerics library. The interesting review question is never "does it ru
 - Every function has a parity test against `scipy.special`, or against `mpmath` where SciPy has no counterpart (`Li`).
 - **Never widen a tolerance to make a test pass.** The tolerances in `tests/parity/` are measured worst-case errors with modest headroom, and several are _not_ machine precision — `K0`/`K1`/`K2` assert rtol `1e-6` because a 30-term series meeting a 10-term asymptotic expansion at `z = 9` delivers `8e-8`, and no more. Loosening one of these silently converts a regression into a pass.
 - Where a domain is genuinely unsupported, it is expressed as a domain restriction with a comment, or as an explicit test of the `nan`/degraded behaviour — not as a skip. Keep it that way.
-- Every documented domain and tolerance lives in [docs/guides/accuracy-and-domains.md](docs/guides/accuracy-and-domains.md). **A change to numerical behaviour must update that page in the same PR.**
+- Every documented domain and tolerance lives in [docs/reference/accuracy-and-domains.md](docs/reference/accuracy-and-domains.md). **A change to numerical behaviour must update that page in the same PR.**
 
 ## Known gaps — do not "fix" these by accident
 
@@ -81,5 +81,5 @@ Single package, tag-driven. A `vX.Y.Z` tag push triggers `.github/workflows/cd.y
 
 - [skills/spexial/SKILL.md](skills/spexial/SKILL.md) — using `spexial` correctly (consumer-facing)
 - [.github/skills/code-review/SKILL.md](.github/skills/code-review/SKILL.md) — reviewing PRs here
-- [docs/guides/accuracy-and-domains.md](docs/guides/accuracy-and-domains.md), [docs/conventions.md](docs/conventions.md)
+- [docs/reference/accuracy-and-domains.md](docs/reference/accuracy-and-domains.md), [docs/reference/conventions.md](docs/reference/conventions.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md), [RELEASING.md](RELEASING.md)

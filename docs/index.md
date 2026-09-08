@@ -2,11 +2,9 @@
 
 `scipy.special` in [JAX](https://docs.jax.dev).
 
-`spexial` implements special functions -- Gegenbauer polynomials, the gamma function, modified Bessel functions, the Riemann zeta function, polylogarithms -- as plain JAX functions. Because they are ordinary JAX code, they compose with the rest of the ecosystem: `jax.jit`, `jax.vmap`, `jax.grad`, and execution on CPU, GPU and TPU.
+`spexial` implements special functions — Gegenbauer polynomials, the gamma function, modified Bessel functions, the Riemann zeta function, polylogarithms — as plain JAX functions. Because they are ordinary JAX code, they compose with `jax.jit`, `jax.vmap` and `jax.grad`, and run on CPU, GPU and TPU.
 
-Where a function has a `scipy.special` counterpart, `spexial` matches its name, its argument order, and its convention. Porting a `scipy.special` call is usually a matter of changing the import.
-
-It is not always only that, though. Some routines are less accurate than their SciPy counterparts, and `zeta` does not cover every argument SciPy does. [Accuracy and domains](guides/accuracy-and-domains.md) states, per function, the domain it is tested over and the tolerance it actually meets -- read it before swapping an import in work you care about.
+Where a function has a `scipy.special` counterpart, `spexial` matches its name, its argument order and its convention. It exists to fill gaps in `jax.scipy.special`, and in a couple of places to go further than SciPy: `gamma` accepts negative reals and `zeta` accepts negative integers.
 
 ## Installation
 
@@ -14,40 +12,33 @@ It is not always only that, though. Some routines are less accurate than their S
 pip install spexial
 ```
 
-or
+## Where to start
 
-```bash
-uv add spexial
-```
+<div class="grid cards" markdown>
 
-## A first example
+- **[Tutorial](tutorials/index.md)**
 
-The Gegenbauer polynomial $C_n^{(\alpha)}(x)$, evaluated at a point:
+  New here? Compute a physical constant from two special functions, and learn the shape of the library along the way.
 
-```pycon
->>> import jax
->>> jax.config.update("jax_enable_x64", True)
+- **[How-to guides](how-to/index.md)**
 
->>> import jax.numpy as jnp
->>> import spexial as sp
+  Know what you want to do? Enable double precision, use the JAX transforms, port from SciPy.
 
->>> sp.eval_gegenbauer(3, 0.5, jnp.array(0.5))
-Array(-0.4375, dtype=float64, weak_type=True)
-```
+- **[Reference](reference/index.md)**
 
-That call is `jit`-compiled, differentiable, and vectorisable like any other JAX function -- see [Getting started](guides/getting-started.md).
+  Every function, its supported domain, and the accuracy it actually delivers.
 
-!!! warning "Enable x64"
+- **[Explanation](explanation/index.md)**
 
-    JAX defaults to 32-bit floats. Special functions are sensitive to precision,
-    so enable double precision before doing anything else, as above. See
-    [Sharp bits](guides/sharp-bits.md).
+  Why double precision is mandatory, why bad input returns `nan`, and why one gradient lies.
 
-## Where to go next
+</div>
 
-- [Getting started](guides/getting-started.md) -- the JAX idioms `spexial` expects.
-- [Accuracy and domains](guides/accuracy-and-domains.md) -- what is supported, where.
-- [Sharp bits](guides/sharp-bits.md) -- precision, shapes, and tracing pitfalls.
-- [API reference](api/index.md) -- every public function.
-- [Conventions](conventions.md) -- naming and argument-order rules.
-- [Contributing](contributing.md).
+## Before you rely on it
+
+Some routines are less accurate than their SciPy counterparts, and `zeta` does not cover every argument SciPy does. [Accuracy and domains](reference/accuracy-and-domains.md) states, per function, the domain it is tested over and the tolerance it meets. Read it before swapping an import in work you care about.
+
+## About
+
+- [Contributing](about/contributing.md)
+- [Source on GitHub](https://github.com/JAXtronomy/spexial)

@@ -10,8 +10,13 @@ edit_uri: ""
 theme:
   name: material
   features:
-    - navigation.sections # Sections are included in the navigation on the left.
-    - toc.integrate # Table of contents is integrated on the left; does not appear separately on the right.
+    - navigation.indexes # Section landing pages: the mode's index.md IS its nav entry.
+    - navigation.sections # Sections are rendered as groups in the left sidebar.
+    - navigation.path # Breadcrumbs, so a reader arriving from search sees which mode they landed in.
+    - navigation.top
+    - content.code.copy
+    # NOTE: `toc.integrate` was removed deliberately -- it is incompatible with
+    # `navigation.indexes`, and the four-mode structure needs the landing pages.
     - header.autohide # header disappears as you scroll
   palette:
     # Light mode / dark mode. Deliberately no `media` auto-detection: default
@@ -52,6 +57,8 @@ markdown_extensions:
   - pymdownx.snippets: # Include one Markdown file into another
       base_path: docs
   - admonition
+  - attr_list # Required by the card grid on the landing page.
+  - md_in_html # Ditto.
   - toc:
       permalink: "¤" # Adds a clickable permalink to each section heading
       toc_depth: 4
@@ -87,11 +94,22 @@ plugins:
 
 nav:
   - "index.md"
-  - Guides:
-      - "guides/getting-started.md"
-      - "guides/accuracy-and-domains.md"
-      - "guides/sharp-bits.md"
-  - API:
-      - "api/index.md"
-  - "conventions.md"
-  - "contributing.md"
+  - Tutorials:
+      - "tutorials/index.md"
+      - Compute the Stefan-Boltzmann constant: "tutorials/stefan-boltzmann.md"
+  - How-to guides:
+      - "how-to/index.md"
+      - How to enable double precision: "how-to/enable-double-precision.md"
+      - How to use spexial with jit, vmap and grad: "how-to/use-with-jit-vmap-and-grad.md"
+      - How to port code from scipy.special: "how-to/port-from-scipy.md"
+  - Reference:
+      - "reference/index.md"
+      - API reference: "reference/api.md"
+      - Accuracy and domains: "reference/accuracy-and-domains.md"
+      - Conventions: "reference/conventions.md"
+  - Explanation:
+      - "explanation/index.md"
+      - About precision: "explanation/precision.md"
+      - About domain edges: "explanation/edges.md"
+  - About:
+      - Contributing: "about/contributing.md"

@@ -33,7 +33,7 @@ Open PRs against `main`.
 - **Code.** For a new special function, include a reference to the algorithm you implemented — a paper, a book section (e.g. Zhang & Jin, _Computation of Special Functions_), or DLMF. "Ported from X" is a fine reference; "I derived it" needs the derivation.
 - **Tests.** A new function needs unit tests for known values and edge cases, a parity test against `scipy.special` (or `mpmath` where scipy has no counterpart), and coverage of `jax.jit` / `jax.vmap` / `jax.grad`.
 - **Docstring.** With a runnable `Examples` block — these are executed as tests, see below.
-- **Documentation.** New functions get a row in `docs/guides/accuracy-and-domains.md` stating the supported domain and how it differs from `scipy.special`.
+- **Documentation.** New functions get a row in `docs/reference/accuracy-and-domains.md` stating the supported domain and how it differs from `scipy.special`.
 - **Benchmarks.** If you are changing performance-sensitive code, add a benchmark under `tests/benchmark/`. A maintainer can run comparative benchmarks; the PR needs the `⏱️ Run benchmarks` label to trigger the workflow.
 
 ## Things that will surprise you
@@ -48,7 +48,7 @@ Open PRs against `main`.
 
 This is a numerics library, so the most important review question is: _over what domain is this actually correct, and how do you know?_
 
-Do not widen a test tolerance to make a test pass. If an implementation is inaccurate in some regime, or a domain is unsupported, say so explicitly — mark the test `xfail` with a reason, or restrict the Hypothesis strategy with a comment explaining the bound — and document it in `docs/guides/accuracy-and-domains.md`. A documented limitation is a contribution. A silently loosened `rtol` is a bug with a green checkmark on it.
+Do not widen a test tolerance to make a test pass. If an implementation is inaccurate in some regime, or a domain is unsupported, say so explicitly — mark the test `xfail` with a reason, or restrict the Hypothesis strategy with a comment explaining the bound — and document it in `docs/reference/accuracy-and-domains.md`. A documented limitation is a contribution. A silently loosened `rtol` is a bug with a green checkmark on it.
 
 ## Commit style
 

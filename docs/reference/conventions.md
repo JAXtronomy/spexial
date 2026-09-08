@@ -3,7 +3,7 @@
 ## Naming
 
 - **A function with a `scipy.special` counterpart keeps SciPy's name.** Porting code should be an import swap.
-- **A function without a counterpart keeps the name used in the literature.** These are called out as having no SciPy counterpart in the [API reference](api/index.md) and in [Accuracy and domains](guides/accuracy-and-domains.md).
+- **A function without a counterpart keeps the name used in the literature.** These are called out as having no SciPy counterpart in the [API reference](api.md) and in [Accuracy and domains](accuracy-and-domains.md).
 - The public surface is the top-level `spexial` namespace, and only what `spexial.__all__` lists. Anything under `spexial._src` is private and may change without notice.
 
 ## Signatures
@@ -15,9 +15,9 @@
 ## Behaviour
 
 - Functions are pure and JAX-transformable: `jit`, `vmap`, `grad`.
-- Out-of-domain _array_ inputs return `nan`/`inf` rather than raising -- traced code cannot raise. A static Python parameter can still be validated eagerly, and is: `Li` raises `ValueError` for a non-integer or non-positive order. See [Sharp bits](guides/sharp-bits.md).
+- Out-of-domain _array_ inputs return `nan`/`inf` rather than raising -- traced code cannot raise. A static Python parameter can still be validated eagerly, and is: `Li` raises `ValueError` for a non-integer or non-positive order. See [About domain edges](../explanation/edges.md).
 - Double precision is assumed. Accuracy claims hold with `jax_enable_x64`.
 
 ## Docstrings
 
-NumPy-style, with an `Examples` section. Examples are executed as tests by [Sybil](https://sybil.readthedocs.io/), as are all `python`/`pycon` blocks in these docs -- so an example that does not run is a failing build.
+NumPy-style, with an `Examples` section. The conventions contributors are held to are in [Contributing](../about/contributing.md).

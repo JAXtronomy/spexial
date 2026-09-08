@@ -33,8 +33,8 @@ Always go through `uv run` / `nox` — never a bare `python`, `pytest` or `ruff`
 1. An implementation in `src/spexial/_src/`, exported from `src/spexial/__init__.py` via `__all__`.
 2. A NumPy-style docstring with a runnable `Examples` section — it is executed as a test.
 3. A parity test against `scipy.special` (or `mpmath` where there is no SciPy counterpart).
-4. A row in [Accuracy and domains](guides/accuracy-and-domains.md) stating the verified domain.
-5. Adherence to [Conventions](conventions.md) — SciPy's name and argument order where one exists.
+4. A row in [Accuracy and domains](../reference/accuracy-and-domains.md) stating the verified domain.
+5. Adherence to [Conventions](../reference/conventions.md) — SciPy's name and argument order where one exists.
 
 !!! warning "On tolerances"
 

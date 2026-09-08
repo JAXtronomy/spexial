@@ -73,7 +73,7 @@ result = jax.vmap(lambda z: sp.Li(2, z))(zs)
 
 ## Accuracy summary
 
-Everything below assumes x64. Full detail, including how each was measured, is at <https://jaxtronomy.github.io/spexial/guides/accuracy-and-domains/>.
+Everything below assumes x64. Full detail, including how each was measured, is at <https://jaxtronomy.github.io/spexial/reference/accuracy-and-domains/>.
 
 | Function          | Domain                                  | Accurate to  |
 | ----------------- | --------------------------------------- | ------------ |

@@ -61,7 +61,7 @@ Array([-1.    ,  0.4375, -0.    , -0.4375,  1.    ], dtype=float64)
 | `Li`               | -- the polylogarithm                           |
 | `zeta`             | `zeta`, extended to negative integer arguments |
 
-**Read [Accuracy and domains](https://jaxtronomy.github.io/spexial/guides/accuracy-and-domains/) before relying on any of these.** It records, per function, the domain each is tested over and the tolerance it actually meets. Some are not machine-precision — the modified Bessel functions are accurate to about `1e-7`, and `zeta` does not implement the critical strip.
+**Read [Accuracy and domains](https://jaxtronomy.github.io/spexial/reference/accuracy-and-domains/) before relying on any of these.** It records, per function, the domain each is tested over and the tolerance it actually meets. Some are not machine-precision — the modified Bessel functions are accurate to about `1e-7`, and `zeta` does not implement the critical strip.
 
 ## Documentation
 
