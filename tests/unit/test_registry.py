@@ -32,6 +32,7 @@ _JVP_OBJECT = {
     "K2": sp.K2,
     "gamma": sp.gamma,
     "Li": _li_core,
+    "spence": sp.spence,
 }
 
 _PROBES = {
@@ -43,6 +44,7 @@ _PROBES = {
         lambda z: jax.vmap(lambda t: _li_core(3, t))(z),
         lambda z: jax.vmap(lambda t: _li_core.fun(3, t))(z),
     ),
+    "spence": (sp.spence, sp.spence.fun),
 }
 
 
@@ -197,7 +199,7 @@ def test_custom_jvp_really_saves_the_claimed_memory(name):
     # anywhere positive.
     x = (
         jnp.linspace(0.05, 0.45, 2_000)
-        if name == "Li"
+        if name in {"Li", "spence"}
         else jnp.linspace(0.6, 20.0, 10_000)
     )
     with_jvp = _residual_bytes(custom, x)
@@ -222,7 +224,23 @@ def test_custom_jvp_agrees_with_differentiating_the_implementation(name):
     JAX differentiating the series it replaced.
     """
     custom, plain = _PROBES[name]
-    x = jnp.linspace(0.05, 0.45, 40) if name == "Li" else jnp.linspace(0.7, 12.0, 40)
+    x = (
+        jnp.linspace(0.05, 0.45, 40)
+        if name in {"Li", "spence"}
+        else jnp.linspace(0.7, 12.0, 40)
+    )
     analytic = jax.grad(lambda a: custom(a).sum())(x)
     autodiff = jax.grad(lambda a: plain(a).sum())(x)
+    assert jnp.all(jnp.isfinite(analytic)), "the analytic rule itself is not finite"
+
+    if not jnp.all(jnp.isfinite(autodiff)):
+        # For `spence` the custom JVP is not merely faster, it is what makes the
+        # gradient exist: `lax.select` evaluates every branch, and the untaken
+        # ones contribute `nan` tangents. Fall back to a central difference,
+        # which does not care how the value was computed.
+        h = 1e-6
+        numeric = (custom(x + h) - custom(x - h)) / (2 * h)
+        np.testing.assert_allclose(analytic, numeric, rtol=1e-5)
+        return
+
     np.testing.assert_allclose(analytic, autodiff, rtol=1e-6)

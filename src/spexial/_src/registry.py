@@ -285,6 +285,35 @@ _ROWS: Final = (
         ),
     ),
     Coverage(
+        name="spence",
+        jax_name="spence",
+        jax_since="*",
+        jax_support=Support.AUTODIFF,
+        scipy_name="spence",
+        scipy_array_api=Support.AUTODIFF,
+        status=Status.EXTENDS,
+        custom_jvp=True,
+        derivative="log(z) / (1 - z)",
+        cost=Cost(
+            speed=26.6 / 95.7,
+            memory=15.6 / 601.6,
+            against="jax.scipy.special.spence",
+        ),
+        notes=(
+            "JAX has had `spence` since before our floor, but it is real-only "
+            "and raises on complex input; this accepts both, which is the "
+            "reason the row exists. It also wins on both cost columns -- 3.6x "
+            "faster on 38.5x less residual -- because the analytic derivative "
+            "log(z)/(1-z) is simply the integrand of the definition. The "
+            "custom JVP is not merely an optimisation here: `lax.select` "
+            "evaluates every branch, so differentiating the implementation "
+            "yields `nan` -- and JAX's own `spence` differentiates to `nan` "
+            "across roughly 1 < x < 2, where ours is exact. "
+            "Contributed by Colm Talbot, translated from scipy's Cython "
+            "implementation."
+        ),
+    ),
+    Coverage(
         name="zeta",
         jax_name="zeta",
         jax_since="*",

@@ -16,6 +16,7 @@ Every function is tested against a reference implementation — `scipy.special` 
 | `K1` | `k1` | $0 < z \lesssim 700$ | as `K0` |
 | `K2` | `kn` ($n = 2$) | $0 < z \lesssim 705$ | as `K0` |
 | `Li` | -- (`mpmath.polylog`) | scalar $z$, integer $n \ge 1$ | rtol $10^{-11}$, atol $10^{-12}$; worst $3.4 \times 10^{-12}$ for $1 \le n \le 20$, $\lvert z \rvert \le 1000$ |
+| `spence` | `spence` | real or complex $z$ | rtol $10^{-5}$, atol $10^{-8}$ vs scipy; the derivative is exact (closed form) |
 | `zeta` | `zeta` | $1 < n \lesssim 10^{15}$, or $n$ a negative integer $> -60$ | rtol $10^{-12}$; worst $8.9 \times 10^{-16}$ |
 
 ## Per-function limits
@@ -31,6 +32,8 @@ Every function is tested against a reference implementation — `scipy.special` 
 `Li` : Accepts a scalar `z` only. An array argument raises a broadcasting `TypeError`; use `jax.vmap` ([how](../how-to/use-with-jit-vmap-and-grad.md)). Raises `ValueError` for a non-integer order or an order below 1. For $\lvert z \rvert \ge 2$ the order is capped at **60** by the Bernoulli table the inversion formula needs; past that the result is `nan`. Smaller $\lvert z \rvert$ is unaffected, bounded instead by $\Gamma(n+1)$ overflow above $n \approx 170$. `Li(1, 1)` is the pole and returns `inf`.
 
 `zeta` : Bernoulli numbers are computed from exact `fractions.Fraction` arithmetic, not `jax.scipy.special.bernoulli`. Above $n \approx 10^{15}$ the result is `nan`, and that comes from `jax.scipy.special.zeta` rather than from this package; SciPy returns `1.0`. `jax.grad(zeta)` is meaningful only for $n > 1$; on the negative line it returns a finite value that is not $\zeta'$.
+
+`spence` : Accepts real _and_ complex argument; `jax.scipy.special.spence` is real-only and raises on complex. Its derivative, $\log z/(1-z)$, is supplied analytically — which matters beyond speed: JAX's own `spence` differentiates to `nan` across roughly $1 < z < 2$, where `spexial` is exact. Translated from SciPy's Cython implementation.
 
 ### `zeta` coverage against SciPy
 

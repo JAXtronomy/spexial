@@ -1,9 +1,9 @@
 # This CITATION.cff file was generated with cffinit.
 # Visit https://bit.ly/cffinit to generate yours today!
 #
-# TODO: add Cara Giovanetti's ORCID before the first tagged release; it could
-# not be verified from repository metadata, and the field is omitted rather
-# than guessed.
+# TODO: before the first tagged release, add ORCIDs and affiliations for Cara
+# Giovanetti and Colm Talbot. Neither could be verified from repository
+# metadata, and the fields are omitted rather than guessed.
 
 cff-version: 1.2.0
 title: spexial
@@ -26,6 +26,9 @@ authors:
     email: nstarman@users.noreply.github.com
     affiliation: MIT
     orcid: "https://orcid.org/0000-0003-3954-3291"
+  - given-names: Colm
+    family-names: Talbot
+    email: talbotcolm@gmail.com
 repository-code: "https://github.com/JAXtronomy/spexial/"
 url: "https://jaxtronomy.github.io/spexial"
 repository-artifact: "https://pypi.org/project/spexial/"
@@ -37,7 +40,8 @@ abstract: >-
   GPU and TPU. spexial fills gaps in jax.scipy.special and
   extends some routines beyond their scipy counterparts, for
   example gamma to negative real arguments and zeta to negative
-  integers. Several routines originate in the LINX code.
+  integers. Several routines originate in the LINX code, and the complex
+  Spence function is translated from scipy's Cython implementation.
 keywords:
   - special-functions
   - jax

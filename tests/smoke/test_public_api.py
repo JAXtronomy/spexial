@@ -16,6 +16,7 @@ _ORIGINS = {
     "eval_gegenbauer": "spexial._src.gegenbauer",
     "eval_gegenbauers": "spexial._src.gegenbauer",
     "gamma": "spexial._src.gamma",
+    "spence": "spexial._src.spence",
     "zeta": "spexial._src.zeta",
 }
 

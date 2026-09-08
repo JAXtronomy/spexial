@@ -33,6 +33,7 @@ __all__ = [
     "eval_gegenbauer",
     "eval_gegenbauers",
     "gamma",
+    "spence",
     "zeta",
 ]
 
@@ -44,6 +45,7 @@ with install_import_hook("spexial"):
     from ._src.gegenbauer import eval_gegenbauer, eval_gegenbauers
     from ._src.kn import K0, K1, K2
     from ._src.polylog import Li
+    from ._src.spence import spence
     from ._src.zeta import zeta
     from ._version import version as __version__
 
