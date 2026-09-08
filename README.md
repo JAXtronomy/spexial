@@ -5,8 +5,7 @@
 
 ## Installation
 
-[![PyPI version][pypi-version]][pypi-link]
-[![PyPI platforms][pypi-platforms]][pypi-link]
+[![PyPI version][pypi-version]][pypi-link] [![PyPI platforms][pypi-platforms]][pypi-link]
 
 ```bash
 pip install spexial
@@ -20,9 +19,7 @@ uv add spexial
 
 ## Development
 
-[![codecov][codecov-badge]][codecov-link]
-[![Actions Status][actions-badge]][actions-link]
-[![CodSpeed][codspeed-badge]][codspeed-link]
+[![codecov][codecov-badge]][codecov-link] [![Actions Status][actions-badge]][actions-link]
 
 We welcome contributions!
 
@@ -31,8 +28,6 @@ We welcome contributions!
 [actions-link]:             https://github.com/JAXtronomy/spexial/actions
 [codecov-badge]:            https://codecov.io/gh/JAXtronomy/spexial/graph/badge.svg
 [codecov-link]:             https://codecov.io/gh/JAXtronomy/spexial
-[codspeed-badge]:           https://img.shields.io/endpoint?url=https://codspeed.io/badge.json
-[codspeed-link]:            https://app.codspeed.io/JAXtronomy/spexial?utm_source=badge
 [pypi-link]:                https://pypi.org/project/spexial/
 [pypi-platforms]:           https://img.shields.io/pypi/pyversions/spexial
 [pypi-version]:             https://img.shields.io/pypi/v/spexial

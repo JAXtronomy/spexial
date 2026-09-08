@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Shaped
 
 Scalar: TypeAlias = Shaped[Array, ""]
-Vector: TypeAlias = Shaped[Array, "N"]  # type: ignore[name-defined] # noqa: F821
+Vector: TypeAlias = Shaped[Array, "N"]  # type: ignore[name-defined]
 AnyArray: TypeAlias = Shaped[Array, "..."]
 Carry: TypeAlias = tuple[float, Scalar, Scalar, Scalar]
 
