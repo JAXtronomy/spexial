@@ -111,6 +111,13 @@ version.source = "vcs"
 [tool.hatch.build.targets.wheel]
 packages = ["src/spexial"]
 
+# Without an explicit sdist target, hatchling bundles everything tracked by
+# git -- including a 500KB `uv.lock`, the whole `.github/` tree and the agent
+# skills. `docs/` and `tests/` stay: a downstream packager should be able to
+# build and test from the sdist.
+[tool.hatch.build.targets.sdist]
+exclude = [".claude", ".github", "skills", "uv.lock"]
+
 [tool.hatch.version.raw-options]
 local_scheme = "no-local-version"
 
