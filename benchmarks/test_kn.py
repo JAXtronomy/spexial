@@ -7,7 +7,7 @@ from pytest_codspeed import BenchmarkFixture
 
 from benchmarks.utils import warm
 
-import spexial
+import spexial as sp
 
 # Below the z < 9 cut-off used by the implementation the series expansion for
 # small arguments is used, above it the asymptotic one.
@@ -15,7 +15,7 @@ Z_SMALL = jnp.asarray(1.5)
 Z_LARGE = jnp.asarray(50.0)
 Z_VECTOR = jnp.linspace(0.1, 20.0, 500)
 
-FUNCTIONS = {"K0": spexial.K0, "K1": spexial.K1, "K2": spexial.K2}
+FUNCTIONS = {"K0": sp.K0, "K1": sp.K1, "K2": sp.K2}
 
 
 @pytest.mark.parametrize("name", list(FUNCTIONS))
@@ -33,5 +33,10 @@ def test_kn_scalar(
 
 @pytest.mark.parametrize("name", list(FUNCTIONS))
 def test_kn_vector(benchmark: BenchmarkFixture, name: str) -> None:
-    """Evaluate a modified Bessel function on 500 points."""
-    benchmark(warm(jax.vmap(FUNCTIONS[name]), Z_VECTOR))
+    """Evaluate a modified Bessel function on 500 points.
+
+    Called directly rather than under ``jax.vmap``: these broadcast over ``z``,
+    so this measures the path a caller actually takes. Note that ``Z_VECTOR``
+    straddles the ``z = 9`` cut-off, so both branches are exercised in one call.
+    """
+    benchmark(warm(FUNCTIONS[name], Z_VECTOR))

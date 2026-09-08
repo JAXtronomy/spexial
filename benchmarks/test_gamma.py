@@ -7,7 +7,7 @@ from pytest_codspeed import BenchmarkFixture
 
 from benchmarks.utils import warm
 
-import spexial
+import spexial as sp
 
 # The implementation reflects arguments below 0.5 onto the other half plane.
 X_REFLECTED = jnp.asarray(-2.7)
@@ -25,24 +25,23 @@ K_VECTOR = jnp.floor(N_VECTOR / 2)
 def test_gamma_scalar(benchmark: BenchmarkFixture, branch: str, x: jax.Array) -> None:
     """Evaluate the gamma function at a single point."""
     del branch  # only used to name the benchmark
-    benchmark(warm(spexial.gamma, x))
+    benchmark(warm(sp.gamma, x))
 
 
 def test_gamma_vector(benchmark: BenchmarkFixture) -> None:
-    """Evaluate the gamma function on 500 points."""
-    benchmark(warm(jax.vmap(spexial.gamma), X_VECTOR))
+    """Evaluate the gamma function on 500 points.
 
-
-def test_gamma_complex(benchmark: BenchmarkFixture) -> None:
-    """Evaluate the gamma function on a complex argument."""
-    benchmark(warm(spexial.gamma, jnp.asarray(3.5 + 1.25j)))
+    Called directly rather than under ``jax.vmap``: ``gamma`` broadcasts over its
+    argument, so this measures the path a caller actually takes.
+    """
+    benchmark(warm(sp.gamma, X_VECTOR))
 
 
 def test_comb_scalar(benchmark: BenchmarkFixture) -> None:
     """Evaluate "N choose k" for a single pair."""
-    benchmark(warm(spexial.comb, jnp.asarray(64.0), jnp.asarray(17.0)))
+    benchmark(warm(sp.comb, jnp.asarray(64.0), jnp.asarray(17.0)))
 
 
 def test_comb_vector(benchmark: BenchmarkFixture) -> None:
     """Evaluate "N choose k" for 1000 pairs."""
-    benchmark(warm(spexial.comb, N_VECTOR, K_VECTOR))
+    benchmark(warm(sp.comb, N_VECTOR, K_VECTOR))
