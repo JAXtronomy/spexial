@@ -15,13 +15,6 @@ ORDERS = [(0, sp.K0), (1, sp.K1), (2, sp.K2)]
 
 
 @pytest.mark.parametrize(("order", "func"), ORDERS)
-@pytest.mark.parametrize("z", [0.01, 0.5, 1.0, 5.0, 8.99, 9.01, 20.0, 100.0, 500.0])
-def test_known_values(order, func, z):
-    """Scalar values match `scipy.special.kn` on both sides of the cross-over."""
-    np.testing.assert_allclose(func(z), scipy_kn(order, z), rtol=RTOL)
-
-
-@pytest.mark.parametrize(("order", "func"), ORDERS)
 def test_array_input_is_elementwise(order, func):
     """REGRESSION: the series `jnp.sum` collapsed the caller's axis.
 

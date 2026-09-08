@@ -10,15 +10,6 @@ import spexial as sp
 
 
 @pytest.mark.parametrize(
-    ("n", "k", "expected"),
-    [(0, 0, 1.0), (5, 0, 1.0), (5, 5, 1.0), (5, 2, 10.0), (10, 5, 252.0)],
-)
-def test_known_values(n, k, expected):
-    """Small binomial coefficients come out exactly (to rounding)."""
-    np.testing.assert_allclose(sp.comb(n, k), expected, rtol=1e-12)
-
-
-@pytest.mark.parametrize(
     ("n", "k"),
     [
         (5, 6),  # k > N
@@ -53,11 +44,6 @@ def test_out_of_range_elementwise():
     """The zero-fill is elementwise, not all-or-nothing."""
     got = sp.comb(jnp.asarray([5, 5, 5, 5]), jnp.asarray([-1, 2, 5, 6]))
     np.testing.assert_allclose(got, [0.0, 10.0, 1.0, 0.0], rtol=1e-12)
-
-
-def test_non_integer_arguments():
-    """Non-integer input gives the generalized binomial coefficient."""
-    np.testing.assert_allclose(sp.comb(5.5, 2), scipy_comb(5.5, 2), rtol=1e-12)
 
 
 def test_broadcasting():

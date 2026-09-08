@@ -9,15 +9,6 @@ from scipy.special import digamma, gamma as scipy_gamma
 import spexial as sp
 
 
-@pytest.mark.parametrize(
-    ("x", "expected"),
-    [(1.0, 1.0), (2.0, 1.0), (5.0, 24.0), (0.5, np.sqrt(np.pi))],
-)
-def test_known_values(x, expected):
-    """Textbook values."""
-    np.testing.assert_allclose(sp.gamma(x), expected, rtol=1e-12)
-
-
 def test_array_input_broadcasts():
     """REGRESSION: `lax.cond` needs a scalar predicate, so arrays used to fail.
 
@@ -42,12 +33,6 @@ def test_poles_are_inf(x):
     """Non-positive integers are poles and give `inf`, as scipy does."""
     assert jnp.isinf(sp.gamma(x))
     assert jnp.isinf(scipy_gamma(x))
-
-
-def test_reflection_branch():
-    """Below 0.5 the reflection formula is used and still matches scipy."""
-    x = np.linspace(-4.9, 0.49, 97)
-    np.testing.assert_allclose(sp.gamma(x), scipy_gamma(x), rtol=1e-11)
 
 
 def test_large_argument_does_not_overflow_early():

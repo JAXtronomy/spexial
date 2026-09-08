@@ -9,23 +9,6 @@ from scipy.special import zeta as scipy_zeta
 import spexial as sp
 
 
-@pytest.mark.parametrize(
-    ("n", "expected"),
-    [
-        (2.0, np.pi**2 / 6),
-        (4.0, np.pi**4 / 90),
-        (0.0, -0.5),
-        (-1.0, -1 / 12),
-        (-3.0, 1 / 120),
-        (-2.0, 0.0),
-        (-10.0, 0.0),
-    ],
-)
-def test_known_values(n, expected):
-    """Textbook values on both halves of the line."""
-    np.testing.assert_allclose(sp.zeta(n), expected, rtol=1e-12, atol=1e-15)
-
-
 def test_float_input_does_not_raise():
     """REGRESSION: the Bernoulli lookup used to be indexed with a float.
 

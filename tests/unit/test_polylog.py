@@ -17,19 +17,6 @@ def reference(n, z):
     return complex(mp.polylog(n, z)).real
 
 
-@pytest.mark.parametrize("n", [1, 2, 3, 5])
-@pytest.mark.parametrize("z", [-5.0, -1.0, -0.5, 0.0, 0.25, 0.75, 0.99, 1.5, 3.0, 50.0])
-def test_matches_mpmath(n, z):
-    """`Li` matches `mpmath.polylog` across all three series."""
-    np.testing.assert_allclose(sp.Li(n, z), reference(n, z), rtol=1e-11, atol=1e-12)
-
-
-def test_li1_is_minus_log1p():
-    """Li_1(z) == -log(1 - z)."""
-    z = 0.4
-    np.testing.assert_allclose(sp.Li(1, z), -np.log1p(-z), rtol=1e-12)
-
-
 def test_li_at_one_is_zeta():
     """Li_n(1) == zeta(n)."""
     for n in (2, 3, 4):

@@ -111,6 +111,26 @@ def test_eval_gegenbauer(n, alpha, x):
     )
 
 
+@given(
+    n=st.integers(min_value=0, max_value=20),
+    alpha=floats(-0.49, 10.0),
+    x=floats(-1.0, 1.0),
+)
+def test_eval_gegenbauers(n, alpha, x):
+    """The all-orders variant agrees with scipy at every order it returns.
+
+    `eval_gegenbauers` has no scipy counterpart as a whole, but each element of
+    its output does: entry `k` must equal `eval_gegenbauer(k, alpha, x)`.
+    Checking against scipy rather than against our own `eval_gegenbauer` is the
+    point -- the two share a recurrence, so a self-consistency test would pass
+    with both of them wrong.
+    """
+    got = sp.eval_gegenbauers(n, alpha, x)
+    expected = [scipy_eval_gegenbauer(k, alpha, x) for k in range(n + 1)]
+    assert got.shape == (n + 1,)
+    np.testing.assert_allclose(got, expected, rtol=1e-10, atol=1e-9)
+
+
 # ---------------------------------------------------------------------------
 # kn
 
@@ -155,7 +175,10 @@ def test_zeta_negative_integers(n):
 
 
 @given(
-    n=st.integers(min_value=1, max_value=8),
+    # Up to 20, matching the range the tolerance below was measured over. The
+    # `j ** n` int64 overflow that used to break `Li` starts at n = 12, so a
+    # strategy stopping at 8 could not have caught it.
+    n=st.integers(min_value=1, max_value=20),
     z=floats(-1000.0, 1000.0),
 )
 @example(n=1, z=2.0)

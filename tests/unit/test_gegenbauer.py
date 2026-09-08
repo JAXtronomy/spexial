@@ -9,19 +9,7 @@ import pytest
 from scipy.special import eval_gegenbauer as scipy_eval_gegenbauer
 
 import spexial as sp
-from spexial._src.gegenbauer import C0, C1
-
-
-@pytest.mark.parametrize("n", range(6))
-@pytest.mark.parametrize("alpha", [-0.25, 0.5, 1.0, 2.5])
-def test_matches_scipy_at_a_point(n, alpha):
-    """Scalar evaluation matches `scipy.special.eval_gegenbauer`."""
-    np.testing.assert_allclose(
-        sp.eval_gegenbauer(n, alpha, 0.3),
-        scipy_eval_gegenbauer(n, alpha, 0.3),
-        rtol=1e-12,
-        atol=1e-12,
-    )
+from spexial._src.gegenbauer import C0
 
 
 def test_c0_broadcasts():
@@ -40,11 +28,6 @@ def test_c0_broadcasts():
 def test_c0_dtype_is_float_for_integer_input():
     """`C0` promotes integer input, so degree 0 is not an integer array."""
     assert jnp.issubdtype(C0(jnp.asarray([1, 2])).dtype, jnp.floating)
-
-
-def test_c1():
-    """Order 1 is 2 * alpha * x."""
-    np.testing.assert_allclose(C1(1.5, jnp.asarray([0.1, 0.2])), [0.3, 0.6], rtol=1e-12)
 
 
 def test_eval_gegenbauer_broadcasts_over_x():
