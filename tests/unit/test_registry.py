@@ -28,23 +28,58 @@ def test_registry_covers_exactly_the_public_api():
     assert set(REGISTRY) == exported
 
 
+def _version(text: str) -> tuple[int, ...]:
+    """Leading numeric components of a version string, for ordering."""
+    parts: list[int] = []
+    for chunk in text.split("."):
+        digits = "".join(c for c in chunk if c.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+JAX_VERSION = _version(jax.__version__)
+
+
 @pytest.mark.parametrize("name", list(REGISTRY))
 def test_jax_availability_claim_is_true(name):
-    """`jax_name`/`jax_since` must match the installed JAX.
+    """`jax_since` must hold against *the installed* JAX, in both directions.
 
-    A row claiming JAX has no equivalent, when it now does, is how this table
-    would quietly become wrong.
+    This is the mechanism the whole registry turns on, so it is checked on
+    whatever JAX the job happens to have rather than assumed. The two CI legs
+    that matter are `Oldest supported deps` and `Newest supported deps`:
+
+    - On the floor, a row like `comb` must be **absent** -- that absence is the
+      reason `spexial` still implements it. A test that merely asserted
+      "upstream has it" would fail there, which is backwards.
+    - On the newest, a row claiming upstream lacks a function fails the moment
+      upstream adds it, which is how a removal candidate gets noticed.
     """
     row = REGISTRY[name]
     if row.jax_name is None:
         assert row.jax_since is None
-        # Probe the obvious name too, so a newly added upstream function trips this.
+        # Probe the obvious name, so a newly added upstream function trips this.
         assert not hasattr(jss, name.lower()), (
-            f"jax.scipy.special now has `{name.lower()}`; revisit this row"
+            f"jax.scipy.special now has `{name.lower()}` (jax {jax.__version__}); "
+            "this row is no longer unique to spexial -- re-measure its cost and "
+            "consider DELEGATES or REDUNDANT"
         )
-    else:
-        assert hasattr(jss, row.jax_name), (
-            f"registry claims jax.scipy.special.{row.jax_name} exists, but it does not"
+        return
+
+    expected = row.jax_since == "*" or _version(row.jax_since) <= JAX_VERSION
+    actual = hasattr(jss, row.jax_name)
+    if expected and not actual:
+        pytest.fail(
+            f"registry says jax.scipy.special.{row.jax_name} exists from "
+            f"{row.jax_since}, but jax {jax.__version__} does not have it -- "
+            "`jax_since` is too low"
+        )
+    if actual and not expected:
+        pytest.fail(
+            f"jax {jax.__version__} already has `{row.jax_name}`, but the "
+            f"registry says it arrives in {row.jax_since} -- `jax_since` is too "
+            "high, and this row may be removable at a lower floor than recorded"
         )
 
 
@@ -54,6 +89,11 @@ def test_jax_autodiff_claim_is_true(name):
     row = REGISTRY[name]
     if row.jax_support is not Support.AUTODIFF:
         pytest.skip("row does not claim autodiff")
+    if not hasattr(jss, row.jax_name):
+        pytest.skip(
+            f"jax {jax.__version__} predates {row.jax_name} "
+            f"(arrives in {row.jax_since}) -- which is why spexial still has it"
+        )
     fn = getattr(jss, row.jax_name)
     call = {"zeta": lambda a: fn(a, 1.0), "comb": lambda a: fn(a, 2.0)}.get(
         row.jax_name, fn

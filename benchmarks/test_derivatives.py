@@ -67,6 +67,11 @@ def test_grad_comb_spexial(benchmark: BenchmarkFixture) -> None:
     benchmark(warm(jax.grad(lambda a: sp.comb(a, 3.0).sum()), N))
 
 
+@pytest.mark.skipif(
+    not hasattr(jss, "comb"),
+    reason="jax.scipy.special.comb arrives in 0.10.2; below that spexial's is the "
+    "only implementation, which is why the row still exists",
+)
 def test_grad_comb_jax(benchmark: BenchmarkFixture) -> None:
     """`jax.scipy.special.comb`, the replacement waiting on that floor bump."""
     benchmark(warm(jax.grad(lambda a: jss.comb(a, 3.0).sum()), N))
