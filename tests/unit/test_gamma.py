@@ -58,6 +58,21 @@ def test_large_argument_does_not_overflow_early():
     assert jnp.isinf(sp.gamma(172.0))
 
 
+def _jax_gamma_supports_complex() -> bool:
+    """Probe rather than version-compare: capability, not a number to maintain."""
+    try:
+        jss.gamma(jnp.asarray(1 + 2j))
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
+@pytest.mark.skipif(
+    not _jax_gamma_supports_complex(),
+    reason="jax.scipy.special.gamma gained complex support in 0.10.2; below that "
+    "it branches on floor(x) and raises. spexial delegates, so it inherits the "
+    "limitation rather than papering over it.",
+)
 def test_complex_input_is_supported():
     """Complex input works, and matches scipy.
 

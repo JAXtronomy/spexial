@@ -75,7 +75,7 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
     Gradient cost vs jax.scipy.special.comb: speed 0.97x (1.0x better), memory --.
 
 `gamma`
-:   The value is `jax.scipy.special.gamma`, called directly, so it cannot drift. What `spexial` adds is the derivative: Gamma'(x) = Gamma(x) psi(x) is 4.3x faster than differentiating JAX's implementation and keeps 3x less residual. Complex input works, since delegating removed the reflection-formula constraint that made the old Lanczos version real-only.
+:   The value is `jax.scipy.special.gamma`, called directly, so it cannot drift. What `spexial` adds is the derivative: Gamma'(x) = Gamma(x) psi(x) is 4.3x faster than differentiating JAX's implementation and keeps 3x less residual. Complex input works from jax 0.10.2 -- the same release that added `comb`, and below it `jax.scipy.special.gamma` branches on `floor(x)` and raises. Delegating means inheriting that limit rather than papering over it; the test probes the capability instead of comparing versions.
 
     Derivative: `gamma(x) psi(x)`.
 

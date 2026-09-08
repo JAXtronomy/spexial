@@ -33,7 +33,9 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
     Parameters
     ----------
     x
-        Argument, of any shape, real or complex. Evaluated elementwise.
+        Argument, of any shape. Evaluated elementwise. Complex input requires
+        ``jax >= 0.10.2``; below that `jax.scipy.special.gamma` raises, since it
+        branches on ``floor(x)`` internally.
 
     Returns
     -------
@@ -50,13 +52,14 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
     >>> round(float(sp.gamma(5.0)), 10)
     24.0
 
-    It broadcasts, and handles negative and complex arguments:
+    It broadcasts, and handles negative arguments:
 
     >>> [round(float(g), 10) for g in sp.gamma(jnp.asarray([0.5, 1.0, -0.5]))]
     [1.7724538509, 1.0, -3.5449077018]
 
-    >>> complex(sp.gamma(jnp.asarray(1 + 2j)))
-    (0.1519040026...+0.019804880...j)
+    Complex input works on ``jax >= 0.10.2`` and returns the complex gamma
+    function; it is not shown here because this example is executed against
+    every supported JAX, including ones that predate it.
 
     """
     return jss.gamma(jnp.asarray(x) * 1.0)

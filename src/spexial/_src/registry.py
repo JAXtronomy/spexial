@@ -339,8 +339,11 @@ _ROWS: Final = (
             "cannot drift. What `spexial` adds is the derivative: "
             "Gamma'(x) = Gamma(x) psi(x) is 4.3x faster than differentiating "
             "JAX's implementation and keeps 3x less residual. Complex input "
-            "works, since delegating removed the reflection-formula constraint "
-            "that made the old Lanczos version real-only."
+            "works from jax 0.10.2 -- the same release that added `comb`, and "
+            "below it `jax.scipy.special.gamma` branches on `floor(x)` and "
+            "raises. Delegating means inheriting that limit rather than "
+            "papering over it; the test probes the capability instead of "
+            "comparing versions."
         ),
     ),
 )
