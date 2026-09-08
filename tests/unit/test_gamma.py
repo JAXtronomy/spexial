@@ -30,9 +30,14 @@ def test_array_input_2d():
 
 @pytest.mark.parametrize("x", [0.0, -1.0, -2.0, -10.0])
 def test_poles_are_inf(x):
-    """Non-positive integers are poles and give `inf`, as scipy does."""
+    """Non-positive integers are poles and give `inf`.
+
+    This asserts *our* behaviour only. scipy is not a stable reference here: it
+    returns `inf` at every pole up to 1.14, but from 1.18 returns `nan` at the
+    negative integers while still returning `inf` at 0 -- matching C99 `tgamma`.
+    See `docs/reference/accuracy-and-domains.md`.
+    """
     assert jnp.isinf(sp.gamma(x))
-    assert jnp.isinf(scipy_gamma(x))
 
 
 def test_large_argument_does_not_overflow_early():

@@ -135,7 +135,10 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:  # noqa: N802
             zeta_ary * powers / _jax_gamma(jnp.arange(_N_TERMS) + 1.0)
         )
 
-        at_one = jnp.isclose(z - 1.0, 0.0)
+        # Exact comparison, deliberately: `jnp.isclose` defaults to atol=1e-8,
+        # which swallowed a whole neighbourhood of z = 1 and returned zeta(n)
+        # there -- wrong by 6e-8 for n = 2 and by 100% for n = 1.
+        at_one = z == 1.0
         harmonic = jnp.sum(1.0 / jnp.arange(1, n))
         harmonic_term = jnp.where(
             at_one,
@@ -144,10 +147,21 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:  # noqa: N802
             / _jax_gamma(n)
             * (harmonic - jnp.log(-jnp.log(jnp.where(at_one, 2.0, z) + 0j) + 0j)),
         )
-        return jnp.real(zeta_series + harmonic_term)
+        out = jnp.real(zeta_series + harmonic_term)
+        # Li_1(1) is the pole of the polylogarithm. Every higher order is
+        # finite there (Li_n(1) = zeta(n)) and needs no special case.
+        if n == 1:
+            out = jnp.where(at_one, jnp.inf, out)
+        return out
 
     def inversion(z: AnyArray) -> AnyArray:
         """Evaluate the inversion formula, for |z| >= 2."""
+        if n > ORDER:
+            # `_bernoulli_poly` indexes the table up to `n`, and an out-of-bounds
+            # index is silently *clamped* under `jit` rather than raising -- so
+            # without this guard every order above the table reused B_ORDER and
+            # returned a plausible, wrong number. `zeta` guards the same hazard.
+            return jnp.full_like(jnp.real(z), jnp.nan)
         recip = lax.fori_loop(
             1,
             _N_TERMS,

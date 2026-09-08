@@ -83,3 +83,49 @@ def test_bernoulli_polynomial():
         np.testing.assert_allclose(
             _bernoulli_poly(2, jnp.asarray(x)), x**2 - x + 1 / 6, rtol=1e-12, atol=1e-15
         )
+
+
+@pytest.mark.parametrize("n", [1, 2, 3])
+@pytest.mark.parametrize("delta", [5e-9, 1e-10, 1e-12])
+def test_near_z_equals_one_is_not_snapped_to_the_pole(n, delta):
+    """REGRESSION: `jnp.isclose` swallowed a 1e-8 neighbourhood of z = 1.
+
+    The branch used `jnp.isclose(z - 1.0, 0.0)`, whose default `atol` is 1e-8,
+    so every `z` within that of 1 was treated as *exactly* 1 and returned
+    `zeta(n)`. For n = 1 that is wrong by 100% (2.5e-9 instead of 19.1); for
+    n = 2 by 6e-8, which is 6000x the parity suite's own tolerance.
+    """
+    z = 1.0 - delta
+    with mp.workdps(30):
+        expected = float(complex(mp.polylog(n, z)).real)
+    np.testing.assert_allclose(sp.Li(n, z), expected, rtol=1e-11)
+
+
+def test_li1_at_one_is_the_pole():
+    """Li_1(1) diverges; it used to return 0.0."""
+    assert jnp.isinf(sp.Li(1, 1.0))
+
+
+@pytest.mark.parametrize("n", [2, 5, 20])
+def test_li_at_one_is_zeta_for_higher_orders(n):
+    """Li_n(1) == zeta(n) for n >= 2, where the pole is absent."""
+    np.testing.assert_allclose(sp.Li(n, 1.0), sp.zeta(float(n)), rtol=1e-13)
+
+
+@pytest.mark.parametrize("n", [61, 62, 70])
+def test_order_past_the_bernoulli_table_is_nan(n):
+    """REGRESSION: the inversion branch silently reused the last Bernoulli number.
+
+    `_bernoulli_poly` indexes the table up to `n`, and an out-of-bounds index is
+    *clamped* under `jit` rather than raising, so `Li(62, 3.0)` returned 0.979
+    where the true value is 3.0. Orders past the table now say so.
+    """
+    assert jnp.isnan(sp.Li(n, 3.0))
+
+
+@pytest.mark.parametrize("n", [61, 70, 150])
+def test_high_order_still_works_below_the_inversion_branch(n):
+    """Only |z| >= 2 needs the Bernoulli table; the other branches are unaffected."""
+    with mp.workdps(30):
+        expected = float(complex(mp.polylog(n, 0.5)).real)
+    np.testing.assert_allclose(sp.Li(n, 0.5), expected, rtol=1e-11)

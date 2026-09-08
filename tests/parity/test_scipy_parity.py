@@ -103,6 +103,12 @@ def test_gamma_near_a_pole(distance):
 @example(n=2, alpha=1.0, x=1.0)
 def test_eval_gegenbauer(n, alpha, x):
     """Measured worst case needs atol 1.9e-12 at rtol 1e-10 (values near roots)."""
+    # scipy >= 1.18 returns 0.0 for `eval_gegenbauer(n, 0.0, x)` at *exactly*
+    # alpha == 0, while returning 1.0 for alpha = 1e-300 and every other value --
+    # a discontinuity at its own limit, and a change from 1.14, which returned
+    # 1.0. C_0^(0) = 1 follows from the generating function, so `spexial` keeps
+    # 1.0 and this one degenerate point is excluded rather than chased.
+    assume(alpha != 0.0)
     np.testing.assert_allclose(
         sp.eval_gegenbauer(n, alpha, x),
         scipy_eval_gegenbauer(n, alpha, x),
@@ -125,6 +131,12 @@ def test_eval_gegenbauers(n, alpha, x):
     point -- the two share a recurrence, so a self-consistency test would pass
     with both of them wrong.
     """
+    # scipy >= 1.18 returns 0.0 for `eval_gegenbauer(n, 0.0, x)` at *exactly*
+    # alpha == 0, while returning 1.0 for alpha = 1e-300 and every other value --
+    # a discontinuity at its own limit, and a change from 1.14, which returned
+    # 1.0. C_0^(0) = 1 follows from the generating function, so `spexial` keeps
+    # 1.0 and this one degenerate point is excluded rather than chased.
+    assume(alpha != 0.0)
     got = sp.eval_gegenbauers(n, alpha, x)
     expected = [scipy_eval_gegenbauer(k, alpha, x) for k in range(n + 1)]
     assert got.shape == (n + 1,)

@@ -20,26 +20,29 @@ Every function is tested against a reference implementation — `scipy.special` 
 
 ## Per-function limits
 
+`eval_gegenbauer`, `eval_gegenbauers` : At exactly $\alpha = 0$, `spexial` returns $C_0^{(0)} = 1$ and $C_n^{(0)} = 0$ for $n \ge 1$, which is what the generating function gives. SciPy agrees up to 1.14; from 1.18 it returns `0.0` for _every_ order at exactly $\alpha = 0$, while still returning `1.0` at $\alpha = 10^{-300}$. The parity suite excludes that single point rather than follow it.
+
 `comb` : Returns `0` for `k > N`, `k < 0` and `N < 0`, matching `scipy.special.comb`. The inexact variant only; there is no `exact=True` path.
 
-`gamma` : Real input only; complex input is rejected by the type annotation. Returns `inf` at the non-positive integers, matching SciPy. Relative error near a pole is approximately $10^{-17}/\delta$, where $\delta$ is the distance to it: $6 \times 10^{-12}$ at $\delta = 10^{-4}$, $1.5 \times 10^{-9}$ at $\delta = 10^{-8}$. The parity suite keeps $10^{-4}$ clear of the poles and pins near-pole behaviour separately at rtol $10^{-7}$.
+`gamma` : Real input only; complex input is rejected by the type annotation. Returns `inf` at the non-positive integers. SciPy is not a stable reference here: it returns `inf` everywhere up to 1.14, but from 1.18 returns `nan` at the negative integers while still returning `inf` at 0, matching C99 `tgamma`. Relative error near a pole is approximately $10^{-17}/\delta$, where $\delta$ is the distance to it: $6 \times 10^{-12}$ at $\delta = 10^{-4}$, $1.5 \times 10^{-9}$ at $\delta = 10^{-8}$. The parity suite keeps $10^{-4}$ clear of the poles and pins near-pole behaviour separately at rtol $10^{-7}$.
 
 `K0`, `K1`, `K2` : A 30-term ascending series below $z = 9$ and a 10-term asymptotic expansion above it. Worst relative error is $8 \times 10^{-8}$, at the cross-over. `K1` underflows to `0` for $z \gtrsim 700$; SciPy does the same.
 
-`Li` : Accepts a scalar `z` only. An array argument raises a broadcasting `TypeError`; use `jax.vmap` ([how](../how-to/use-with-jit-vmap-and-grad.md)). Raises `ValueError` for a non-integer order or an order below 1. Large `n` is bounded by $\Gamma(n+1)$ overflow above $n \approx 170$.
+`Li` : Accepts a scalar `z` only. An array argument raises a broadcasting `TypeError`; use `jax.vmap` ([how](../how-to/use-with-jit-vmap-and-grad.md)). Raises `ValueError` for a non-integer order or an order below 1. For $\lvert z \rvert \ge 2$ the order is capped at **60** by the Bernoulli table the inversion formula needs; past that the result is `nan`. Smaller $\lvert z \rvert$ is unaffected, bounded instead by $\Gamma(n+1)$ overflow above $n \approx 170$. `Li(1, 1)` is the pole and returns `inf`.
 
 `zeta` : Bernoulli numbers are computed from exact `fractions.Fraction` arithmetic, not `jax.scipy.special.bernoulli`. `jax.grad(zeta)` is meaningful only for $n > 1$; on the negative line it returns a finite value that is not $\zeta'$.
 
 ### `zeta` coverage against SciPy
 
-| Input                                | `spexial`   | `scipy.special.zeta` |
-| ------------------------------------ | ----------- | -------------------- |
-| $n > 1$                              | accurate    | accurate             |
-| $0 < n \le 1$ (the critical strip)   | `nan`       | accurate             |
-| negative integer $> -60$             | exact       | accurate             |
-| negative even integer, any magnitude | exactly `0` | `0`                  |
-| negative odd integer $\le -60$       | `nan`       | accurate             |
-| negative non-integer                 | `nan`       | accurate             |
+| Input | `spexial` | `scipy.special.zeta` |
+| --- | --- | --- |
+| $n > 1$ | accurate | accurate |
+| $0 < n \le 1$ (the critical strip) | `nan` | accurate |
+| negative integer $> -60$ | exact | accurate |
+| negative even integer, to $\sim 9 \times 10^{18}$ | exactly `0` | `0` |
+| negative even integer, beyond int64 | `nan` | `0` |
+| negative odd integer $\le -60$ | `nan` | accurate |
+| negative non-integer | `nan` | accurate |
 
 ## Reference implementations
 

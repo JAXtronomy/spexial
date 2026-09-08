@@ -56,7 +56,12 @@ def test_eval_gegenbauers_agrees_with_scalar_calls(n):
 
 
 def test_alpha_zero_vanishes_above_degree_zero():
-    """C_n^(0) is 0 for n >= 1, as in scipy."""
+    """C_n^(0) is 0 for n >= 1, and C_0^(0) is 1.
+
+    scipy agrees up to 1.14; from 1.18 it returns 0.0 for every order at exactly
+    alpha == 0, including order 0. The generating function gives 1, so this
+    asserts our own value.
+    """
     got = sp.eval_gegenbauers(4, 0.0, 0.3)
     np.testing.assert_allclose(got, [1.0, 0.0, 0.0, 0.0, 0.0], atol=1e-15)
 
