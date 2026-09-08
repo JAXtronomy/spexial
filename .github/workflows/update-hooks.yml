@@ -35,8 +35,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
+      # `--freeze` is required, not a preference: without it `prek update`
+      # rewrites every `rev` back from a SHA to a mutable tag, undoing the
+      # pinning on its first monthly run.
       - name: Update hook revisions
-        run: uv run --no-default-groups --group lint prek update
+        run: uv run --no-default-groups --group lint prek update --freeze
 
       - name: Open pull request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
