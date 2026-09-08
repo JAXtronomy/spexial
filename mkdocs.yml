@@ -104,6 +104,7 @@ nav:
       - How to port code from scipy.special: "how-to/port-from-scipy.md"
   - Reference:
       - "reference/index.md"
+      - Coverage: "reference/coverage.md"
       - API reference: "reference/api.md"
       - Accuracy and domains: "reference/accuracy-and-domains.md"
       - Conventions: "reference/conventions.md"

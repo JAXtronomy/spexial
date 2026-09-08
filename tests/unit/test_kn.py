@@ -120,3 +120,43 @@ def test_k2_keeps_its_recurrence_term_in_the_subnormal_tail(z):
         expected = float(mp.besselk(2, z))
     assert float(sp.K2(z)) > float(sp.K0(z))
     np.testing.assert_allclose(sp.K2(z), expected, rtol=1e-6)
+
+
+@pytest.mark.parametrize("z", [0.5, 2.0, 8.5, 9.5, 20.0])
+def test_grad_k1_is_minus_half_k0_plus_k2(z):
+    """K1'(z) = -(K0(z) + K2(z)) / 2, via the custom JVP."""
+    got = jax.grad(sp.K1)(z)
+    np.testing.assert_allclose(got, -0.5 * (sp.K0(z) + sp.K2(z)), rtol=1e-12)
+
+
+@pytest.mark.parametrize("z", [0.5, 2.0, 8.5, 9.5, 20.0])
+def test_grad_k2_matches_the_recurrence(z):
+    """K2'(z) = -K1(z) - (2/z) K2(z), via the custom JVP."""
+    got = jax.grad(sp.K2)(z)
+    np.testing.assert_allclose(got, -sp.K1(z) - 2.0 / z * sp.K2(z), rtol=1e-12)
+
+
+@pytest.mark.parametrize("func", [sp.K0, sp.K1, sp.K2])
+def test_custom_jvp_agrees_with_differentiating_the_series(func):
+    """The analytic derivative must match what autodiff would have produced.
+
+    A custom JVP silently replaces the true derivative, so this pins it against
+    a finite-difference estimate rather than against itself.
+    """
+    z = 3.0
+    h = 1e-6
+    analytic = float(jax.grad(func)(z))
+    numeric = float((func(z + h) - func(z - h)) / (2 * h))
+    np.testing.assert_allclose(analytic, numeric, rtol=1e-7)
+
+
+@pytest.mark.parametrize("func", [sp.K0, sp.K1, sp.K2])
+def test_vjp_works(func):
+    """`jax.vjp` is derived from the custom JVP, so it must work too."""
+    z = jnp.asarray([1.0, 4.0])
+    out, pullback = jax.vjp(func, z)
+    (cotangent,) = pullback(jnp.ones_like(out))
+    assert cotangent.shape == z.shape
+    np.testing.assert_allclose(
+        cotangent, jax.grad(lambda a: func(a).sum())(z), rtol=1e-12
+    )
