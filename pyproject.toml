@@ -168,7 +168,10 @@ module                   = "spexial.*"
 
 [[tool.mypy.overrides]]
 ignore_missing_imports = true
-module                 = ["jax.*", "jaxtyping.*", "mpmath.*", "numpy.*", "scipy.*"]
+# `mpmath`/`scipy` are used only in `tests/parity`, which mypy is not
+# pointed at; listing them here trips `warn_unused_configs`. Re-add them
+# when `files` widens beyond `tests/typing`.
+module = ["jax.*", "jaxtyping.*", "numpy.*"]
 
 
 [tool.pylint]

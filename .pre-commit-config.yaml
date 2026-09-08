@@ -124,5 +124,5 @@ repos:
       - id: disallow-caps
         name: Disallow improper capitalization
         language: pygrep
-        entry: PyBind|Numpy|Cmake|CCache|Github|PyTest|Jax|Scipy
+        entry: PyBind|Numpy|Cmake|CCache|Github|PyTest|\bJax\b|\bScipy\b
         exclude: .pre-commit-config.yaml

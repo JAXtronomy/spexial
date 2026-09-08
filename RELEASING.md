@@ -16,7 +16,7 @@ Between releases you will see versions like `0.2.dev14`. That is expected.
 
 1. **Check `main` is green.** The `CI Pass` job must be passing on the commit you intend to tag.
 
-2. **Decide the version.** Semantic versioning. For a numerics library, note that a change to a function's *numerical output* beyond its documented tolerance is a breaking change even if the signature is unchanged — treat it as such.
+2. **Decide the version.** Semantic versioning. For a numerics library, note that a change to a function's _numerical output_ beyond its documented tolerance is a breaking change even if the signature is unchanged — treat it as such.
 
 3. **Tag and push.**
 
