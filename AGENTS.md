@@ -61,6 +61,66 @@ This is a numerics library. The interesting review question is never "does it ru
 - `bernoulli.py` builds its table from exact `fractions.Fraction` arithmetic, **not** `jax.scipy.special.bernoulli`, which loses ~7 digits on `B4`. Do not "simplify" it back. Only the Python tuple is cached — caching the `jax.Array` leaks a tracer when the first call happens inside a `jit` trace.
 - `gegenbauer.C0` is written `jnp.asarray(x) * 0.0 + 1.0` rather than `ones_like` so weakly-typed input stays weak; `ones_like` changes the repr and breaks doctests.
 
+## Bumping the minimum supported JAX
+
+This is the procedure the library is organised around, and it is driven entirely by the coverage registry in [`src/spexial/_src/registry.py`](src/spexial/_src/registry.py) — rendered to [docs/reference/coverage.md](docs/reference/coverage.md), which is generated, not hand-edited.
+
+**The rule.** A function is removed from `spexial` when upstream covers it _and_ upstream is no worse. "No worse" means all four of:
+
+1. **Available** at the new floor — `jax_since` is `"*"` or at or below it.
+2. **Correct over the same domain.** `zeta` fails this: JAX's is the Hurwitz form and returns `nan` on the negative line.
+3. **As fast** to differentiate — `cost.speed >= 1.0`.
+4. **As lean** to differentiate — `cost.memory >= 1.0`.
+
+Points 3 and 4 are why `gamma` survived a floor at which it was otherwise redundant: JAX computes the value, but differentiating JAX's implementation costs 4.3x the time and 3x the residual memory of `Gamma'(x) = Gamma(x) psi(x)`. **Memory is usually the deciding column, not speed** — a custom JVP replaces a whole series' worth of saved intermediates with one array, and for `K0` that is 67x less residual against a 2.1x speed-up.
+
+If a row fails only 3 or 4, it does not get removed — it becomes `Status.DELEGATES`: call upstream for the value so it cannot drift, and keep our `jax.custom_jvp`. That is strictly better than reimplementing.
+
+### Steps
+
+1. **Re-measure before deciding.** The `cost` numbers are measurements with a shelf life:
+
+   ```bash
+   uv run --group bench pytest benchmarks/test_derivatives.py --benchmark-only
+   uv run pytest tests/unit/test_registry.py     # memory ratios, asserted exactly
+   ```
+
+   Each `spexial` gradient benchmark has an upstream counterpart, so the comparison happens on one runner in one run.
+
+2. **Probe the new floor** for availability and autodiff, rather than trusting a changelog:
+
+   ```bash
+   uvx --with "jax==<new-floor>" --with "jaxlib==<new-floor>" python - <<'PY'
+   import jax, jax.scipy.special as jss
+   print([n for n in ("k0", "kn", "comb", "eval_gegenbauer") if hasattr(jss, n)])
+   PY
+   ```
+
+3. **Update `pyproject.toml`** (`dependencies`, the `cpu`/`cuda*` extras, and `[tool.ruff]`/`classifiers` if the Python floor moves with it) and `JAX_FLOOR` in the registry. `test_floor_matches_the_declared_dependency` fails if these disagree.
+
+4. **Re-evaluate every `REDUNDANT_ABOVE_FLOOR` row** against the rule above, and move it to `DELEGATES`, `REDUNDANT`, or leave it.
+
+5. **Regenerate and relock:**
+
+   ```bash
+   uv run scripts/gen_coverage_table.py
+   uv lock
+   ```
+
+6. **Run the gate.** `tests/unit/test_registry.py` asserts that rows claiming JAX has no equivalent are still true, so a floor bump that makes one of them wrong fails there rather than silently shipping a duplicate implementation.
+
+### Removing a row
+
+Removal is three releases, never one:
+
+| Release | Action |
+| --- | --- |
+| N | `Status.DELEGATES` or `REDUNDANT` — re-export upstream, keep the name working |
+| N+1 | `DeprecationWarning` on import, docs point at the upstream name |
+| N+2 | Remove from `__all__` and delete |
+
+Drop the parity tests only in the last step: while `spexial` still exports the name, it still owes the guarantee.
+
 ## Commit style
 
 Conventional commits + gitmoji, enforced by `commitizen` (`cz-conventional-gitmoji`) as a pre-commit hook: `<emoji> <type>(<scope>): <description> (#PR)`.

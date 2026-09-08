@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import jax.scipy.special as jss
 import numpy as np
 import pytest
 from scipy.special import digamma, gamma as scipy_gamma
@@ -28,16 +29,22 @@ def test_array_input_2d():
     np.testing.assert_allclose(sp.gamma(x), [[1.0, 1.0], [2.0, 6.0]], rtol=1e-11)
 
 
-@pytest.mark.parametrize("x", [0.0, -1.0, -2.0, -10.0])
-def test_poles_are_inf(x):
-    """Non-positive integers are poles and give `inf`.
+def test_pole_at_zero_is_inf():
+    """`gamma(0)` is `inf`, as in both JAX and scipy."""
+    assert jnp.isinf(sp.gamma(0.0))
 
-    This asserts *our* behaviour only. scipy is not a stable reference here: it
-    returns `inf` at every pole up to 1.14, but from 1.18 returns `nan` at the
-    negative integers while still returning `inf` at 0 -- matching C99 `tgamma`.
-    See `docs/reference/accuracy-and-domains.md`.
+
+@pytest.mark.parametrize("x", [-1.0, -2.0, -10.0])
+def test_negative_integer_poles_are_nan(x):
+    """The negative integers give `nan`, matching JAX and scipy >= 1.18.
+
+    Gamma has a pole at each of them and the two-sided limit does not exist, so
+    `nan` is the defensible value; C99 `tgamma` agrees. This changed when
+    `gamma` began delegating to `jax.scipy.special.gamma` -- before that
+    `spexial` returned `inf` here, which matched scipy 1.14 but not 1.18.
     """
-    assert jnp.isinf(sp.gamma(x))
+    assert jnp.isnan(sp.gamma(x))
+    assert jnp.isnan(jss.gamma(jnp.asarray(x)))
 
 
 def test_large_argument_does_not_overflow_early():
@@ -51,14 +58,17 @@ def test_large_argument_does_not_overflow_early():
     assert jnp.isinf(sp.gamma(172.0))
 
 
-def test_complex_input_is_rejected_by_the_type_checker():
-    """`gamma` is documented as real-only; complex input is a type error.
+def test_complex_input_is_supported():
+    """Complex input works, and matches scipy.
 
-    The runtime type checker is on under pytest (see ``[tool.pytest_env]``), so
-    this is the behaviour a user sees rather than a silent wrong answer.
+    `spexial.gamma` was real-only while it carried its own Lanczos series, whose
+    reflection branch needed an elementwise ``x < 0.5`` test. Delegating removed
+    that constraint, so the restriction went with it.
     """
-    with pytest.raises(Exception, match=r"(?i)typecheck|complex"):
-        sp.gamma(jnp.asarray(1.0 + 2.0j))
+    z = jnp.asarray([1 + 2j, -1.5 + 0.5j])
+    got = np.asarray(sp.gamma(z))
+    expected = scipy_gamma(np.asarray([1 + 2j, -1.5 + 0.5j]))
+    np.testing.assert_allclose(got, expected, rtol=1e-12)
 
 
 def test_dtype_is_float_for_integer_input():

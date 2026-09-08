@@ -13,6 +13,7 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import jax.scipy.special as jss
+import numpy as np
 import pytest
 
 import spexial as sp
@@ -102,3 +103,55 @@ def test_generated_docs_page_is_current():
     assert gen.apply(page) == page, (
         "coverage.md is stale; run `uv run scripts/gen_coverage_table.py`"
     )
+
+
+def _residual_bytes(fn, x):
+    """Bytes the backward pass must keep alive, via the first-class VJP object.
+
+    `jax.vjp` returns a pytree whose leaves are the saved residuals, so this is
+    exact rather than sampled -- unlike wall-clock, it is safe to assert on.
+    """
+    _, pullback = jax.vjp(fn, x)
+    return sum(getattr(leaf, "nbytes", 0) for leaf in jax.tree.leaves(pullback))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [n for n, r in REGISTRY.items() if r.custom_jvp and r.cost and r.cost.memory],
+)
+def test_custom_jvp_really_saves_the_claimed_memory(name):
+    """A row claiming a memory saving must actually deliver one.
+
+    This is the column that justifies most of these rows existing, so it is
+    checked rather than trusted. `jax.custom_jvp` exposes the undecorated
+    implementation as `.fun`, which is what the saving is measured against.
+    """
+    row = REGISTRY[name]
+    fn = getattr(sp, name)
+    x = jnp.linspace(0.6, 20.0, 10_000)
+    with_jvp = _residual_bytes(fn, x)
+    without = _residual_bytes(fn.fun, x)
+    assert with_jvp < without, f"{name}: custom JVP saves nothing"
+    # The recorded ratio is a measurement, not a contract; allow it to drift by
+    # 2x either way before demanding it be re-measured.
+    measured = with_jvp / without
+    assert measured < row.cost.memory * 2, (
+        f"{name}: memory saving has regressed -- recorded {row.cost.memory:.4f}, "
+        f"now {measured:.4f}. Re-measure the registry."
+    )
+
+
+@pytest.mark.parametrize("name", [n for n, r in REGISTRY.items() if r.custom_jvp])
+def test_custom_jvp_agrees_with_differentiating_the_implementation(name):
+    """The analytic derivative must equal what autodiff would have produced.
+
+    A custom JVP silently replaces the true derivative: get it wrong and every
+    value stays right while every gradient is quietly wrong. `.fun` is the
+    undecorated implementation, so this compares the hand-written rule against
+    JAX differentiating the series it replaced.
+    """
+    fn = getattr(sp, name)
+    x = jnp.linspace(0.7, 12.0, 40)
+    analytic = jax.grad(lambda a: fn(a).sum())(x)
+    autodiff = jax.grad(lambda a: fn.fun(a).sum())(x)
+    np.testing.assert_allclose(analytic, autodiff, rtol=1e-6)

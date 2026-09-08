@@ -14,17 +14,17 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 
 <!-- BEGIN GENERATED TABLE -->
 
-| Function | In JAX | JAX autodiff | scipy on JAX arrays | Custom JVP | Status |
-| --- | --- | --- | --- | --- | --- |
-| `K0` | -- | -- | value only | yes | only here |
-| `K1` | -- | -- | value only | yes | only here |
-| `K2` | -- | -- | -- | yes | only here |
-| `Li` | -- | -- | -- | available | only here |
-| `eval_gegenbauer` | -- | -- | -- | available | only here |
-| `eval_gegenbauers` | -- | -- | -- | -- | only here |
-| `zeta` | yes (all >= 0.7.2) | value + autodiff | -- | -- | extends upstream |
-| `comb` | yes (>= 0.10.2) | value + autodiff | -- | -- | redundant above floor |
-| `gamma` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | available | redundant |
+| Function | In JAX | JAX autodiff | scipy on JAX arrays | Custom JVP | Grad speed | Grad memory | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `K0` | -- | -- | value only | yes | 0.48x (2.1x better) | 0.01x (67.4x better) | only here |
+| `K1` | -- | -- | value only | yes | -- | 0.06x (16.6x better) | only here |
+| `K2` | -- | -- | -- | yes | -- | 0.08x (12.1x better) | only here |
+| `Li` | -- | -- | -- | available | -- | -- | only here |
+| `eval_gegenbauer` | -- | -- | -- | available | -- | -- | only here |
+| `eval_gegenbauers` | -- | -- | -- | -- | -- | -- | only here |
+| `zeta` | yes (all >= 0.7.2) | value + autodiff | -- | -- | 1.15x (1.1x worse) | -- | extends upstream |
+| `comb` | yes (>= 0.10.2) | value + autodiff | -- | -- | 0.97x (1.0x better) | -- | redundant above floor |
+| `gamma` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.23x (4.3x better) | 0.33x (3.0x better) | delegates + our JVP |
 
 ## Per-function detail
 
@@ -33,15 +33,21 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 
     Derivative: `-K1(z)`.
 
+    Gradient cost vs differentiating our own series: speed 0.48x (2.1x better), memory 0.01x (67.4x better).
+
 `K1`
 :   As `K0`. K1'(z) = -(K0(z) + K2(z)) / 2.
 
     Derivative: `-(K0(z) + K2(z)) / 2`.
 
+    Gradient cost vs differentiating our own series: speed --, memory 0.06x (16.6x better).
+
 `K2`
 :   `scipy.special.kn` does not dispatch on JAX arrays at all, even with the array API enabled. K2'(z) = -K1(z) - (2/z) K2(z).
 
     Derivative: `-K1(z) - (2/z) K2(z)`.
+
+    Gradient cost vs differentiating our own series: speed --, memory 0.08x (12.1x better).
 
 `Li`
 :   No general polylogarithm anywhere. `jax.scipy.special.spence` is the n = 2 case only, and scipy has no polylog. d/dz Li_n(z) = Li_{n-1}(z) / z.
@@ -59,13 +65,19 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 `zeta`
 :   `jax.scipy.special.zeta` is the Hurwitz form and returns `nan` for negative arguments; `spexial` adds the negative integers via the functional equation. scipy raises `NotImplementedError` for the Riemann form on JAX arrays. No closed form for zeta', so no custom JVP.
 
+    Gradient cost vs jax.scipy.special.zeta, n > 1 only: speed 1.15x (1.1x worse), memory --.
+
 `comb`
 :   Added to JAX in 0.10.2, below which `spexial` is still needed. `jax.scipy.special.comb` agrees on every edge case `spexial` handles (k > N, k < 0, N < 0) and differentiates. Re-export once the floor reaches 0.10.2.
 
+    Gradient cost vs jax.scipy.special.comb: speed 0.97x (1.0x better), memory --.
+
 `gamma`
-:   `jax.scipy.special.gamma` is a strict superset: negative reals, complex input, and autodiff, at comparable accuracy. `spexial`'s is real-only. The original implementation existed to add complex support, which JAX now provides -- so this row has no reason to stay. Re-export, then remove.
+:   The value is `jax.scipy.special.gamma`, called directly, so it cannot drift. What `spexial` adds is the derivative: Gamma'(x) = Gamma(x) psi(x) is 4.3x faster than differentiating JAX's implementation and keeps 3x less residual. Complex input works, since delegating removed the reflection-formula constraint that made the old Lanczos version real-only.
 
     Derivative: `gamma(x) psi(x)`.
+
+    Gradient cost vs jax.scipy.special.gamma: speed 0.23x (4.3x better), memory 0.33x (3.0x better).
 
 <!-- END GENERATED TABLE -->
 
