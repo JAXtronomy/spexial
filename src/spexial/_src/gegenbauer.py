@@ -8,7 +8,7 @@ from typing import TypeAlias
 import jax
 import jax.numpy as jnp
 
-from ._typing import AnyArray, AnyArrayLike, ScalarLike, Vector
+from .custom_types import AnyArray, AnyArrayLike, ScalarLike, Vector
 
 _Carry: TypeAlias = tuple[ScalarLike, AnyArray, AnyArray, AnyArray]
 

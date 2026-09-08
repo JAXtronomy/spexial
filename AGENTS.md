@@ -25,8 +25,8 @@ src/spexial/
   __init__.py       # flat public API mirroring scipy.special; installs the jaxtyping hook
   setup_package.py  # SPEXIAL_ENABLE_RUNTIME_TYPECHECKING -> jaxtyping import hook
   _src/
-    _typing.py      # shared Scalar / Vector / AnyArray + *Like input aliases
-    _bernoulli.py   # the one Bernoulli table
+    custom_types.py # shared Scalar / Vector / AnyArray + *Like input aliases
+    bernoulli.py    # the one Bernoulli table
     comb.py gamma.py gegenbauer.py kn.py polylog.py zeta.py
 tests/{smoke,unit,parity,benchmark,typing}/
 ```
@@ -58,7 +58,7 @@ This is a numerics library. The interesting review question is never "does it ru
 - `zeta` returns `nan` on the critical strip (`0 < n <= 1`), for negative non-integers, and for odd `n <= -60` (the Bernoulli table ends at `B60`). SciPy handles all three. These are real gaps, documented as such.
 - `zeta`'s negative line is a table lookup, so **`jax.grad(zeta)` is only meaningful for `n > 1`**. It returns a finite number on the negative line that is not `ζ'`.
 - `Li` takes **scalar `z` only** — the middle branch builds a length-60 vector of powers of `log z`. `jax.vmap` is the supported workaround and is tested.
-- `_bernoulli.py` builds its table from exact `fractions.Fraction` arithmetic, **not** `jax.scipy.special.bernoulli`, which loses ~7 digits on `B4`. Do not "simplify" it back. Only the Python tuple is cached — caching the `jax.Array` leaks a tracer when the first call happens inside a `jit` trace.
+- `bernoulli.py` builds its table from exact `fractions.Fraction` arithmetic, **not** `jax.scipy.special.bernoulli`, which loses ~7 digits on `B4`. Do not "simplify" it back. Only the Python tuple is cached — caching the `jax.Array` leaks a tracer when the first call happens inside a `jit` trace.
 - `gegenbauer.C0` is written `jnp.asarray(x) * 0.0 + 1.0` rather than `ones_like` so weakly-typed input stays weak; `ones_like` changes the repr and breaks doctests.
 
 ## Commit style

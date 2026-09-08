@@ -5,7 +5,7 @@ __all__ = ["comb"]
 import jax.numpy as jnp
 from jax.scipy.special import gammaln
 
-from ._typing import AnyArray, AnyArrayLike
+from .custom_types import AnyArray, AnyArrayLike
 
 
 def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:

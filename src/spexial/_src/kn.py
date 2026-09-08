@@ -7,7 +7,7 @@ from typing import Final
 import jax.numpy as jnp
 from jax.scipy.special import gammaln, i0, i1
 
-from ._typing import AnyArray, RealArrayLike
+from .custom_types import AnyArray, RealArrayLike
 
 _EULER_GAMMA: Final = 0.57721566490153286061
 """The Euler-Mascheroni constant."""

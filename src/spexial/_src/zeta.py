@@ -5,8 +5,8 @@ __all__ = ["zeta"]
 import jax.numpy as jnp
 from jax.scipy.special import zeta as _hurwitz_zeta
 
-from ._bernoulli import ORDER, bernoulli_numbers
-from ._typing import AnyArray, RealArrayLike
+from .bernoulli import ORDER, bernoulli_numbers
+from .custom_types import AnyArray, RealArrayLike
 
 
 def zeta(n: RealArrayLike, /) -> AnyArray:

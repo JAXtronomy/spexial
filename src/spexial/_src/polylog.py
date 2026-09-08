@@ -10,9 +10,9 @@ import jax.numpy as jnp
 from jax import lax
 from jax.scipy.special import gamma as _jax_gamma
 
-from ._bernoulli import ORDER, bernoulli_numbers
-from ._typing import AnyArray, Scalar, ScalarLike
+from .bernoulli import ORDER, bernoulli_numbers
 from .comb import comb
+from .custom_types import AnyArray, Scalar, ScalarLike
 from .zeta import zeta
 
 _N_TERMS: Final = ORDER

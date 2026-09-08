@@ -23,7 +23,7 @@ from typing import Final
 
 import jax.numpy as jnp
 
-from ._typing import Vector
+from .custom_types import Vector
 
 ORDER: Final = 60
 """Highest index in the table, i.e. the table holds :math:`B_0 \\ldots B_{60}`."""
@@ -54,7 +54,7 @@ def bernoulli_numbers() -> Vector:
 
     Examples
     --------
-    >>> from spexial._src._bernoulli import bernoulli_numbers
+    >>> from spexial._src.bernoulli import bernoulli_numbers
     >>> [float(b) for b in bernoulli_numbers()[:5]]
     [1.0, -0.5, 0.16666666666666666, 0.0, -0.03333333333333333]
 

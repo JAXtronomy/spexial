@@ -6,7 +6,7 @@ from typing import Final
 
 import jax.numpy as jnp
 
-from ._typing import AnyArray, RealArrayLike
+from .custom_types import AnyArray, RealArrayLike
 
 _LANCZOS_G: Final = 7.0
 """The ``g`` parameter of the Lanczos approximation."""
