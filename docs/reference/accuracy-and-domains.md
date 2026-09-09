@@ -10,7 +10,7 @@ Every function is tested against a reference implementation — `scipy.special` 
 | --- | --- | --- | --- |
 | `eval_gegenbauer` | `eval_gegenbauer` | $n \le 20$ integer, $\alpha > -1/2$, $\lvert x \rvert \le 1$ | rtol $10^{-10}$, atol $10^{-13}\times$ recurrence scale; worst $1.5\times10^{-7}$ absolute at $n=20,\ \alpha=10$ |
 | `eval_gegenbauers` | -- | as `eval_gegenbauer`; returns all orders $0 \ldots n$ | as `eval_gegenbauer` |
-| `comb` | `comb` (`exact=False`) | $0 \le N, k \le 170$ | rtol $10^{-11}$; worst $3.2 \times 10^{-13}$ |
+| `comb` | `comb` (`exact=False`) | $0 \le k \le N$, up to $N \approx 9 \times 10^{307}$ | rtol $10^{-11}$; worst $1.2 \times 10^{-12}$ |
 | `gamma` | `gamma` | real (and complex, jax $\ge$ 0.10.2), $-170 \lesssim x \lesssim 171$ | rtol $10^{-11}$; worst $3.5\times10^{-13}$ for $x \ge 1/2$, $4.3\times10^{-13}$ on $[-170,-30]$ |
 | `K0` | `k0` | $0 < z \lesssim 705.5$ | rtol $10^{-6}$; worst $2.0 \times 10^{-7}$ at $z = 8.9984$, ~$10^{-15}$ above $z = 30$ |
 | `K1` | `k1` | $0 < z \lesssim 705.5$ | as `K0`; worst $1.8 \times 10^{-7}$ |
@@ -20,7 +20,7 @@ Every function is tested against a reference implementation — `scipy.special` 
 | `K2e` | `kve` ($v = 2$) | $z > 0$, no upper limit | as `K2`; verified to `DBL_MAX` |
 | `Li` | -- (`mpmath.polylog`) | scalar $z$, integer $n \ge 1$ | rtol $10^{-11}$, atol $10^{-12}$; worst $3.4 \times 10^{-12}$ for $1 \le n \le 20$, $\lvert z \rvert \le 1000$ |
 | `spence` | `spence` | real or complex $z$ | rtol $10^{-12}$, atol $10^{-13}$ vs scipy; worst $1.6 \times 10^{-14}$ real, $2.9 \times 10^{-15}$ complex |
-| `zeta` | `zeta` | all real $n$ | rtol $10^{-12}$; worst $9 \times 10^{-13}$ near the pole, $9\times10^{-16}$ elsewhere |
+| `zeta` | `zeta` | all real $n$ | rtol $10^{-12}$; worst $3.3 \times 10^{-13}$, near the trivial zeros |
 
 ## Per-function limits
 
@@ -30,7 +30,7 @@ Every function is tested against a reference implementation — `scipy.special` 
 
 `eval_gegenbauer` : At $x = \pm\infty$ (outside the supported $\lvert x \rvert \le 1$) every order returns its analytic limit. The leading coefficient is $2^n(\alpha)_n/n!$, and for $\alpha > -1/2$ every factor after the first is positive, so its sign is $\operatorname{sign}(\alpha)$ — giving $C_n(+\infty) = \operatorname{sign}(\alpha)\infty$ and $C_n(-\infty) = \operatorname{sign}(\alpha)(-1)^n\infty$, and $0$ for $n \ge 1$ at $\alpha = 0$, where the polynomial vanishes identically. SciPy differs here: it returns `inf` at $+\infty$ but `nan` at $-\infty$. A finite argument large enough to overflow the polynomial gives `nan`.
 
-`comb` : Returns `0` for `k > N`, `k < 0` and `N < 0`, matching `scipy.special.comb`. `comb(inf, 0)` is `1`, `comb(inf, k >= 1)` is `inf` and `comb(inf, inf)` is `nan`, all as in SciPy. The inexact variant only; there is no `exact=True` path. The $N \le 170$ domain is a real ceiling, not a formality: the value comes from $\Gamma\ln(N+1) - \Gamma\ln(N-k+1)$, which cancels catastrophically for large $N$ — `comb(1e10, 2)` is already off by $3.7\times10^{-6}$, and `comb(1e300, 2)` returns `1.0` where SciPy returns `inf`.
+`comb` : Returns `0` for `k > N`, `k < 0` and `N < 0`, matching `scipy.special.comb`. `comb(inf, 0)` is `1`, `comb(inf, k >= 1)` is `inf` and `comb(inf, inf)` is `nan`, all as in SciPy. The inexact variant only; there is no `exact=True` path. Two formulas are stitched at $N = 1000$: a log-gamma difference below, which is the more accurate there but cancels catastrophically above, and a Beta-function form above, which does not cancel. The step in value across the join is a few times $10^{-13}$. **Above $N = 2^{1023} \approx 8.99\times10^{307}$ the result is $e^{-2}$ times the true value** — 86% low — because `jax.scipy.special.betaln` loses exactly $2$ there. Only $k \le 1$ (and its mirror $k \ge N-1$) gives a finite answer that far out, so this affects a narrow band; SciPy is correct throughout it.
 
 `gamma` : Delegates the value to `jax.scipy.special.gamma`, so it cannot drift from upstream; `spexial` supplies only the derivative. Accepts real **and complex** input, the latter from jax 0.10.2 (below that JAX branches on `floor(x)` and raises). Returns `inf` at `x = 0` and `nan` at the negative integers, matching JAX and `scipy.special.gamma` from 1.18 — SciPy is not a stable reference at the poles, returning `inf` everywhere up to 1.14. There is no near-pole blow-up: measured error stays at $10^{-16}$–$8\times10^{-14}$ right up to $10^{-8}$ from a pole. Below $x \approx -170.6$ the true value is subnormal and XLA on CPU flushes it to zero, so `spexial` returns `0` where SciPy returns a denormal. The **first** derivative is accurate to $1.6\times10^{-13}$ everywhere tested, but the **second** is not usable on the negative axis: $\Gamma''$ routes through `jax.scipy.special.digamma`'s own derivative, and JAX's trigamma diverges from the truth from about $x = -7.5$ (at $x = -10.5$ it is wrong by $10^{11}$ relative, and at $-20.5$ it has the wrong sign). This is upstream — `jax.grad(jax.grad(jax.scipy.special.gamma))` returns the identical wrong number — but `spexial` inherits it. `gamma(+inf)` is `inf`, matching SciPy; `gamma(-inf)` is `nan` — Gamma has a pole at every negative integer, so the limit does not exist, and SciPy's `-inf` is not something to copy.
 
@@ -48,7 +48,7 @@ Every function is tested against a reference implementation — `scipy.special` 
 
 `Li` : Accepts a scalar `z` only. An array argument raises a broadcasting `TypeError`; use `jax.vmap` ([how](../how-to/use-with-jit-vmap-and-grad.md)). Raises `ValueError` for an order below 1, and for complex `z` — two of the three branches take the real part of a complex intermediate, which is exact for real `z` and would silently discard a genuine imaginary part. A non-integer order, including a whole-number `float` such as `Li(2.0, z)`, is a `TypeError` from the runtime type checker rather than a `ValueError`. For $\lvert z \rvert \ge 2$ the order is capped at **60** by the Bernoulli table the inversion formula needs; past that the result is `nan`. Smaller $\lvert z \rvert$ is unaffected, bounded instead by $\Gamma(n+1)$ overflow above $n \approx 170$. `Li(1, 1)` is the pole and returns `inf`.
 
-`zeta` : Bernoulli numbers are computed from exact `fractions.Fraction` arithmetic, not `jax.scipy.special.bernoulli`. At and above $n = 54$ the result is the constant `1.0`, which is not an approximation: $\zeta(n) - 1 \approx 2^{-n}$ falls below half an eps of 1 once $n > 53$, so every double-precision value from there up _is_ `1.0`. Taking the constant also steps around `jax.scipy.special.zeta`, which returns `nan` above $n \approx 10^{15}$; `spexial` is correct at every magnitude including `inf`, matching SciPy. `jax.grad(zeta)` is meaningful except at the negative integers, where the value comes from a table lookup that carries no information about how $\zeta$ varies between them. Elsewhere on the negative line the functional equation is differentiated and the gradient is genuine.
+`zeta` : Bernoulli numbers are computed from exact `fractions.Fraction` arithmetic, not `jax.scipy.special.bernoulli`. At and above $n = 54$ the result is the constant `1.0`, which is not an approximation: $\zeta(n) - 1 \approx 2^{-n}$ falls below half an eps of 1 once $n > 53$, so every double-precision value from there up _is_ `1.0`. Taking the constant also steps around `jax.scipy.special.zeta`, which returns `nan` above $n \approx 10^{15}$; `spexial` is correct at every magnitude including `inf`, matching SciPy. `jax.grad(zeta)` is meaningful except at two sets of points: the tabulated integers $0 \ge n \ge -60$, where the value is a table lookup that carries no information about how $\zeta$ varies between entries, and the negative even integers at any magnitude, which are a constant `0`. Both report a finite number that is not $\zeta'$. Everywhere else — non-integers, and the odd integers past the table — the functional equation is differentiated and the gradient is genuine to about $10^{-14}$.
 
 `spence` : Accepts real _and_ complex argument; `jax.scipy.special.spence` is real-only and raises on complex. Its derivative, $\log z/(1-z)$, is supplied analytically — evaluated as the limit $-1$ at $z = 1$, where the closed form is $0/0$, and $-\infty$ at $z = 0$ — which matters beyond speed: JAX's own `spence` differentiates to `nan` across roughly $1 < z < 2$, where `spexial` is exact. **Do not compare against SciPy's complex `spence` near $z = 3 \pm \sqrt3$.** It returns `0.01125` at $3 - \sqrt3$ where the true value is $-0.25186$; `spexial` returns the true value. Use `mpmath.polylog(2, 1 - z)` as the reference at those two points. SciPy's _real_ path is unaffected and agrees everywhere.
 
@@ -56,16 +56,19 @@ Every function is tested against a reference implementation — `scipy.special` 
 
 | Input | `spexial` | how |
 | --- | --- | --- |
-| $n > 1$ | $9\times10^{-16}$ | `jax.scipy.special` |
 | $n \ge 54$ | exactly `1` | constant |
+| $n > 1$ | $4\times10^{-16}$ | `jax.scipy.special` |
 | $n = 1$ | `inf` | the pole |
-| $0 < n < 1$ (the critical strip) | $9\times10^{-13}$ | eta series |
-| negative integer $> -60$ | exact (0 ulp) | Bernoulli table |
+| $0 < n < 1$ (the critical strip) | $1.8\times10^{-15}$ | eta series |
+| $-0.5 < n < 0$ | $8.6\times10^{-15}$ | eta series |
+| negative integer $\ge -60$ | exact (0 ulp) | Bernoulli table |
 | negative even integer, any magnitude | exactly `0` | trivial zero |
-| negative odd integer $\le -60$ | $7\times10^{-14}$ | functional equation |
-| negative non-integer | $9\times10^{-16}$ | functional equation |
+| negative odd integer $< -60$ | $4.2\times10^{-13}$ | functional equation |
+| negative non-integer $\le -0.5$ | $3.9\times10^{-13}$ | functional equation |
 
-Every real argument is covered, and SciPy agrees throughout.
+Every real argument is covered, and SciPy agrees throughout. Accuracy is worst just off a negative even integer, where the $\sin(\pi n/2)$ of the functional equation is near a zero of its own: $1.8\times10^{-13}$ at $n = -99.99$. SciPy is $2\times10^{-4}$ there, so this is the better of the two.
+
+Below about $n = -1000$ the true value exceeds `DBL_MAX` and the result is `±inf`, as it is in SciPy.
 
 ## Reference implementations
 

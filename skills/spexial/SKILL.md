@@ -48,7 +48,7 @@ These are series and asymptotic expansions. In float32 the accuracy figures belo
 
 **`nan` does not raise.** JAX has no exceptions inside traced code. Every domain violation below returns `nan` or `inf` and propagates silently through `jit`, `vmap` and `grad`. Check your inputs before the call, or check the output after.
 
-**`zeta` has real gaps.** `nan` on the critical strip (`0 < n <= 1`), for negative non-integers, and for odd `n <= -60`. SciPy handles all three; `spexial` does not.
+**`zeta` covers every real argument**, by four methods stitched together (see the docs table). Worst accuracy `4e-13`, just off a negative even integer. `jax.grad` is an artefact only at the tabulated integers `0 >= n >= -60` and at the negative even integers.
 
 **`jax.grad(zeta)` is only meaningful for `n > 1`.** The negative line is evaluated from a Bernoulli table, so the derivative reported there is finite but is not `ζ'`. It will not warn you.
 
@@ -82,7 +82,7 @@ Everything below assumes x64. Full detail, including how each was measured, is a
 
 | Function          | Domain                                  | Accurate to  |
 | ----------------- | --------------------------------------- | ------------ |
-| `comb`            | `0 <= N, k <= 170`                      | `3e-13`      |
+| `comb`            | `0 <= k <= N`, to `N ~ 9e307`           | `1.2e-12`    |
 | `gamma`           | real or complex, `\|x\| < 171`          | `4e-13`      |
 | `eval_gegenbauer` | `n <= 20`, `alpha > -0.5`, `\|x\| <= 1` | `2e-12` atol |
 | `K0`/`K1`/`K2`    | `0 < z < 705.5`                         | `2.0e-7`     |
