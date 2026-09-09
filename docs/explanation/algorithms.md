@@ -72,6 +72,10 @@ There is no custom derivative rule. $\partial C/\partial x$ has the closed form 
 
 ## The pattern worth taking away
 
-Three of these functions had the same class of bug, found in three separate rounds of review: a removable singularity guarded by a constant inside a `jnp.where`. The guard makes the value right and every derivative wrong, because a constant differentiates to zero — and the wrongness appears one order higher each time it is patched.
+Two of these functions had the same class of bug, and it was reported four times across three separate rounds of review: a removable singularity guarded by a constant inside a `jnp.where`. The guard makes the value right and every derivative wrong, because a constant differentiates to zero — and the wrongness reappears one order higher each time it is patched. `spence` at $z = 1$ accounted for three of the four — $-1$, then $1/2$, then $-2/3$, one per round — and `Li` at $z = 0$ was the fourth.
 
-The fix that actually terminates is to change the _formula_ near the singular point to one that is analytic there — a series, evaluated by Horner — so that autodiff differentiates a polynomial. `spence` at $z = 1$ and `Li` at $z = 0$ are both now handled this way, and both are correct to every order rather than to the order most recently complained about.
+The fix that actually terminates is to change the _formula_ near the singular point to one that is analytic there — a series, evaluated by Horner — so that autodiff differentiates a polynomial. Both are now handled that way, and both are correct to every order rather than to the order most recently complained about.
+
+The trap is easy to fall straight back into. The first attempt at the `Li` fix substituted a constant and reproduced the `spence` bug exactly; the second used $\sum_j z^j c_j$, whose term-by-term derivative $j\,z^{j-1}$ is $0 \times \infty$ at the origin for $j = 0$, so the second derivative came back `nan`. Only Horner evaluation gives an honest polynomial. Neither misstep reached a commit, but both were caught by tests rather than by reasoning about them in advance, which is the more useful half of the lesson.
+
+A genuine pole is a different matter, and the distinction is worth keeping straight: nothing is finite there, so no change of formula avoids the substitution and each order needs its own. `grad`$^3$ of the scaled Bessel family at $z = 0$ is documented rather than fixed for exactly that reason.
