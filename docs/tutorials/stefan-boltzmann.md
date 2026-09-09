@@ -65,12 +65,13 @@ The polylogarithm $\mathrm{Li}_s(z)$ reduces to the zeta function at $z = 1$: $\
 ```
 
 ```pycon
->>> bool(sp.zeta(4.0) == sp.Li(4, 1.0))
+>>> import math
+>>> math.isclose(float(sp.zeta(4.0)), float(sp.Li(4, 1.0)), rel_tol=1e-15)
 True
 
 ```
 
-Notice that this is exact equality, not approximate — the two independent implementations landed on the same float. That is a stronger agreement than we had any right to expect, and a good sign about both.
+Two independent implementations — a Borwein-accelerated series and a polylogarithm — agree to the last bit or two. That is a good sign about both. The check above asks for closeness rather than exact equality on purpose: the two happen to land on the same float today, but that is the kind of property a compiler change can alter without either implementation becoming wrong, and a tutorial that fails is worse than one that claims less.
 
 ## Step 5: assemble the constant
 

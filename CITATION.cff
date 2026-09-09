@@ -37,11 +37,17 @@ abstract: >-
   scipy.special API. The implementations are written in terms
   of JAX primitives, so they compose with jit compilation,
   automatic differentiation and vectorisation, and run on CPU,
-  GPU and TPU. spexial fills gaps in jax.scipy.special and
-  extends some routines beyond their scipy counterparts, for
-  example gamma to negative real arguments and zeta to negative
-  integers. Several routines originate in the LINX code, and the complex
-  Spence function is translated from scipy's Cython implementation.
+  GPU and TPU. spexial fills gaps in jax.scipy.special, which
+  has no modified Bessel K functions at any release and returns
+  nan for zeta on the negative real line, and supplies analytic
+  derivatives that cut backward-pass memory by up to 268x. A few
+  routines also reach further than their scipy counterparts:
+  the exponentially scaled Bessel functions stay accurate to
+  DBL_MAX, where scipy.special.kve returns nan, and the complex
+  Spence function is correct at 3 +/- sqrt(3), where scipy loses
+  every significant digit. Several routines originate in the LINX
+  code, and the complex Spence function is translated from
+  scipy's Cython implementation.
 keywords:
   - special-functions
   - jax

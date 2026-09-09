@@ -1,6 +1,6 @@
 # spexial — Agent Instructions
 
-`spexial` is special functions for JAX, following the `scipy.special` API. It fills gaps in `jax.scipy.special` and in places extends beyond SciPy (`gamma` and `zeta` accept negative arguments). Everything is written in JAX primitives, so it composes with `jit`, `grad` and `vmap`.
+`spexial` is special functions for JAX, following the `scipy.special` API. It fills gaps in `jax.scipy.special` — which has no modified Bessel `K` at any release, and returns `nan` for `zeta` on the negative line — and supplies analytic derivatives that cut backward-pass memory by up to 268x. It reaches past SciPy in two places: `K0e`/`K1e`/`K2e` stay accurate to `DBL_MAX` where `scipy.special.kve` returns `nan`, and complex `spence` is correct at `3 ± sqrt(3)` where SciPy loses every significant digit. Note both `scipy.special.gamma` and `scipy.special.zeta` already accept negative arguments, so those are _not_ extensions. Everything is written in JAX primitives, so it composes with `jit`, `grad` and `vmap`.
 
 For _using_ `spexial` correctly — which function to reach for, where it differs from SciPy, what is not supported — read [skills/spexial/SKILL.md](skills/spexial/SKILL.md). This file is for working _inside_ this repo.
 
