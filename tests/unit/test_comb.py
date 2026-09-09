@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import mpmath as mp
 import numpy as np
 import pytest
 from scipy.special import comb as scipy_comb
@@ -156,3 +157,26 @@ def test_the_whole_subnormal_band(k, expected):
     assert np.isinf(scipy_comb(1e308, k)) or np.allclose(
         got, scipy_comb(1e308, k), rtol=1e-12
     )
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float16", "bfloat16"])
+@pytest.mark.parametrize("n", [20.0, 50.0, 100.0, 500.0])
+def test_low_precision_is_within_its_own_dtype(dtype, n):
+    """Narrow dtypes must get what their dtype can represent.
+
+    The log-gamma difference has lost every digit by ``N = 20`` in bfloat16 --
+    ``comb(100, 2)`` was 345% high and ``comb(500, 2)`` returned ``1.0`` for a
+    true 124750. Two things fix it: computing one width up, and moving the
+    branch cross-over, which was measured in float64 and is 100x too high for
+    anything narrower.
+    """
+    dt = jnp.dtype(dtype)
+    expected = float(mp.binomial(int(n), 2))
+    if expected > float(jnp.finfo(dt).max):
+        pytest.skip(f"{expected:g} overflows {dtype}")
+    got = sp.comb(jnp.asarray(n, dt), jnp.asarray(2.0, dt))
+    assert got.dtype == dt
+    # 16 eps, not one: the value is `exp` of a logarithm, and that round trip
+    # alone costs about `log(comb) * eps` -- ~7 eps at these sizes. Before the
+    # fix, bfloat16 was 345% out and float16 returned `inf`.
+    np.testing.assert_allclose(float(got), expected, rtol=16 * float(jnp.finfo(dt).eps))

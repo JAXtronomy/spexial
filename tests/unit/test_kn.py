@@ -578,3 +578,47 @@ def test_third_derivative_in_the_tail_is_a_documented_limitation():
     assert 1e-4 < abs(got / expected - 1) < 1e-2, (
         "grad^3 in the tail changed; re-measure and update the docs"
     )
+
+
+@pytest.mark.parametrize("z", [1e-310, 1e-320, 5e-324])
+def test_subnormal_argument(z):
+    """A subnormal `z` must not come back as `inf`.
+
+    XLA on CPU flushes a subnormal *input* to zero, so `jnp.log(z)` was `-inf`
+    and every `K0` below `tiny` was `inf` where the true value is an ordinary
+    number near 700. This is a different fault from the `log(z) - log(2)`
+    rearrangement, which only stops a *normal* `z` being halved into the
+    subnormal range.
+    """
+    expected = float(mp.besselk(0, z))
+    np.testing.assert_allclose(sp.K0(z), expected, rtol=1e-13)
+
+
+@pytest.mark.parametrize("z", [1e-38, 1e-40, 1e-45])
+def test_subnormal_argument_float32(z):
+    """The same band in float32, where it starts at an ordinary 1.2e-38."""
+    argument = jnp.asarray(z, dtype=jnp.float32)
+    got = sp.K0(argument)
+    assert got.dtype == jnp.float32
+    # Against the float32 value actually held, not the decimal literal: the
+    # smallest subnormals have a bit or two of mantissa, so `float32(1e-45)` is
+    # 1.401e-45, and `K0` of the two differs in the third digit.
+    np.testing.assert_allclose(got, float(mp.besselk(0, float(argument))), rtol=1e-6)
+
+
+@pytest.mark.parametrize("z", [-1.0, -1e-310, -1e-320])
+def test_negative_subnormal_is_nan_for_k0(z):
+    """Sign has to be read off the bits.
+
+    XLA compares a subnormal as if it were zero, so `z > 0` is False for
+    exactly the positive values the subnormal branch exists to catch, and
+    `z < tiny` is True for every negative. Reading the sign bit separates them;
+    getting this wrong turned every negative argument into `inf`.
+    """
+    assert jnp.isnan(sp.K0(z))
+
+
+def test_signed_zero_is_still_the_pole():
+    """`-0.0` is the one negative bit pattern that is not out of domain."""
+    assert jnp.isinf(sp.K0(-0.0))
+    assert jnp.isinf(sp.K0(0.0))

@@ -226,3 +226,17 @@ def test_derivative_at_zero(n):
     assert float(jax.grad(partial(sp.Li, n))(-0.0)) == pytest.approx(1.0)
     second = float(jax.grad(jax.grad(partial(sp.Li, n)))(0.0))
     assert second == pytest.approx(2.0 ** (1 - n))
+
+
+@pytest.mark.parametrize("n", [60, 61, 62])
+def test_value_and_gradient_agree_about_the_order_cap(n):
+    """Above the Bernoulli table the value is `nan`; the gradient must be too.
+
+    The derivative needs only ``Li_{n-1}``, so at exactly one order past the cap
+    it stayed finite and correct while the value gave up -- a caller guarding on
+    `isnan` got opposite answers depending on which it checked.
+    """
+    z = jnp.asarray(3.0)
+    value = sp.Li(n, z)
+    grad = jax.grad(partial(sp.Li, n))(z)
+    assert bool(jnp.isnan(value)) == bool(jnp.isnan(grad))

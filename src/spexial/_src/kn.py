@@ -2,13 +2,16 @@
 
 __all__ = ["K0", "K1", "K2", "K0e", "K1e", "K2e"]
 
+from math import log
 from typing import Any, Final
 
 import jax
 import jax.numpy as jnp
+from jax import lax
 from jax.scipy.special import gammaln, i0, i0e, i1e
 
 from .custom_types import AnyArray, RealArrayLike
+from .dtype import as_float as _as_float, cast_like as _cast_like
 
 _EULER_GAMMA: Final = 0.57721566490153286061
 """The Euler-Mascheroni constant."""
@@ -16,9 +19,52 @@ _EULER_GAMMA: Final = 0.57721566490153286061
 _LN2: Final = 0.6931471805599453
 """log(2), subtracted rather than dividing `z` by 2; see `_K0_small`."""
 
+_INT_OF_WIDTH: Final = {2: jnp.int16, 4: jnp.int32, 8: jnp.int64}
+"""Signed integer of the same width as each float dtype, for `_log_no_flush`."""
+
+
+def _log_no_flush(z: AnyArray) -> AnyArray:
+    """``log(z)``, including where ``z`` is subnormal and XLA has flushed it.
+
+    XLA on CPU flushes a subnormal *input* to zero, so `jnp.log` returns
+    ``-inf`` for every ``z`` below ``finfo(dtype).tiny`` -- and `K0` then
+    returned ``inf`` where the true value is an ordinary number near 700. In
+    float32 that band starts at 1.2e-38, an entirely reachable magnitude.
+
+    A subnormal's bit pattern still holds its mantissa; only arithmetic on it
+    flushes. Reading the bits as an integer therefore recovers it, and a
+    subnormal is exactly ``mantissa * tiny / 2**nmant``, so its logarithm is
+    ``log(mantissa)`` plus a constant. `jnp.frexp` is not an alternative -- it
+    flushes too, and reports the same exponent for every subnormal.
+
+    Note this is distinct from the `_LN2` subtraction in `_K0_small`, which
+    stops a *normal* ``z`` being halved into the subnormal range. That fix does
+    nothing when the argument arrives subnormal already.
+    """
+    info = jnp.finfo(z.dtype)
+    bits = lax.bitcast_convert_type(z, _INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
+    mantissa = jnp.bitwise_and(bits, (1 << info.nmant) - 1).astype(z.dtype)
+    # `bits > 0` is the sign test, done on the integer because the float one
+    # cannot be: XLA compares a subnormal as if it were zero, so `z > 0` is
+    # False for exactly the values this branch exists to catch. It is also why
+    # the magnitude test has to be `z < tiny` rather than `abs(z) < tiny` --
+    # and why, without the sign test, every negative argument took this branch
+    # and came back `inf` instead of `nan`.
+    subnormal = (bits > 0) & (z < info.tiny)
+    # Every negative except `-0.0`, whose bit pattern is the one integer more
+    # negative than all of them. A negative *subnormal* cannot be recognised any
+    # other way -- it compares equal to zero, so `jnp.log` returned `-inf` for
+    # it and `K0` came back `inf` where the argument is simply out of domain.
+    negative = (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
+    from_bits = jnp.log(mantissa) + (log(float(info.tiny)) - info.nmant * _LN2)
+    # Every branch evaluates, so keep `log` off the flushed value.
+    plain = jnp.log(jnp.where(subnormal, info.tiny, z))
+    return jnp.where(negative, jnp.nan, jnp.where(subnormal, from_bits, plain))
+
+
 _SMALL_Z: Final = 9.0
 """Cross-over between the ascending series and the asymptotic expansion, in
-float64. See `_crossover`; float32 has to hand off far earlier."""
+float64. See `_SMALL_Z`; float32 has to hand off far earlier."""
 
 _SMALL_Z_LOW_PRECISION: Final = 4.65
 """Cross-over in float32, chosen by measurement rather than scaled from 9.
@@ -49,7 +95,7 @@ def _K0_small(z: AnyArray) -> AnyArray:
     # flushes to zero, and `log(0)` is `-inf`. That turned the whole finite band
     # 2.2e-308 <= z < 4.45e-308 into `inf` (and `K1` into `nan`) where the true
     # values are ~708 and ~3e307. Subtracting instead touches no small number.
-    log_half_z = jnp.log(z) - _LN2
+    log_half_z = _log_no_flush(z) - _LN2
     # `z[..., None]` sums over a *trailing* axis: without it `jnp.sum` collapses
     # the caller's own axis and an array argument silently yields one scalar.
     log_term = 2.0 * k * log_half_z[..., None] - 2.0 * gammaln(k + 1.0)
@@ -96,44 +142,6 @@ def _two_over(z: AnyArray) -> AnyArray:
     return 2.0 / jnp.abs(z)
 
 
-def _cast_like(out: AnyArray, z: RealArrayLike) -> AnyArray:
-    """Return the caller's own floating dtype, whatever width we computed in.
-
-    Covers two separate widenings. `float16`/`bfloat16` are deliberately
-    promoted to float32 by `_as_float` and must come back. `float32` was widened
-    by accident, through series constants that defaulted to float64 under x64 --
-    fixed at the source, with this as the backstop. Integer input has no float
-    dtype to return to and stays promoted.
-    """
-    dtype = jnp.asarray(z).dtype
-    if not jnp.issubdtype(dtype, jnp.floating):
-        return out  # integer input has no float dtype to go back to
-    narrower = jnp.finfo(dtype).bits < jnp.finfo(out.dtype).bits
-    return out.astype(dtype) if narrower else out
-
-
-def _as_float(z: RealArrayLike) -> AnyArray:
-    """Promote to at least float32.
-
-    The promotion is not cosmetic. `_SMALL_Z_LOW_PRECISION` was measured for
-    float32; `float16` and `bfloat16` have no working cross-over at all, because
-    the ascending series costs ~4 decimal digits at z = 4.65 while they carry
-    3.3 and 2.4, and the asymptotic branch is still ~10x off at z = 3 for
-    reasons that have nothing to do with dtype. Between the two, `K0` in
-    bfloat16 was wrong by 16x and **negative** over part of [2, 4.65]. Computing
-    in float32 and rounding back (see `_cast_like`) keeps the caller's dtype
-    while giving it the ~3e-3 that dtype can actually represent.
-
-    This deliberately does *not* normalise `-0.0`. It used to, with
-    `where(z == 0.0, 0.0, z)` -- which cost a select on every call, and, because
-    XLA's comparison treats subnormals as zero, silently mapped every subnormal
-    argument to an exact zero as well. Signed zero is handled where it actually
-    matters instead; see `_two_over`.
-    """
-    z_arr = jnp.asarray(z) * 1.0
-    return z_arr.astype(jnp.promote_types(z_arr.dtype, jnp.float32))
-
-
 def _split(z: RealArrayLike) -> tuple[AnyArray, AnyArray, AnyArray, AnyArray]:
     """Both branch arguments, each already made safe for the other's domain."""
     z_arr = _as_float(z)
@@ -168,7 +176,7 @@ def K0e(z: RealArrayLike, /) -> AnyArray:
         (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
-        ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
+        ~7e-3 (see `_SMALL_Z`). `float16` and `bfloat16` are computed in
         float32 and rounded back, so they get what their dtype can hold.
 
     Examples
@@ -213,7 +221,7 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
         (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
-        ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
+        ~7e-3 (see `_SMALL_Z`). `float16` and `bfloat16` are computed in
         float32 and rounded back, so they get what their dtype can hold.
 
     Examples
@@ -271,7 +279,7 @@ def K2e(z: RealArrayLike, /) -> AnyArray:
         (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
-        ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
+        ~7e-3 (see `_SMALL_Z`). `float16` and `bfloat16` are computed in
         float32 and rounded back, so they get what their dtype can hold.
 
     Examples
@@ -310,7 +318,7 @@ def K0(z: RealArrayLike, /) -> AnyArray:
         (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
-        ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
+        ~7e-3 (see `_SMALL_Z`). `float16` and `bfloat16` are computed in
         float32 and rounded back, so they get what their dtype can hold. Underflows to 0
         above ``z = 705.5``, where the true value is subnormal; use `K0e` there.
 
@@ -354,7 +362,7 @@ def K1(z: RealArrayLike, /) -> AnyArray:
         (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
-        ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
+        ~7e-3 (see `_SMALL_Z`). `float16` and `bfloat16` are computed in
         float32 and rounded back, so they get what their dtype can hold. Underflows to 0
         above ``z = 705.5``, where the true value is subnormal; use `K1e` there.
 
@@ -394,7 +402,7 @@ def K2(z: RealArrayLike, /) -> AnyArray:
         (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
-        ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
+        ~7e-3 (see `_SMALL_Z`). `float16` and `bfloat16` are computed in
         float32 and rounded back, so they get what their dtype can hold. Underflows to 0
         above ``z = 705.5``, where the true value is subnormal; use `K2e` there.
 

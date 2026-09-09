@@ -72,7 +72,17 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
 
 @gamma.defjvp
 def _gamma_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    r""":math:`\Gamma'(x) = \Gamma(x)\,\psi(x)`."""
+    r""":math:`\Gamma'(x) = \Gamma(x)\,\psi(x)`.
+
+    Real input only. `jax.scipy.special.digamma` rejects a complex dtype, so
+    applying this rule to complex input raised -- while `jax.scipy.special.gamma`,
+    whose value this function forwards, differentiates complex input perfectly
+    well. A `custom_jvp` cannot decline to apply, so the complex case is handed
+    straight back to the function being wrapped. The dtype test is static, so
+    the branch is resolved at trace time and costs nothing.
+    """
     (x,), (dx,) = primals, tangents
+    if jnp.iscomplexobj(jnp.asarray(x)):
+        return jax.jvp(lambda v: jss.gamma(jnp.asarray(v) * 1.0), (x,), (dx,))
     g = gamma(x)
     return g, g * digamma(jnp.asarray(x) * 1.0) * dx

@@ -3,6 +3,7 @@
 import jax
 import jax.numpy as jnp
 import jax.scipy.special as jss
+import mpmath as mp
 import numpy as np
 import pytest
 from scipy.special import digamma, gamma as scipy_gamma, polygamma
@@ -148,3 +149,20 @@ def test_second_derivative_is_broken_on_the_negative_axis_like_jax(x):
     truth = scipy_gamma(x) * (digamma(x) ** 2 + polygamma(1, x))
     np.testing.assert_allclose(ours, theirs, rtol=1e-12)
     assert abs(ours / truth - 1) > 0.1, "JAX's trigamma looks fixed; update the docs"
+
+
+@pytest.mark.parametrize("z", [1.5 + 2j, -0.5 + 0.25j])
+def test_complex_input_differentiates(z):
+    """The custom rule must not be a regression on the function it wraps.
+
+    `jax.scipy.special.digamma` rejects complex input, so the analytic rule
+    raised `TypeError` where `jax.scipy.special.gamma` -- whose value `gamma`
+    merely forwards -- differentiates complex input perfectly well. A
+    `custom_jvp` cannot decline to apply, so the complex case is handed back to
+    the wrapped function.
+    """
+    _, tangent = jax.jvp(sp.gamma, (jnp.asarray(z),), (jnp.asarray(1.0 + 0j),))
+    with mp.workdps(30):
+        w = mp.mpc(z.real, z.imag)
+        expected = complex(mp.gamma(w) * mp.digamma(w))
+    assert abs(complex(tangent) - expected) <= 1e-12 * abs(expected)

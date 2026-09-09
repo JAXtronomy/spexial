@@ -232,3 +232,34 @@ def test_grad_matches_mpmath_off_the_integers(n):
     with mp.workdps(30):
         expected = float(mp.diff(mp.zeta, n))
     np.testing.assert_allclose(jax.grad(sp.zeta)(n), expected, rtol=1e-8)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float16", "bfloat16"])
+@pytest.mark.parametrize("n", [-0.25, 0.3, 0.5, 0.9])
+def test_the_strip_in_low_precision(dtype, n):
+    """The eta branch must not overflow the dtype it is cast to.
+
+    Borwein's coefficients reach 1.6e24, which overflows float16 on the cast --
+    taking the normalising term to `inf` and every value on the strip to `nan`,
+    silently. Storing the ratios rather than the raw coefficients puts every
+    entry in [-1, 0], where nothing can overflow.
+    """
+    dt = jnp.dtype(dtype)
+    got = sp.zeta(jnp.asarray(n, dt))
+    assert got.dtype == dt
+    assert jnp.isfinite(got)
+    with mp.workdps(30):
+        expected = float(mp.zeta(n))
+    np.testing.assert_allclose(float(got), expected, rtol=10 * float(jnp.finfo(dt).eps))
+
+
+@pytest.mark.parametrize("n", [-1e15 - 1.0, -2999999999999999.0, -4503599627370495.0])
+def test_far_negative_odd_integers_are_infinite_not_nan(n):
+    """`zeta(1 - n)` is `nan` above ~1e15, and the reflection passed it through.
+
+    The positive branch has always clamped to `_UNIT`, past which zeta is
+    exactly 1; the reflection's own argument was missed. SciPy returns `±inf`
+    here, the true values being far beyond `DBL_MAX`.
+    """
+    assert jnp.isinf(sp.zeta(n))
+    assert np.isinf(scipy_zeta(n))

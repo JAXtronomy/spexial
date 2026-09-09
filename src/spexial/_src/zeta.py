@@ -38,35 +38,49 @@ _ETA_FLOOR: Final = -0.5
 """Below this the reflection takes over from the eta series.
 
 The series is needed below zero because the reflection forms ``1 - n``, which
-rounds to exactly ``1`` once ``|n|`` drops under half an eps -- putting the pole
-of :math:`\\zeta(1)` into a formula whose answer is a finite ``-0.5``. The two
-methods cross here: at ``-0.5`` the series is 2.1e-15 and the reflection
-2.1e-16, and going the other way the series is the only one that works at all.
+loses ``n`` as it shrinks: the reflection is 1.1e-13 by ``n = -1e-3``, 8.3e-8 by
+``-1e-9``, and ``-inf`` once ``|n|`` drops under half an eps, where ``1 - n``
+rounds to exactly ``1`` and puts the pole of :math:`\\zeta(1)` into a formula
+whose answer is a finite ``-0.5``.
+
+The floor is *not* the point where the two measure equal -- below about
+``-0.05`` they interleave, both at 1e-15, with the reflection ahead as often as
+not. It sits at ``-0.5`` because that is comfortably inside the region where the
+reflection is established and well clear of where it collapses; nothing between
+``-0.5`` and ``-0.05`` distinguishes them.
 """
 
 
 @cache
-def _eta_coefficients() -> tuple[float, ...]:
-    r"""Borwein's :math:`d_k`, built from exact integer arithmetic.
+def _eta_weights() -> tuple[float, ...]:
+    r"""Borwein's :math:`d_k`, normalised by :math:`d_n` and offset.
 
     .. math::
 
-        d_k = N \sum_{i=0}^{k} \frac{(N+i-1)!\,4^i}{(N-i)!\,(2i)!}
+        d_k = n \sum_{i=0}^{k} \frac{(n+i-1)!\,4^i}{(n-i)!\,(2i)!},
+        \qquad w_k = \frac{d_k - d_n}{d_n}
 
     Exact `Fraction` arithmetic for the same reason `bernoulli_numbers` uses it:
     the terms span many orders of magnitude and a floating-point recurrence
-    loses digits that the accelerated sum then cannot recover. The table is
-    small and fixed, so it is built once.
+    loses digits the accelerated sum cannot recover.
+
+    Returning the *ratio* rather than the raw :math:`d_k` is what makes this
+    work at every width. The largest :math:`d_k` here is 1.6e24, which overflows
+    `float16` on the cast to the argument's dtype -- taking `last` to `inf` and
+    every value on ``-0.5 < n < 1`` to `nan`, silently. Dividing through first
+    puts every entry in ``[-1, 0]``, where no float dtype can overflow, and the
+    common factor :math:`n` cancels on the way.
     """
     n = _ETA_TERMS
-    coefficients = []
+    partial = []
     total = Fraction(0)
     for i in range(n + 1):
         total += Fraction(
             factorial(n + i - 1) * 4**i, factorial(n - i) * factorial(2 * i)
         )
-        coefficients.append(float(n * total))
-    return tuple(coefficients)
+        partial.append(total)
+    last = partial[n]
+    return tuple(float((partial[k] - last) / last) for k in range(n))
 
 
 def _by_eta(n: AnyArray) -> AnyArray:
@@ -85,15 +99,14 @@ def _by_eta(n: AnyArray) -> AnyArray:
     The same series continues to hold below zero, so `zeta` also uses it down
     to `_ETA_FLOOR` -- see there for why the reflection cannot cover that part.
     """
-    coefficients = jnp.asarray(_eta_coefficients(), dtype=n.dtype)
-    last = coefficients[_ETA_TERMS]
+    weights_table = jnp.asarray(_eta_weights(), dtype=n.dtype)
     k = jnp.arange(1.0, _ETA_TERMS + 1.0, dtype=n.dtype)
     # `n[..., None]` puts the 32 terms on a *trailing* axis and sums over that
     # one only. Without it an array argument broadcasts against the term axis
     # and the shapes collide -- the same mistake `_K0_small` once made with a
     # bare `jnp.sum`, which silently collapsed the caller's own axis instead.
-    weights = (-1.0) ** (k - 1.0) * (coefficients[:_ETA_TERMS] - last)
-    eta = -jnp.sum(weights / k ** jnp.asarray(n)[..., None], axis=-1) / last
+    weights = (-1.0) ** (k - 1.0) * weights_table
+    eta = -jnp.sum(weights / k ** jnp.asarray(n)[..., None], axis=-1)
     # `1 - 2**(1-n)` cancels to nothing as `n` approaches 1 -- it is exactly 0
     # half an eps below it, and only ~4 digits survive by `1 - 1e-12`. `expm1`
     # of the same quantity carries every digit, which matters because the pole
@@ -142,7 +155,12 @@ def _by_reflection(n: AnyArray) -> AnyArray:
         + (n - 1.0) * jnp.log(jnp.pi)
         + jnp.log(jnp.abs(sine))
         + gammaln(1.0 - n)
-        + jnp.log(_hurwitz_zeta(1.0 - n, 1.0))
+        # `1 - n` runs past 1e15 for n below about -1e15, where
+        # `jax.scipy.special.zeta` returns `nan` -- and zeta is exactly 1 from
+        # `_UNIT` up, so clamp to the range it can answer. The positive branch
+        # has always done this; the reflection's own argument was missed, and
+        # returned `nan` where SciPy gives `±inf`.
+        + jnp.log(_hurwitz_zeta(jnp.minimum(1.0 - n, _UNIT), 1.0))
     )
     return jnp.sign(sine) * jnp.exp(log_magnitude)
 

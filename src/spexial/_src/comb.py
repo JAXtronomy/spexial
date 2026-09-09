@@ -8,15 +8,29 @@ import jax.numpy as jnp
 from jax.scipy.special import betaln, gammaln
 
 from .custom_types import AnyArray, AnyArrayLike
+from .dtype import as_float, cast_like
 
 _BETA_FROM: Final = 1000.0
-"""Above this ``N``, the Beta form replaces the log-gamma difference.
+"""Above this ``N``, the Beta form replaces the log-gamma difference, in float64.
 
 Measured against `mpmath.binomial` over a grid of ``k`` at each ``N``: the
 log-gamma difference is worst 1.3e-13 at ``N = 170``, 6.6e-13 at 600 and
 1.6e-12 at 1000, while the Beta form improves the other way -- 1.6e-9 at 100,
 7.3e-12 at 600, 1.7e-12 at 1000, and ~1e-14 from there up. They cross here, so
 the step in value across the crossover is a few times 1e-13.
+"""
+
+_BETA_FROM_LOW_PRECISION: Final = 10.0
+"""The same cross-over, for float32 and narrower.
+
+It moves because the two error sources scale differently. The Beta form's own
+error is a property of `jax.scipy.special.betaln` and is ~1e-9 at ``N = 100``
+whatever the dtype -- invisible under float32's 1.2e-7 eps, decisive under
+float64's 2.2e-16. The log-gamma cancellation grows with ``N`` in *units of
+eps*, so it bites 10^9 times sooner in float32. Measured in float32, the Beta
+form is the better of the two from ``N = 10`` up, by 3x at 20 and 400x by 1000,
+where the log-gamma difference reaches 4.5e-4 -- four decades worse than the
+dtype can do, and the reason a single constant could not serve both.
 """
 
 
@@ -66,7 +80,10 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     12.375
 
     """
-    n_arr, k_arr = jnp.asarray(N) * 1.0, jnp.asarray(k) * 1.0
+    # Computed one width up for `float16`/`bfloat16` and rounded back: the
+    # log-gamma difference needs more digits than either carries, and returned
+    # `1.0` for a true 124750 at bfloat16 `N = 500`. See `spexial._src.dtype`.
+    n_arr, k_arr = as_float(N, keep_weak=True), as_float(k, keep_weak=True)
     in_domain = (n_arr >= 0) & (k_arr >= 0) & (k_arr <= n_arr)
     # Mask *before* the gammaln call: gammaln of a non-positive integer is
     # +inf, and inf - inf would give nan rather than the 0 scipy returns.
@@ -85,6 +102,8 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # It is the weaker of the two on small N, where the Beta function's own
     # argument reduction costs digits, and holds at ~1e-14 from N = 1000 to
     # `DBL_MAX`, given the subnormal correction below.
+    eps = float(jnp.finfo(n_arr.dtype).eps)
+    beta_from = _BETA_FROM if eps < 1e-10 else _BETA_FROM_LOW_PRECISION
     log_comb = gammaln(n_safe + 1) - gammaln(k_safe + 1) - gammaln(n_safe - k_safe + 1)
     # `jax.scipy.special.betaln` orders its arguments and forms `small / big`.
     # XLA on CPU flushes that quotient to zero as soon as it is subnormal, and
@@ -105,7 +124,7 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     )
     from_beta = neg_log_beta - jnp.log(n_safe + 1)
     out = jnp.where(
-        in_domain, jnp.exp(jnp.where(n_arr > _BETA_FROM, from_beta, log_comb)), 0.0
+        in_domain, jnp.exp(jnp.where(n_arr > beta_from, from_beta, log_comb)), 0.0
     )
     # `gammaln(inf) - gammaln(inf) - ...` is `inf - inf == nan`; the limit is
     # plainly +inf and scipy returns that -- except at k = 0, where C(N, 0) = 1
@@ -114,4 +133,4 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     at_infinity = jnp.where(
         k_arr == 0, 1.0, jnp.where(jnp.isinf(k_arr), jnp.nan, jnp.inf)
     )
-    return jnp.where(in_domain & jnp.isinf(n_arr), at_infinity, out)
+    return cast_like(jnp.where(in_domain & jnp.isinf(n_arr), at_infinity, out), N)

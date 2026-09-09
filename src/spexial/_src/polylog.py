@@ -283,7 +283,18 @@ def _li_jvp(n: int, primals: tuple[Any], tangents: tuple[Any]) -> tuple[Scalar, 
         series = jnp.polyval(coefficients, jnp.where(small, z_arr, 0.0))
         z_big = jnp.where(small, 1.0, z_arr)
         deriv = jnp.where(small, series, _li_core(n - 1, z_big) / z_big)
-    return _li_core(n, z_arr), deriv * dz
+    value = _li_core(n, z_arr)
+    # The value gives up above the Bernoulli table (`n > ORDER`, |z| >= 2) and
+    # returns `nan`; the derivative needs only `Li_{n-1}`, so at exactly
+    # `n = ORDER + 1` it stayed finite and correct. Value and gradient then
+    # disagreed about the supported domain at one order, which is worse than
+    # either answer alone -- a caller guarding on `isnan(value)` was safe and
+    # one guarding on `isnan(grad)` was not.
+    # The `nan` goes on the derivative *factor*, not on the product: a
+    # `where` whose branch is the constant `nan` transposes to a zero
+    # cotangent, so `jax.grad` came back 0.0 -- a plausible number in place of
+    # the `nan` that says "out of domain".
+    return value, jnp.where(jnp.isnan(value), jnp.nan, deriv) * dz
 
 
 _li = jax.jit(_li_core, static_argnums=(0,))
