@@ -25,6 +25,17 @@ _MAXITER: Final = 500
 _PLAIN_TERMS: Final = 60
 """Terms in the plain `sum z**n / n**2` fallback near the removable root."""
 
+_GRADIENT_RADIUS: Final = 0.1
+"""How close to `z = 1` the derivative switches to its series form."""
+
+_GRADIENT_TERMS: Final = 20
+"""Terms in that series. `0.1**20` is 1e-20, so the truncation is invisible.
+
+The radius is 0.1 rather than 0.5 because both branches of the `where` are
+evaluated on every call, and a 60-term Horner chain is a long serial dependency:
+at 0.5 it cost 2.7x on `grad(spence)`. Just outside 0.1 the closed form is still
+good to ~1e-15, so nothing is given up by switching later."""
+
 
 @jnp.vectorize
 def _series_about_zero(z: AnyArray) -> AnyArray:
@@ -187,9 +198,9 @@ def _spence_gradient(z: AnyArrayLike) -> AnyArray:
     # round after the last. The series has no such floor: differentiating a
     # polynomial is correct at every order, so this closes the whole chain
     # rather than one more rung of it.
-    near_one = jnp.abs(z - 1) < 0.5
+    near_one = jnp.abs(z - 1) < _GRADIENT_RADIUS
     u = jnp.where(near_one, z - 1, 0.0)
-    j = jnp.arange(_PLAIN_TERMS, dtype=_real_dtype(jnp.asarray(z)))
+    j = jnp.arange(_GRADIENT_TERMS, dtype=_real_dtype(jnp.asarray(z)))
     series = jnp.polyval(((-1.0) ** (j + 1) / (j + 1))[::-1], u)
     z_safe = jnp.where(near_one, 2.0, z)
     return jnp.where(near_one, series, jnp.log(z_safe) / (1 - z_safe))
@@ -218,9 +229,9 @@ def _spence_gradient_jvp(
     # Same treatment as the gradient itself, and for the same reason: term-by-
     # term differentiation of that series, `sum_m (m+1)(-1)^m u^m/(m+2)`, which
     # is again a polynomial and therefore right to every further order.
-    near_one = jnp.abs(z - 1) < 0.5
+    near_one = jnp.abs(z - 1) < _GRADIENT_RADIUS
     u = jnp.where(near_one, z - 1, 0.0)
-    m = jnp.arange(_PLAIN_TERMS - 1, dtype=_real_dtype(jnp.asarray(z)))
+    m = jnp.arange(_GRADIENT_TERMS - 1, dtype=_real_dtype(jnp.asarray(z)))
     series = jnp.polyval(((m + 1) * (-1.0) ** m / (m + 2))[::-1], u)
     at_zero = z == 0
     z_safe = jnp.where(near_one | at_zero, 2.0, z)

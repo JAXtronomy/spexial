@@ -94,6 +94,34 @@ def _seed(alpha: AnyArrayLike, x: AnyArrayLike, /) -> tuple[AnyArray, AnyArray]:
     return tuple(jnp.broadcast_arrays(alpha_arr, x_arr))
 
 
+def _at_infinity(n: int, alpha: AnyArray, x: AnyArray, value: AnyArray) -> AnyArray:
+    """Substitute the analytic limit where `x` is infinite.
+
+    The recurrence forms `2(n + a)x C_{n-1} - (n + 2a - 2) C_{n-2}`, which is
+    `inf - inf` from n = 3 once `x` is infinite, so every order from there was
+    `nan` -- while orders 0 to 2 happened to come out right, which made the
+    break look arbitrary.
+
+    The limit is set by the leading coefficient, `2^n (a)_n / n!`. For the
+    supported `a > -1/2` every factor of the Pochhammer symbol after the first
+    is positive, so its sign is just `sign(a)`, and
+
+        C_n(+inf) = sign(a) * inf,   C_n(-inf) = sign(a) * (-1)^n * inf.
+
+    At `a = 0` the polynomial is identically zero for n >= 1, so the limit is 0
+    rather than an infinity -- which also keeps `sign(a) == 0` from producing
+    `0 * inf == nan`.
+
+    This is outside the documented `|x| <= 1` domain, where SciPy is not
+    self-consistent either (it returns `inf` at `+inf` and `nan` at `-inf`).
+    """
+    if n == 0:
+        return value
+    sign = jnp.sign(alpha) * jnp.where(x > 0, 1.0, (-1.0) ** n)
+    limit = jnp.where(sign == 0, 0.0, sign * jnp.inf)
+    return jnp.where(jnp.isinf(x), limit, value)
+
+
 def _C_n_plus_1(carry: _Carry, n: AnyArray) -> tuple[_Carry, AnyArray]:
     """Apply the three-term Gegenbauer recurrence once."""
     alpha, x, Cn, Cn_minus_1 = carry
@@ -168,7 +196,16 @@ def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
     n_values = jnp.arange(1, n)  # starts at 1: 0 is already initialized above
     _, C_values = jax.lax.scan(_C_n_plus_1, carry, n_values)
 
-    return jnp.hstack([C0_val, C1_val, C_values])
+    orders = jnp.hstack([C0_val, C1_val, C_values])
+    # Every order from 3 up is `inf - inf` when `x` is infinite; substitute each
+    # one's limit. `C_0` is 1 there and `C_1 = 2 a x` is already right except at
+    # a = 0, so the whole vector goes through `_at_infinity` order by order.
+    return jnp.stack(
+        [
+            _at_infinity(k, jnp.asarray(alpha), jnp.asarray(x), orders[k])
+            for k in range(n + 1)
+        ]
+    )
 
 
 # TODO: support n non-integer
@@ -235,9 +272,11 @@ def eval_gegenbauer(n: int, alpha: AnyArrayLike, x: AnyArrayLike, /) -> AnyArray
     if n == 0:
         return C0(x_arr)
     if n == 1:
-        return C1(alpha_arr, x_arr)
+        # `2 * alpha * x` is `nan` at alpha = 0 with x infinite, so this early
+        # return needs the same limit substitution as the scan below.
+        return _at_infinity(1, alpha_arr, x_arr, C1(alpha_arr, x_arr))
 
     carry = (alpha_arr, x_arr, C1(alpha_arr, x_arr), C0(x_arr))
     n_values = jnp.arange(1, n)  # 0 is already done
     _, C_values = jax.lax.scan(_C_n_plus_1, carry, n_values)
-    return C_values[-1]
+    return _at_infinity(n, alpha_arr, x_arr, C_values[-1])

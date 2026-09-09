@@ -156,3 +156,39 @@ def test_mixed_precision_alpha_and_x(n, da, dx):
     got = float(sp.eval_gegenbauer(n, alpha, x))
     expected = scipy_eval_gegenbauer(n, np.float64(1.5), np.float64(0.5))
     np.testing.assert_allclose(got, expected, rtol=1e-6)
+
+
+@pytest.mark.parametrize("alpha", [1.0, 0.5, -0.3, 0.0])
+@pytest.mark.parametrize("n", [0, 1, 2, 3, 4, 5])
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+def test_infinite_argument_gives_the_analytic_limit(alpha, n, sign):
+    """REGRESSION: order >= 3 was `nan` at +-inf; the limit is an infinity.
+
+    The recurrence forms `2(n + a)x C_{n-1} - (n + 2a - 2) C_{n-2}`, which is
+    `inf - inf` once `x` is infinite -- so orders 0 to 2 came out right and
+    everything above was `nan`, which made the break look arbitrary rather than
+    systematic. The limit follows the leading coefficient `2^n (a)_n / n!`:
+    for the supported `a > -1/2` every Pochhammer factor after the first is
+    positive, so the sign is `sign(a)`, and `a = 0` gives 0 for n >= 1 because
+    the polynomial is identically zero there.
+
+    Outside the documented `|x| <= 1`, and SciPy is not self-consistent here
+    (`inf` at `+inf`, `nan` at `-inf`), so mathematics is the reference.
+    """
+    x = sign * np.inf
+    got = float(sp.eval_gegenbauer(n, alpha, x))
+    if n == 0:
+        expected = 1.0
+    elif alpha == 0.0:
+        expected = 0.0
+    else:
+        expected = np.sign(alpha) * (1.0 if sign > 0 else (-1.0) ** n) * np.inf
+    assert got == expected
+
+
+@pytest.mark.parametrize("alpha", [1.0, 0.0])
+def test_all_orders_at_infinity(alpha):
+    """`eval_gegenbauers` substitutes the limit for every order it returns."""
+    got = np.asarray(sp.eval_gegenbauers(5, alpha, -np.inf))
+    assert not np.isnan(got).any()
+    assert got[0] == 1.0
