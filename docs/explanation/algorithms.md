@@ -30,9 +30,9 @@ Translated from SciPy's Cython implementation: a series about $z = 0$ for $|z| \
 
 The accelerated series ends by dividing by $1 + 4t + t^2$ with $t = 1 - z$. That quadratic **vanishes** at $t = -2 + \sqrt3$, and so does the numerator — a $0/0$ that produced a 59%-wrong value at Spence argument $3 - \sqrt3$, and again at $3 + \sqrt3$, which the reflected branch maps onto the same root.
 
-The fix is not a patch at the singular point but a change of formula near it: for small denominators the plain defining series $\sum t^n/n^2$ is used instead, which is exact there because $|t| \le 0.42$ in that region and sixty terms reach $10^{-23}$. Both branches are evaluated under a `jnp.where`, so this costs about 7% on the forward path — the price of being right at two points where the alternative was catastrophically wrong.
+Near that root the plain defining series $\sum t^n/n^2$ is used instead. It is exact there — $|t| \le 0.42$ in the region where it applies, and sixty terms reach $10^{-23}$ — and it costs about 7% on the forward path, because both branches of the `jnp.where` are evaluated.
 
-This bug is worth dwelling on because of _how it survived_: **SciPy's complex `spence` has the same defect**, being the same code. A parity test against SciPy agreed on the wrong answer. Only `mpmath`, which shares no ancestry, could see it.
+One consequence is worth knowing if you are checking results: **SciPy's complex `spence` still has this defect**, being the same code, so it agrees with the wrong answer at those two points. `mpmath` shares no ancestry with either and is the reference to use there.
 
 ## `Li` — three branches and a table
 
@@ -40,7 +40,7 @@ The polylogarithm uses the defining sum for $|z| \le 1/2$, a Hurwitz-zeta expans
 
 The inversion branch needs Bernoulli numbers, and the table stops at $B_{60}$. So the practical bound on the order is **branch-dependent**: $n \le 60$ for $|z| \ge 2$, and $n \le 170$ elsewhere, where $\Gamma(n+1)$ overflows. Past the table the result is `nan` rather than a silently clamped index — an earlier version reused $B_{60}$ for every higher order and returned `Li(62, 3) = 0.979` against a true `3.0`.
 
-The derivative uses $\mathrm{Li}_n'(z) = \mathrm{Li}_{n-1}(z)/z$, which is $0/0$ at the origin. Here too the fix is a change of formula rather than a guard: near zero the ratio is evaluated as the series it equals, $\sum_j z^j/(j+1)^{n-1}$, by Horner. A guard would have been a constant, and a constant differentiates to zero — giving the right first derivative and a wrong second.
+The derivative uses $\mathrm{Li}_n'(z) = \mathrm{Li}_{n-1}(z)/z$, which is $0/0$ at the origin. Near zero the ratio is therefore evaluated as the series it equals, $\sum_j z^j/(j+1)^{n-1}$, by Horner — a form that is analytic at the origin, so derivatives of every order are correct there. Substituting a value at the singular point instead would fix the function and leave its derivatives wrong, since a constant differentiates to zero.
 
 ## `zeta` — delegate, extend, and know when to stop
 
@@ -69,13 +69,3 @@ There is no custom derivative rule. $\partial C/\partial x$ has the closed form 
 `comb` is $\exp(\ln\Gamma(N+1) - \ln\Gamma(k+1) - \ln\Gamma(N-k+1))$, masked so out-of-range pairs return 0 rather than a plausible wrong number. The $N \le 170$ domain is a real ceiling: the difference of log-gammas cancels catastrophically for large $N$, and `comb(1e10, 2)` is already off by $3.7\times10^{-6}$.
 
 `gamma` computes nothing. It calls JAX and supplies a derivative. That is the whole implementation, and it is the right one: a value that delegates cannot drift from upstream, and the analytic $\Gamma\psi$ keeps 3× less residual memory than differentiating through JAX's own.
-
-## The pattern worth taking away
-
-Two of these functions had the same class of bug, and it was reported four times across three separate rounds of review: a removable singularity guarded by a constant inside a `jnp.where`. The guard makes the value right and every derivative wrong, because a constant differentiates to zero — and the wrongness reappears one order higher each time it is patched. `spence` at $z = 1$ accounted for three of the four — $-1$, then $1/2$, then $-2/3$, one per round — and `Li` at $z = 0$ was the fourth.
-
-The fix that actually terminates is to change the _formula_ near the singular point to one that is analytic there — a series, evaluated by Horner — so that autodiff differentiates a polynomial. Both are now handled that way, and both are correct to every order rather than to the order most recently complained about.
-
-The trap is easy to fall straight back into. The first attempt at the `Li` fix substituted a constant and reproduced the `spence` bug exactly; the second used $\sum_j z^j c_j$, whose term-by-term derivative $j\,z^{j-1}$ is $0 \times \infty$ at the origin for $j = 0$, so the second derivative came back `nan`. Only Horner evaluation gives an honest polynomial. Neither misstep reached a commit, but both were caught by tests rather than by reasoning about them in advance, which is the more useful half of the lesson.
-
-A genuine pole is a different matter, and the distinction is worth keeping straight: nothing is finite there, so no change of formula avoids the substitution and each order needs its own. `grad`$^3$ of the scaled Bessel family at $z = 0$ is documented rather than fixed for exactly that reason.

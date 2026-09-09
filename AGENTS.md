@@ -51,10 +51,20 @@ This is a numerics library. The interesting review question is never "does it ru
 - Where a domain is genuinely unsupported, it is expressed as a domain restriction with a comment, or as an explicit test of the `nan`/degraded behaviour — not as a skip. Keep it that way.
 - Every documented domain and tolerance lives in [docs/reference/accuracy-and-domains.md](docs/reference/accuracy-and-domains.md). **A change to numerical behaviour must update that page in the same PR.**
 
+## Guards at a removable singularity
+
+A `jnp.where` that substitutes a **constant** at a singular point makes the value right and every derivative wrong, because a constant differentiates to zero. The wrongness then reappears one order higher each time it is patched: `spence` at `z = 1` was reported three times this way — wrong first derivative, then second, then third — and `Li` at `z = 0` once.
+
+**Where the function is analytic at the point, change the formula, not the value.** `log(z)/(1-z)` at `z = 1` and `Li_{n-1}(z)/z` at `z = 0` are both `0/0` in their closed forms and both have ordinary power series there, so each is now evaluated as its series — by Horner, `jnp.polyval`, not `sum(z**j * c_j)`, whose term-by-term derivative `j * z**(j-1)` is `0 * inf` at the origin for `j = 0`. Autodiff then differentiates a polynomial and every order is right at once.
+
+**Where the point is a genuine pole**, nothing is finite and no reformulation helps: each order needs its own substituted constant, so fixing order 3 leaves order 4. `kn`'s `_at_pole` is that case, and the ceiling is documented rather than chased. Do not confuse the two — the same symptom has opposite fixes.
+
+When touching any of these, test the second _and_ third derivative at the guarded point, not just the value.
+
 ## Known gaps — do not "fix" these by accident
 
-- `gamma` is **real-only**. The reflection formula branches on `x < 0.5`, which complex input cannot supply. The `Real[...]` annotation is deliberate.
-- `gamma` near a non-positive integer loses precision as `1e-17 / distance-to-pole`. Inherent to the reflection formula. The parity suite keeps `1e-4` clear of the poles and pins near-pole behaviour separately.
+- `gamma` **delegates its value** to `jax.scipy.special.gamma` and supplies only the derivative, so the value cannot drift from upstream. It accepts complex input from jax 0.10.2. Do not reintroduce a hand-rolled Lanczos reflection: the old one lost precision as `|x| * 1e-16 / distance-to-pole`, where the delegated value stays at `1e-16`-`8e-14` right up to `1e-8` from a pole.
+- `gamma`'s **second** derivative is unusable on the negative axis, from about `x = -7.5`. `Gamma''` routes through `jax.scipy.special.digamma`'s derivative, and JAX's trigamma is wrong there. It is upstream, not ours, and pinned by a test that fails if JAX fixes it.
 - `zeta` returns `nan` on the critical strip (`0 < n <= 1`), for negative non-integers, and for odd `n <= -60` (the Bernoulli table ends at `B60`). SciPy handles all three. These are real gaps, documented as such.
 - `zeta`'s negative line is a table lookup, so **`jax.grad(zeta)` is only meaningful for `n > 1`**. It returns a finite number on the negative line that is not `ζ'`.
 - `Li` takes **scalar `z` only** — the middle branch builds a length-60 vector of powers of `log z`. `jax.vmap` is the supported workaround and is tested.
