@@ -68,11 +68,28 @@ def _seed(alpha: AnyArrayLike, x: AnyArrayLike, /) -> tuple[AnyArray, AnyArray]:
     keeps `alpha` scalar: its documented return shape is ``(n + 1,)``, which an
     array `alpha` would silently change.
     """
+    # `jnp.broadcast_arrays` unifies *shapes* but not *dtypes*, which left the
+    # dtype half of the same bug: a strongly-typed float64 `alpha` against a
+    # float32 `x` gave `C0` float32 and the recurrence float64, so the carry
+    # changed dtype and the scan raised -- same message, same "n <= 1 works,
+    # n >= 2 dies" signature as the shape mismatch above. Promote both to their
+    # common type first. Only strong dtypes trigger it; a weakly-typed Python
+    # float follows `x`, which is why it went unnoticed.
+    alpha_arr = jnp.asarray(alpha) * 1.0
+    x_arr = jnp.asarray(x) * 1.0
+    # Only when they actually differ: an unconditional `astype` strips *weak*
+    # typing, and weak types are deliberately preserved here -- see `C0`, which
+    # is written as `x * 0 + 1` rather than `ones_like` for exactly that reason.
+    # Casting regardless turned `eval_gegenbauer(3, 0.5, 0.25)` from a weak
+    # float64 into a strong one, which changes how the result promotes against
+    # anything narrower downstream.
+    if alpha_arr.dtype != x_arr.dtype:
+        dtype = jnp.result_type(alpha_arr, x_arr)
+        alpha_arr = alpha_arr.astype(dtype)
+        x_arr = x_arr.astype(dtype)
     # Unpacked into a real tuple: `jnp.broadcast_arrays` returns a list, which
     # the runtime type checker rejects against the annotation.
-    alpha_arr, x_arr = jnp.broadcast_arrays(
-        jnp.asarray(alpha) * 1.0, jnp.asarray(x) * 1.0
-    )
+    alpha_arr, x_arr = jnp.broadcast_arrays(alpha_arr, x_arr)
     return alpha_arr, x_arr
 
 

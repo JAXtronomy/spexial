@@ -201,7 +201,7 @@ def test_kn_across_the_crossover(order, z):
 @pytest.mark.parametrize("order", [0, 1, 2])
 @given(z=floats(1e-30, 690.0))
 def test_kn(order, z):
-    """~2.2e-7 worst case, at the z = 9 cross-over between the two series.
+    """~2.0e-7 worst case, at the z = 9 cross-over between the two series.
 
     That is the accuracy the truncated series can deliver (30 ascending terms,
     10 asymptotic ones), so 1e-6 is the honest tolerance -- not machine
@@ -232,7 +232,13 @@ def test_zeta_positive(n):
 
 @given(n=st.integers(min_value=-59, max_value=0))
 def test_zeta_negative_integers(n):
-    """From exact Bernoulli numbers; measured worst case 9.6e-15 relative."""
+    """From exact Bernoulli numbers; measured worst case 9.6e-15 relative.
+
+    `rtol` is 1e-13, not 1e-12: the floor here is *SciPy's* error, not ours
+    (`test_mpmath_parity` asserts 1e-15 against the truth), but 1e-12 still sat
+    two orders above the real disagreement. Its sibling `test_zeta_positive`
+    was tightened for exactly this reason; this one was left behind.
+    """
     np.testing.assert_allclose(
         sp.zeta(float(n)), scipy_zeta(float(n)), rtol=1e-12, atol=1e-300
     )

@@ -135,7 +135,19 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:
     if jnp.iscomplexobj(z):
         msg = f"Li is only implemented for real z, got dtype {jnp.asarray(z).dtype}"
         raise ValueError(msg)
-    return _li(n, z)
+    # `_li_core` evaluates all three branches under `jnp.where`, and two of them
+    # build float64 constants (the zeta table, `gamma(arange(...))`, the
+    # Bernoulli table), so the `where` promoted a float32 argument to float64 --
+    # leaving `Li` the only public function whose primal disagreed with its own
+    # `grad`. Narrowed back here, as `kn.py` does with `_cast_like`.
+    out = _li(n, z)
+    dtype = jnp.asarray(z).dtype
+    if (
+        jnp.issubdtype(dtype, jnp.inexact)
+        and jnp.finfo(dtype).bits < jnp.finfo(out.dtype).bits
+    ):
+        return out.astype(dtype)
+    return out
 
 
 @partial(jax.custom_jvp, nondiff_argnums=(0,))

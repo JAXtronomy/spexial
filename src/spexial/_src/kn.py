@@ -171,8 +171,8 @@ def K0e(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`e^z K_0(z)`, accurate to ~2.2e-7 relative
-        (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
+        Value(s) of :math:`e^z K_0(z)`, accurate to ~2.0e-7 relative
+        (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
         ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
@@ -216,8 +216,8 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`e^z K_1(z)`, accurate to ~2.0e-7 relative
-        (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
+        Value(s) of :math:`e^z K_1(z)`, accurate to ~1.8e-7 relative
+        (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
         ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
@@ -274,8 +274,8 @@ def K2e(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`e^z K_2(z)`, accurate to ~1.4e-7 relative
-        (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
+        Value(s) of :math:`e^z K_2(z)`, accurate to ~1.3e-7 relative
+        (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
         ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
@@ -313,8 +313,8 @@ def K0(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`K_0(z)`, accurate to ~2.2e-7 relative
-        (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
+        Value(s) of :math:`K_0(z)`, accurate to ~2.0e-7 relative
+        (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
         ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
@@ -357,8 +357,8 @@ def K1(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`K_1(z)`, accurate to ~2.0e-7 relative
-        (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
+        Value(s) of :math:`K_1(z)`, accurate to ~1.8e-7 relative
+        (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
         ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in
@@ -397,8 +397,8 @@ def K2(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`K_2(z)`, accurate to ~1.4e-7 relative
-        (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
+        Value(s) of :math:`K_2(z)`, accurate to ~1.3e-7 relative
+        (worst at z = 8.9984, just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
         ~7e-3 (see `_crossover`). `float16` and `bfloat16` are computed in

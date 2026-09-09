@@ -114,7 +114,7 @@ def test_grad_k0_is_minus_k1(z):
     """K0'(z) == -K1(z).
 
     `rtol` is 1e-10, not the 1e-6 these functions are documented to: none of
-    these four points is near the z = 9 cross-over, so the true error is 5.2e-12
+    these four points is near the z = 9 cross-over, so the true error is 4.9e-13
     and a 1e-6 gate would sit ~190,000x above it -- passing a 10,000x
     regression in `grad(K0)` without noticing.
     """
@@ -529,7 +529,7 @@ def test_second_derivative_at_the_pole_is_positive_infinity(func):
 def test_scaled_second_derivative(order, func, z):
     """The scaled second derivatives, against mpmath.
 
-    `rtol` is 1e-9, looser than the values' own 2.2e-7 would suggest is needed,
+    `rtol` is 1e-9, looser than the values' own 2.0e-7 would suggest is needed,
     because `(e^z K_0)'' = 2G0 - 2G1 + G1/z` subtracts two nearly equal numbers:
     at z = 8.9 the cancellation costs about two decades, and it worsens with z
     (measured 3e-6 at z = 1e5). The absolute error stays at machine precision.
@@ -539,3 +539,42 @@ def test_scaled_second_derivative(order, func, z):
     with mp.workdps(50):
         expected = float(mp.diff(lambda t: mp.exp(t) * mp.besselk(order, t), z, 2))
     np.testing.assert_allclose(jax.grad(jax.grad(func))(z), expected, rtol=1e-9)
+
+
+@pytest.mark.parametrize(("order", "func"), [(1, sp.K1), (2, sp.K2)])
+@pytest.mark.parametrize("derivative_order", [1, 2])
+def test_derivatives_are_exact_to_second_order_in_the_tail(
+    order, func, derivative_order
+):
+    """Orders 1 and 2 are exact at z = 700; order 3 is documented as not.
+
+    Pinned separately from `test_second_derivative_in_the_subnormal_tail` so
+    that the *boundary* of the guarantee is explicit: if a future change makes
+    order 3 exact too, the companion test below fails and the docs get updated.
+    """
+    g = func
+    for _ in range(derivative_order):
+        g = jax.grad(g)
+    with mp.workdps(50):
+        expected = float(
+            mp.diff(lambda t: mp.besselk(order, t), 700.0, derivative_order)
+        )
+    np.testing.assert_allclose(g(700.0), expected, rtol=1e-13)
+
+
+def test_third_derivative_in_the_tail_is_a_documented_limitation():
+    """Order 3 loses 7.2e-4 above z ~ 690, and that is stated rather than fixed.
+
+    Each autodiff pass expands a Leibniz product of a scaled quantity with
+    `e^-z`; the individual terms go subnormal even though their sum does not
+    (`(4/z**3) * K1e * e^-z` is 5.4e-314 at z = 700). Naming a third derivative
+    function would move the wall to order 4 rather than remove it -- orders 3
+    and 4 are both 7.2e-4 low today -- so the ceiling is documented instead.
+    This test fails if that ever stops being true, which is the point.
+    """
+    with mp.workdps(50):
+        expected = float(mp.diff(lambda t: mp.besselk(1, t), 700.0, 3))
+    got = float(jax.grad(jax.grad(jax.grad(sp.K1)))(700.0))
+    assert 1e-4 < abs(got / expected - 1) < 1e-2, (
+        "grad^3 in the tail changed; re-measure and update the docs"
+    )

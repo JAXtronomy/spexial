@@ -50,12 +50,12 @@ def _series_about_zero(z: AnyArray) -> AnyArray:
 def _real_dtype(z: AnyArray) -> Any:
     """Give the real floating dtype to build series constants in.
 
-    `jnp.finfo(z.dtype)` is not enough: it raises on integer input, and `z` may
-    be complex, in which case the constants want the *real* component's width.
-    Multiplying by 1.0 promotes an integer to the default float and leaves
-    everything else alone.
+    `jnp.finfo(z.dtype)` is not enough, because `z` may be complex and the
+    constants want the *real* component's width. Integer input never reaches
+    here -- `spence` promotes it once at entry, precisely so that every branch
+    agrees on a dtype -- so this only has to strip the imaginary part.
     """
-    return jnp.asarray(jnp.real(z) * 1.0).dtype
+    return jnp.asarray(jnp.real(z)).dtype
 
 
 @jnp.vectorize
@@ -129,6 +129,15 @@ def spence(z: AnyArrayLike, /) -> AnyArray:
     jax.scipy.special.spence: jax implementation for real inputs
 
     """
+    # Promoted once, here, rather than inside each branch: `_series_reflected`
+    # forms `z / (z - 1)`, and JAX's integer division yields float32 for int32
+    # input while the other two branches build float64 constants -- so
+    # `lax.select` got two dtypes and raised. Integer widths all land on the
+    # default float; float and complex arguments are untouched, which is what
+    # keeps `_cast_like`-style dtype preservation intact.
+    z = jnp.asarray(z)
+    if not jnp.issubdtype(z.dtype, jnp.inexact):
+        z = z.astype(jnp.asarray(0.0).dtype)
     return jax.lax.select(
         abs(z) < 0.5,
         _series_about_zero(z),

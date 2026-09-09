@@ -130,3 +130,29 @@ def test_alpha_broadcasts_against_x(n, alpha, x):
     got = sp.eval_gegenbauer(n, alpha, x)
     expected = scipy_eval_gegenbauer(n, np.asarray(alpha), np.asarray(x))
     np.testing.assert_allclose(got, expected, rtol=1e-10, atol=1e-12)
+
+
+@pytest.mark.parametrize("n", [0, 1, 2, 3, 5])
+@pytest.mark.parametrize(
+    ("da", "dx"),
+    [
+        ("float64", "float32"),
+        ("float32", "float64"),
+        ("float32", "float32"),
+    ],
+)
+def test_mixed_precision_alpha_and_x(n, da, dx):
+    """REGRESSION: a strongly-typed float64 `alpha` against float32 `x` raised.
+
+    `_seed` used `jnp.broadcast_arrays`, which unifies *shapes* but not
+    *dtypes* -- so `C0` followed `x` while the recurrence followed `alpha`, the
+    scan carry changed dtype, and it raised with the same message and the same
+    "n <= 1 works, n >= 2 dies" signature as the shape mismatch that `_seed` was
+    introduced to fix. Only strong dtypes trigger it: a weakly-typed Python
+    float follows `x`, which is why the dtype half went unnoticed.
+    """
+    alpha = jnp.asarray(1.5, dtype=da)
+    x = jnp.asarray(0.5, dtype=dx)
+    got = float(sp.eval_gegenbauer(n, alpha, x))
+    expected = scipy_eval_gegenbauer(n, np.float64(1.5), np.float64(0.5))
+    np.testing.assert_allclose(got, expected, rtol=1e-6)
