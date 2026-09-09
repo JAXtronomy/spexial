@@ -250,7 +250,12 @@ def test_the_strip_in_low_precision(dtype, n):
     assert jnp.isfinite(got)
     with mp.workdps(30):
         expected = float(mp.zeta(n))
-    np.testing.assert_allclose(float(got), expected, rtol=10 * float(jnp.finfo(dt).eps))
+    # 50 eps, because a 32-term alternating series accumulates in a dtype that
+    # carries three digits, and because the figure moves with the JAX version:
+    # worst here is 8.7 eps at `n = -0.25` in float32, and 24 eps on the oldest
+    # supported JAX. The point of the test is that the branch is *finite* and
+    # roughly right, not that it is sharp -- before the fix it was `nan`.
+    np.testing.assert_allclose(float(got), expected, rtol=50 * float(jnp.finfo(dt).eps))
 
 
 @pytest.mark.parametrize("n", [-1e15 - 1.0, -2999999999999999.0, -4503599627370495.0])

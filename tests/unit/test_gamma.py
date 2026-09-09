@@ -151,6 +151,11 @@ def test_second_derivative_is_broken_on_the_negative_axis_like_jax(x):
     assert abs(ours / truth - 1) > 0.1, "JAX's trigamma looks fixed; update the docs"
 
 
+@pytest.mark.skipif(
+    not _jax_gamma_supports_complex(),
+    reason="jax.scipy.special.gamma gained complex support in 0.10.2; below that "
+    "it branches on floor(x) and raises, so there is nothing to differentiate",
+)
 @pytest.mark.parametrize("z", [1.5 + 2j, -0.5 + 0.25j])
 def test_complex_input_differentiates(z):
     """The custom rule must not be a regression on the function it wraps.
