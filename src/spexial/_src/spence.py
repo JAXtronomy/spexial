@@ -40,6 +40,13 @@ def _series_about_zero(z: AnyArray) -> AnyArray:
     return jnp.where(z == 0, np.pi**2 / 6, np.pi**2 / 6 - sum1 + jnp.log(z) * sum2)
 
 
+# `np.pi` is a Python `float`, not a `np.float64` scalar, so `np.pi**2 / 6` is
+# weakly typed and follows the argument's dtype rather than forcing float64.
+# Keep it that way: a `np.float64(...)` constant here would silently promote a
+# float32 or complex64 argument, undoing `_real_dtype`. Locked by
+# `test_dtype_is_preserved`.
+
+
 def _real_dtype(z: AnyArray) -> Any:
     """Give the real floating dtype to build series constants in.
 

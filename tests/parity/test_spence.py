@@ -131,3 +131,29 @@ def test_series_denominator_does_not_overflow_int32():
     # float32 eps is 1.2e-7; allow a decade of accumulation over the 499 terms.
     np.testing.assert_allclose(at_two, -0.8224670334241132, rtol=1e-6)
     np.testing.assert_allclose(at_one_three, -0.2800743338009109, rtol=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "value"),
+    [
+        ("float32", 2.0),
+        ("float64", 2.0),
+        ("complex64", 2.0 + 1.0j),
+        ("complex128", 2.0 + 1.0j),
+    ],
+)
+@pytest.mark.parametrize("z", [0.2, 0.6, 1.0, 1.5, 3.0])
+def test_dtype_is_preserved(dtype, value, z):
+    """A narrow argument must not come back widened, on any branch.
+
+    `spence` stitches three series together and both the series-about-zero and
+    the reflected branch carry a `pi**2 / 6` constant. `np.pi` is a Python
+    `float`, so that constant is *weakly* typed and follows the argument --
+    but a `np.float64(...)` in its place would promote float32 to float64
+    silently, which is exactly the kind of widening that breaks a `lax.scan`
+    carry downstream. Every branch is exercised: `z` spans |z| <= 1/2,
+    |1 - z| <= 1 and the reflected region.
+    """
+    arg = complex(z, value.imag) if isinstance(value, complex) else z
+    got = spence(jnp.asarray(arg, dtype=dtype))
+    assert got.dtype == jnp.dtype(dtype)
