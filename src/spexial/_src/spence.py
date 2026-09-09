@@ -229,7 +229,13 @@ def _spence_gradient(z: AnyArrayLike) -> AnyArray:
     j = jnp.arange(_GRADIENT_TERMS, dtype=_real_dtype(jnp.asarray(z)))
     series = jnp.polyval(((-1.0) ** (j + 1) / (j + 1))[::-1], u)
     z_safe = jnp.where(near_one, 2.0, z)
-    return jnp.where(near_one, series, jnp.log(z_safe) / (1 - z_safe))
+    closed = jnp.log(z_safe) / (1 - z_safe)
+    # `z = 0` is a pole and the limit is `-inf`, which the real path gets for
+    # free from `log(0) / 1`. The *complex* path does not: `(-inf + 0j)` divided
+    # by `(1 + 0j)` leaves `0 - (-inf * 0)` in the imaginary part, i.e. `nan`,
+    # so the branch this module exists to provide disagreed with the real one at
+    # the one point both can reach.
+    return jnp.where(near_one, series, jnp.where(z == 0, -jnp.inf, closed))
 
 
 @_spence_gradient.defjvp
