@@ -171,3 +171,37 @@ def test_complex_input_differentiates(z):
         w = mp.mpc(z.real, z.imag)
         expected = complex(mp.gamma(w) * mp.digamma(w))
     assert abs(complex(tangent) - expected) <= 1e-12 * abs(expected)
+
+
+@pytest.mark.parametrize("x", [1e-38, 5e-39, 3e-39, -5e-39])
+def test_subnormal_argument_in_float32(x):
+    """`Gamma(x) -> 1/x` near zero, and in float32 that still fits below `tiny`.
+
+    Upstream returns `inf` for the whole subnormal range because it flushes the
+    argument internally; SciPy gives the finite value. The band is a factor of
+    about two wide -- `tiny * max` is ~2 in any IEEE format -- which in float32
+    is the reachable 2.9e-39 to 1.2e-38. This is the one place the delegated
+    value is deliberately overridden, and only where upstream has none.
+    """
+    got = sp.gamma(jnp.asarray(x, dtype=jnp.float32))
+    assert got.dtype == jnp.float32
+    np.testing.assert_allclose(float(got), 1.0 / x, rtol=1e-5)
+
+
+@pytest.mark.parametrize("x", [2e-39, 1e-310])
+def test_gamma_is_infinite_only_where_one_over_x_overflows(x):
+    """Past the band the true value exceeds the dtype, so `inf` is right."""
+    dtype = jnp.float32 if x > 1e-45 else jnp.float64
+    assert jnp.isinf(sp.gamma(jnp.asarray(x, dtype=dtype)))
+
+
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16", "float32", "float64"])
+def test_floating_input_keeps_its_dtype(dtype):
+    """A floating argument is passed through, not multiplied by ``1.0``.
+
+    The multiply promotes integers, which is what it is for, but it also
+    flushes a subnormal float to zero on XLA. `jax.scipy.special.gamma` handles
+    every float width itself, so there is nothing to gain by casting.
+    """
+    dt = jnp.dtype(dtype)
+    assert sp.gamma(jnp.asarray(2.5, dt)).dtype == dt

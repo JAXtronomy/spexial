@@ -13,7 +13,11 @@ the caller keeps its dtype and gets the accuracy that dtype can represent.
 
 __all__: tuple[str, ...] = ()
 
+from math import log
+from typing import Final
+
 import jax.numpy as jnp
+from jax import lax
 
 from .custom_types import AnyArray, AnyArrayLike
 
@@ -75,3 +79,81 @@ def cast_like(out: AnyArray, x: AnyArrayLike, /) -> AnyArray:
         return out  # integer input has no float dtype to go back to
     narrower = jnp.finfo(dtype).bits < jnp.finfo(out.dtype).bits
     return out.astype(dtype) if narrower else out
+
+
+_LN2: Final = 0.6931471805599453
+"""log(2)."""
+
+INT_OF_WIDTH: Final = {2: jnp.int16, 4: jnp.int32, 8: jnp.int64}
+"""Signed integer of the same width as each float dtype, for reading its bits."""
+
+
+def positive_subnormal(z: AnyArray) -> AnyArray:
+    """Mask of the arguments XLA has flushed to zero but that are not zero.
+
+    The float tests cannot do this. XLA compares a subnormal as if it were
+    zero, so ``z > 0`` is False for exactly these values and ``z == 0.0`` is
+    True for them -- which is how a subnormal argument reached `kn.K1`'s pole
+    guard and came back ``inf``.
+    """
+    bits = lax.bitcast_convert_type(z, INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
+    return (bits > 0) & (z < jnp.finfo(z.dtype).tiny)
+
+
+def exactly_zero(z: AnyArray) -> AnyArray:
+    """``z == 0.0`` done on the bits, so a subnormal is not mistaken for zero.
+
+    Only two bit patterns are zero, ``+0.0`` and ``-0.0``; the latter is the
+    single integer more negative than every other float.
+    """
+    bits = lax.bitcast_convert_type(z, INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
+    return (bits == 0) | (bits == jnp.iinfo(bits.dtype).min)
+
+
+def is_negative(z: AnyArray) -> AnyArray:
+    """``z < 0`` done on the bits, so a negative subnormal is not read as zero.
+
+    Every negative float has the sign bit set; ``-0.0`` is the single integer
+    more negative than all of them, and is not "negative" for this purpose.
+    """
+    bits = lax.bitcast_convert_type(z, INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
+    return (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
+
+
+def log_no_flush(z: AnyArray) -> AnyArray:
+    """``log(z)``, including where ``z`` is subnormal and XLA has flushed it.
+
+    XLA on CPU flushes a subnormal *input* to zero, so `jnp.log` returns
+    ``-inf`` for every ``z`` below ``finfo(dtype).tiny`` -- and `kn.K0` then
+    returned ``inf`` where the true value is an ordinary number near 700. In
+    float32 that band starts at 1.2e-38, an entirely reachable magnitude.
+
+    A subnormal's bit pattern still holds its mantissa; only arithmetic on it
+    flushes. Reading the bits as an integer therefore recovers it, and a
+    subnormal is exactly ``mantissa * tiny / 2**nmant``, so its logarithm is
+    ``log(mantissa)`` plus a constant. `jnp.frexp` is not an alternative -- it
+    flushes too, and reports the same exponent for every subnormal.
+
+    Note this is distinct from the `_LN2` subtraction in `_K0_small`, which
+    stops a *normal* ``z`` being halved into the subnormal range. That fix does
+    nothing when the argument arrives subnormal already.
+    """
+    info = jnp.finfo(z.dtype)
+    bits = lax.bitcast_convert_type(z, INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
+    mantissa = jnp.bitwise_and(bits, (1 << info.nmant) - 1).astype(z.dtype)
+    # `bits > 0` is the sign test, done on the integer because the float one
+    # cannot be: XLA compares a subnormal as if it were zero, so `z > 0` is
+    # False for exactly the values this branch exists to catch. It is also why
+    # the magnitude test has to be `z < tiny` rather than `abs(z) < tiny` --
+    # and why, without the sign test, every negative argument took this branch
+    # and came back `inf` instead of `nan`.
+    subnormal = (bits > 0) & (z < info.tiny)
+    # Every negative except `-0.0`, whose bit pattern is the one integer more
+    # negative than all of them. A negative *subnormal* cannot be recognised any
+    # other way -- it compares equal to zero, so `jnp.log` returned `-inf` for
+    # it and `kn.K0` came back `inf` where the argument is simply out of domain.
+    negative = (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
+    from_bits = jnp.log(mantissa) + (log(float(info.tiny)) - info.nmant * _LN2)
+    # Every branch evaluates, so keep `log` off the flushed value.
+    plain = jnp.log(jnp.where(subnormal, info.tiny, z))
+    return jnp.where(negative, jnp.nan, jnp.where(subnormal, from_bits, plain))
