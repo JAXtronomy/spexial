@@ -8,7 +8,7 @@ Every function is tested against a reference implementation — `scipy.special` 
 
 | Function | `scipy.special` | Supported domain | Tested to |
 | --- | --- | --- | --- |
-| `eval_gegenbauer` | `eval_gegenbauer` | $n \le 20$ integer, $\alpha > -1/2$, $\lvert x \rvert \le 1$ | rtol $10^{-10}$, atol $10^{-11}$; worst measured atol $1.9 \times 10^{-12}$ |
+| `eval_gegenbauer` | `eval_gegenbauer` | $n \le 20$ integer, $\alpha > -1/2$, $\lvert x \rvert \le 1$ | rtol $10^{-10}$, atol $10^{-13}\times$ recurrence scale; worst $1.5\times10^{-7}$ absolute at $n=20,\ \alpha=10$ |
 | `eval_gegenbauers` | -- | as `eval_gegenbauer`; returns all orders $0 \ldots n$ | as `eval_gegenbauer` |
 | `comb` | `comb` (`exact=False`) | $0 \le N, k \le 170$ | rtol $10^{-11}$; worst $3.2 \times 10^{-13}$ |
 | `gamma` | `gamma` | real (and complex, jax $\ge$ 0.10.2), $-170 \lesssim x \lesssim 171$ | rtol $10^{-11}$; worst $3.5\times10^{-13}$ for $x \ge 1/2$, $4.3\times10^{-13}$ on $[-170,-30]$ |
@@ -25,6 +25,8 @@ Every function is tested against a reference implementation — `scipy.special` 
 ## Per-function limits
 
 `eval_gegenbauer`, `eval_gegenbauers` : At exactly $\alpha = 0$, `spexial` returns $C_0^{(0)} = 1$ and $C_n^{(0)} = 0$ for $n \ge 1$, which is what the generating function gives. SciPy agrees up to 1.14; from 1.18 it returns `0.0` for _every_ order at exactly $\alpha = 0$, while still returning `1.0` at $\alpha = 10^{-300}$. The parity suite excludes that single point rather than follow it.
+
+`eval_gegenbauer` : Accuracy is set by the **recurrence's** working magnitude, not by the size of the answer. At $n = 20,\ \alpha = 10$ the intermediate $\lvert C_k\rvert$ peaks at $9.6\times10^{7}$ on the way to a result of $1.3\times10^{-2}$, so the worst absolute error near a root there is $1.5\times10^{-7}$ — which is $1.6\times10^{-15}$ of that peak, i.e. backward-stable to machine precision, and 13x better than SciPy at the same point. Tolerances are therefore scaled by that peak; a flat $10^{-11}$ asserted something float64 cannot deliver, and an earlier revision of this page quoted $1.9\times10^{-12}$, which held only for the small-$\alpha$ region Hypothesis actually samples.
 
 `eval_gegenbauer` : At $x = \pm\infty$ (outside the supported $\lvert x \rvert \le 1$) orders 0, 1 and 2 are correct — $1$, $\pm\infty$ and $+\infty$ respectively, the last being the true limit of $2\alpha(1+\alpha)x^2 - \alpha$, where SciPy returns `nan` at $-\infty$. Order $\ge 3$ gives `nan`, because the recurrence forms $\infty - \infty$; the same happens for finite arguments once the polynomial overflows. SciPy is not self-consistent here either, and the domain is documented as $\lvert x \rvert \le 1$. The recurrence forms $\infty - \infty$; SciPy is not self-consistent here either, and the domain is documented as $\lvert x \rvert \le 1$.
 

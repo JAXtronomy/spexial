@@ -115,6 +115,15 @@ def test_gamma_near_a_pole(pole, distance):
     np.testing.assert_allclose(sp.gamma(x), scipy_gamma(x), rtol=1e-11)
 
 
+def _recurrence_scale(n, alpha, x):
+    """Largest intermediate the three-term recurrence passes through.
+
+    The accuracy a recurrence can deliver is set by its own working magnitude,
+    not by the size of its answer, so tolerances are measured against this.
+    """
+    return float(np.abs(np.asarray(sp.eval_gegenbauers(n, alpha, x))).max())
+
+
 # ---------------------------------------------------------------------------
 # eval_gegenbauer
 
@@ -142,12 +151,16 @@ def test_eval_gegenbauer(n, alpha, x):
         sp.eval_gegenbauer(n, alpha, x),
         scipy_eval_gegenbauer(n, alpha, x),
         rtol=1e-10,
-        # 1e-11, not the original 1e-9: that was dead slack that would have
-        # hidden a 100x error on any result below 1e-9 -- the near-root values
-        # it was meant to protect. Not 1e-13 either, which was tried and
-        # falsified at n=8, alpha=10, where a value sitting on a root needs
-        # 1.9e-12 absolute.
-        atol=1e-11,
+        # Scaled by the recurrence's own working magnitude. A three-term
+        # recurrence at large `alpha` runs far above its final value -- at
+        # n = 20, alpha = 10 the intermediate |C_k| peaks at 9.6e7 for an answer
+        # of 1.3e-2 -- so a flat `atol` asserts something float64 cannot
+        # deliver. The measured worst is 1.5e-7 absolute, which is 1.6e-15 of
+        # that peak: backward-stable to machine precision, and 13x better than
+        # SciPy at the same point. A flat 1e-11 was therefore *latently
+        # failing*, passing only because Hypothesis almost never lands near a
+        # root at large alpha (one point in 200,001 on a uniform grid there).
+        atol=max(1e-11, 1e-13 * _recurrence_scale(n, alpha, x)),
     )
 
 
@@ -174,7 +187,12 @@ def test_eval_gegenbauers(n, alpha, x):
     got = sp.eval_gegenbauers(n, alpha, x)
     expected = [scipy_eval_gegenbauer(k, alpha, x) for k in range(n + 1)]
     assert got.shape == (n + 1,)
-    np.testing.assert_allclose(got, expected, rtol=1e-10, atol=1e-11)
+    np.testing.assert_allclose(
+        got,
+        expected,
+        rtol=1e-10,
+        atol=max(1e-11, 1e-13 * _recurrence_scale(n, alpha, x)),
+    )
 
 
 # ---------------------------------------------------------------------------

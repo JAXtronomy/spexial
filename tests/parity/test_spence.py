@@ -47,7 +47,7 @@ def test_spence_matches_scipy(x, phi):
     if min(abs(z - (3 - np.sqrt(3))), abs(z - (3 + np.sqrt(3)))) > 0.05:
         np.testing.assert_allclose(spence(z), scipy_spence(z), rtol=1e-12, atol=1e-13)
     # rtol was 1e-5 here, seven orders looser than the measured worst case of
-    # 1.6e-14 -- slack that large would let the function be 1e7x wrong and still
+    # 2.7e-14 -- slack that large would let the function be 1e7x wrong and still
     # pass. (Before the root fix the true worst was 1.9e-12, so this assertion
     # was latently failing, not merely slack.)
     np.testing.assert_allclose(spence(x), scipy_spence(x), rtol=1e-12, atol=1e-13)
@@ -186,3 +186,31 @@ def test_spence_at_the_removable_singularity(z, delta):
     with mp.workdps(40):
         expected = float(mp.re(mp.polylog(2, 1 - mp.mpf(point))))
     np.testing.assert_allclose(spence(point), expected, rtol=1e-13)
+
+
+@pytest.mark.parametrize("z", [0.3, 0.75, 1.0, 1.5, 2.5, 6.0])
+def test_second_derivative_matches_mpmath(z):
+    """REGRESSION: `spence''(1)` was 0; the true value is 1/2.
+
+    `_spence_gradient` guards the removable singularity at z = 1 by returning
+    the constant -1, which is right for the first derivative and differentiates
+    to **0** for the second. Only that single point was wrong -- 1 +- 1e-7 was
+    already correct to seven digits -- which is what made it a plausible number
+    rather than an obvious one. Precisely the defect the first derivative had at
+    this same point, one order up, so it is now a rule rather than arithmetic.
+    """
+    with mp.workdps(40):
+        expected = float(mp.re(mp.diff(lambda t: mp.polylog(2, 1 - t), z, 2)))
+    np.testing.assert_allclose(jax.grad(jax.grad(spence))(z), expected, rtol=1e-9)
+
+
+def test_second_derivative_at_the_pole_is_positive_infinity():
+    """Both signed zeros agree, and on the true limit.
+
+    `spence''(z) = 1/(z(1-z)) + log(z)/(1-z)**2` tends to `+inf` as z -> 0,
+    since 1/z outruns log z. The closed form is `inf - inf` at `+0.0` and
+    committed to `-inf` at `-0.0`, so the two zeros disagreed with each other
+    as well as with the limit.
+    """
+    assert float(jax.grad(jax.grad(spence))(0.0)) == np.inf
+    assert float(jax.grad(jax.grad(spence))(-0.0)) == np.inf

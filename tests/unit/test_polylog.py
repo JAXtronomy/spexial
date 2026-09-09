@@ -205,3 +205,24 @@ def test_narrow_scalar_does_not_raise(dtype):
     """
     got = float(sp.Li(2, jnp.asarray(0.5, dtype=dtype)))
     np.testing.assert_allclose(got, reference(2, 0.5), rtol=1e-6)
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 5, 12])
+def test_derivative_at_zero(n):
+    """REGRESSION: `grad(Li_n)(0)` was `nan` for every order n >= 2.
+
+    The JVP is `Li_{n-1}(z) / z`, which is 0/0 at the origin -- while the
+    *value* `Li(n, 0)` was correctly 0, so only the gradient broke. `n = 1` has
+    its own `1/(1-z)` branch and was unaffected, which made the break look
+    selective. The limit is 1 for every order, since `Li_{n-1}(z) = z + O(z^2)`.
+
+    The second derivative is checked too, because the obvious guard --
+    `where(z == 0, 1.0, ratio)` -- fixes the first order and silently breaks the
+    second, a constant differentiating to 0 where `Li_n''(0) = 2**(1-n)`. The
+    ratio is instead rewritten as the series it equals, evaluated by Horner so
+    that it is analytic at 0 to every order.
+    """
+    assert float(jax.grad(partial(sp.Li, n))(0.0)) == pytest.approx(1.0)
+    assert float(jax.grad(partial(sp.Li, n))(-0.0)) == pytest.approx(1.0)
+    second = float(jax.grad(jax.grad(partial(sp.Li, n)))(0.0))
+    assert second == pytest.approx(2.0 ** (1 - n))

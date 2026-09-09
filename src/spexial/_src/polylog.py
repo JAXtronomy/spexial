@@ -251,7 +251,35 @@ def _li_jvp(n: int, primals: tuple[Any], tangents: tuple[Any]) -> tuple[Scalar, 
     """
     (z,), (dz,) = primals, tangents
     z_arr = jnp.asarray(z) * 1.0
-    deriv = 1.0 / (1.0 - z_arr) if n == 1 else _li_core(n - 1, z_arr) / z_arr
+    if n == 1:
+        deriv = 1.0 / (1.0 - z_arr)
+    else:
+        # `Li_{n-1}(0) / 0` is 0/0, and returned `nan` for every order n >= 2
+        # while the *value* `Li(n, 0)` was correctly 0. (`n = 1` has its own
+        # branch and was never affected, which made the break look selective.)
+        #
+        # Guarding it with `where(z == 0, 1.0, ratio)` fixes the first
+        # derivative and silently breaks the second: a constant branch
+        # differentiates to 0, where `Li_n''(0) = 2^(1-n)`. That is the same
+        # trap `spence` fell into at its own removable point, so instead of
+        # patching a value in, the ratio is *rewritten* as the series it equals:
+        #
+        #     Li_{n-1}(z) / z = sum_{j >= 0} z^j / (j + 1)^(n - 1)
+        #
+        # which is analytic at 0 and therefore right to every order. It is used
+        # only for |z| < 1/2, where 60 terms give 8.7e-19; beyond that the
+        # division is nowhere near zero and the closed form is kept.
+        # Evaluated by Horner (`jnp.polyval`) rather than as `sum(z**j * c_j)`:
+        # `z**j` differentiates to `j * z**(j-1)`, which is `0 * inf` at z = 0
+        # for j = 0, so the sum form is `nan` at the very point this exists to
+        # get right. Horner keeps it an honest polynomial, differentiable to
+        # every order there.
+        small = jnp.abs(z_arr) < 0.5
+        j = jnp.arange(_N_TERMS, dtype=z_arr.dtype)
+        coefficients = (1.0 / (j + 1.0) ** (n - 1))[::-1]
+        series = jnp.polyval(coefficients, jnp.where(small, z_arr, 0.0))
+        z_big = jnp.where(small, 1.0, z_arr)
+        deriv = jnp.where(small, series, _li_core(n - 1, z_big) / z_big)
     return _li_core(n, z_arr), deriv * dz
 
 

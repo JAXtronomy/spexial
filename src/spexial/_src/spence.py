@@ -20,10 +20,10 @@ import numpy as np
 from .custom_types import AnyArray, AnyArrayLike
 
 _MAXITER: Final = 500
+"""Terms taken in each series branch."""
 
 _PLAIN_TERMS: Final = 60
 """Terms in the plain `sum z**n / n**2` fallback near the removable root."""
-"""Terms taken in each series branch."""
 
 
 @jnp.vectorize
@@ -123,8 +123,9 @@ def spence(z: AnyArrayLike, /) -> AnyArray:
     `jax.scipy.special.spence` covers the real case at every JAX version
     `spexial` supports, and raises on complex input. This accepts both, and
     carries an analytic derivative: differentiating the series instead costs
-    444x the time and 1534x the residual memory (23.9 MB against 16 kB over
-    2000 points).
+    444x the time and 1652x the residual memory (26.4 MB against 16 kB over
+    2000 points; the `near_root` fallback added ~2 MB to the differentiated
+    series, which is exactly the cost a custom rule avoids).
 
     .. math::
 
@@ -156,6 +157,7 @@ def spence(z: AnyArrayLike, /) -> AnyArray:
     )
 
 
+@jax.custom_jvp
 def _spence_gradient(z: AnyArrayLike) -> AnyArray:
     r"""Analytic derivative of Spence's function.
 
@@ -176,6 +178,34 @@ def _spence_gradient(z: AnyArrayLike) -> AnyArray:
     at_one = z == 1
     z_safe = jnp.where(at_one, 2.0, z)
     return jnp.where(at_one, -1.0, jnp.log(z_safe) / (1 - z_safe))
+
+
+@_spence_gradient.defjvp
+def _spence_gradient_jvp(
+    primals: tuple[Any], tangents: tuple[Any]
+) -> tuple[AnyArray, AnyArray]:
+    r"""Second derivative: :math:`1/(z(1-z)) + \log z/(1-z)^2`.
+
+    A rule rather than plain arithmetic, because the `jnp.where` above returns a
+    *constant* at ``z = 1`` -- correct for the value, but its derivative is then
+    `0`, where the true ``spence''(1)`` is `1/2`. Substituting `z = 1 + h` in the
+    closed form and expanding gives `1/2 - 2h/3 + O(h^2)`, so the limit is `1/2`
+    and the neighbourhood was already right: only the single guarded point was
+    wrong, which is what made it a plausible number rather than an obvious one.
+    Exactly the defect the *first* derivative had at this same point, one order
+    up.
+
+    At ``z = 0`` both terms diverge: the closed form is `inf - inf` at `+0.0`
+    and commits to `-inf` at `-0.0`, while the true limit is `+inf` from either
+    side, since `1/z` outruns `log z`.
+    """
+    (z,), (dz,) = primals, tangents
+    at_one = z == 1
+    at_zero = z == 0
+    z_safe = jnp.where(at_one | at_zero, 2.0, z)
+    second = 1.0 / (z_safe * (1 - z_safe)) + jnp.log(z_safe) / (1 - z_safe) ** 2
+    second = jnp.where(at_one, 0.5, jnp.where(at_zero, jnp.inf, second))
+    return _spence_gradient(z), second * dz
 
 
 def _spence_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
