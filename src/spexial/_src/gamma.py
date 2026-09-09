@@ -14,7 +14,7 @@ import jax.scipy.special as jss
 from jax.scipy.special import digamma
 
 from .custom_types import AnyArray, AnyArrayLike
-from .dtype import is_negative, log_no_flush, positive_subnormal
+from .dtype import is_negative, log_no_flush, positive_subnormal, promote_integers
 
 
 @jax.custom_jvp
@@ -68,15 +68,12 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
     every supported JAX, including ones that predate it.
 
     """
-    # Only non-inexact input takes the multiply. `x * 1.0` promotes integers,
-    # which is what it is for, but it also flushes a subnormal float to zero on
-    # XLA -- the hazard `spexial._src.dtype` documents, and the one that cost
-    # `K0` its entire subnormal band. `jax.scipy.special.gamma` handles every
-    # float width itself, including `float16` and `bfloat16`, so a floating
-    # argument is passed through untouched and keeps its dtype.
-    x_arr = jnp.asarray(x)
-    if not jnp.issubdtype(x_arr.dtype, jnp.inexact):
-        x_arr = x_arr * 1.0
+    # Integers only. `jax.scipy.special.gamma` handles every float width
+    # itself, `float16` and `bfloat16` included, so a floating argument is
+    # passed through untouched and keeps its dtype -- and must be, because
+    # multiplying it by 1.0 would flush a subnormal to zero. See
+    # `promote_integers`.
+    x_arr = promote_integers(x)
     out = jss.gamma(x_arr)
     if jnp.issubdtype(x_arr.dtype, jnp.complexfloating):
         return out
@@ -110,12 +107,7 @@ def _gamma_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, Any
     if jnp.iscomplexobj(jnp.asarray(x)):
         return jax.jvp(lambda v: jss.gamma(jnp.asarray(v)), (x,), (dx,))
     g = gamma(x)
-    # `as_float`, not `* 1.0`: the multiply promotes integers and also flushes a
-    # subnormal float to zero, which is the hazard `spexial._src.dtype` exists
-    # to document. `digamma` is unaffected in practice -- it returns `-inf`
-    # either way -- but the pattern is the one that cost `K0` its whole
-    # subnormal band, so it does not stay in the codebase.
-    x_arr = jnp.asarray(x)
-    if not jnp.issubdtype(x_arr.dtype, jnp.inexact):
-        x_arr = x_arr * 1.0
-    return g, g * digamma(x_arr) * dx
+    # Same promotion as the value above, through the same helper so the two
+    # cannot drift apart -- they already had, once, leaving a comment here that
+    # described a spelling the code no longer used.
+    return g, g * digamma(promote_integers(x)) * dx

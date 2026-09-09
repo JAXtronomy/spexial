@@ -66,6 +66,26 @@ def as_float(x: AnyArrayLike, /, *, keep_weak: bool = False) -> AnyArray:
     return x_arr.astype(target)
 
 
+def promote_integers(x: AnyArrayLike, /) -> AnyArray:
+    """Make integer and boolean input floating, and leave everything else alone.
+
+    The narrower cousin of `as_float`, for callers that want nothing except
+    integer promotion -- `gamma` delegates to a `jax.scipy.special` function
+    that already handles every float width itself, so widening `float16` would
+    only throw away the caller's dtype.
+
+    The point is what it does *not* do. ``x * 1.0`` is the obvious spelling and
+    is wrong for a float: on XLA it flushes a subnormal to zero, which is the
+    hazard this module exists to document and the one that cost `kn.K0` its
+    whole subnormal band. Integers have no subnormal to lose, so they can take
+    the multiply -- and need it, since that is what makes them floats at all.
+    """
+    x_arr = jnp.asarray(x)
+    if jnp.issubdtype(x_arr.dtype, jnp.inexact):
+        return x_arr
+    return x_arr * 1.0
+
+
 def cast_like(out: AnyArray, x: AnyArrayLike, /) -> AnyArray:
     """Return the caller's own floating dtype, whatever width we computed in.
 
