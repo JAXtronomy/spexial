@@ -20,7 +20,7 @@ Every function is tested against a reference implementation — `scipy.special` 
 | `K2e` | `kve` ($v = 2$) | $z > 0$, no upper limit | as `K2`; verified to `DBL_MAX` |
 | `Li` | -- (`mpmath.polylog`) | scalar $z$, integer $n \ge 1$ | rtol $10^{-11}$, atol $10^{-12}$; worst $3.4 \times 10^{-12}$ for $1 \le n \le 20$, $\lvert z \rvert \le 1000$ |
 | `spence` | `spence` | real or complex $z$ | rtol $10^{-12}$, atol $10^{-13}$ vs scipy; worst $1.6 \times 10^{-14}$ real, $2.9 \times 10^{-15}$ complex |
-| `zeta` | `zeta` | $n > 1$, or $n$ a negative integer $> -60$ | rtol $10^{-12}$; worst $8.9 \times 10^{-16}$ |
+| `zeta` | `zeta` | all real $n$ | rtol $10^{-12}$; worst $9 \times 10^{-13}$ near the pole, $9\times10^{-16}$ elsewhere |
 
 ## Per-function limits
 
@@ -48,20 +48,24 @@ Every function is tested against a reference implementation — `scipy.special` 
 
 `Li` : Accepts a scalar `z` only. An array argument raises a broadcasting `TypeError`; use `jax.vmap` ([how](../how-to/use-with-jit-vmap-and-grad.md)). Raises `ValueError` for an order below 1, and for complex `z` — two of the three branches take the real part of a complex intermediate, which is exact for real `z` and would silently discard a genuine imaginary part. A non-integer order, including a whole-number `float` such as `Li(2.0, z)`, is a `TypeError` from the runtime type checker rather than a `ValueError`. For $\lvert z \rvert \ge 2$ the order is capped at **60** by the Bernoulli table the inversion formula needs; past that the result is `nan`. Smaller $\lvert z \rvert$ is unaffected, bounded instead by $\Gamma(n+1)$ overflow above $n \approx 170$. `Li(1, 1)` is the pole and returns `inf`.
 
-`zeta` : Bernoulli numbers are computed from exact `fractions.Fraction` arithmetic, not `jax.scipy.special.bernoulli`. At and above $n = 54$ the result is the constant `1.0`, which is not an approximation: $\zeta(n) - 1 \approx 2^{-n}$ falls below half an eps of 1 once $n > 53$, so every double-precision value from there up _is_ `1.0`. Taking the constant also steps around `jax.scipy.special.zeta`, which returns `nan` above $n \approx 10^{15}$; `spexial` is correct at every magnitude including `inf`, matching SciPy. `jax.grad(zeta)` is meaningful only for $n > 1$; on the negative line it returns a finite value that is not $\zeta'$.
+`zeta` : Bernoulli numbers are computed from exact `fractions.Fraction` arithmetic, not `jax.scipy.special.bernoulli`. At and above $n = 54$ the result is the constant `1.0`, which is not an approximation: $\zeta(n) - 1 \approx 2^{-n}$ falls below half an eps of 1 once $n > 53$, so every double-precision value from there up _is_ `1.0`. Taking the constant also steps around `jax.scipy.special.zeta`, which returns `nan` above $n \approx 10^{15}$; `spexial` is correct at every magnitude including `inf`, matching SciPy. `jax.grad(zeta)` is meaningful except at the negative integers, where the value comes from a table lookup that carries no information about how $\zeta$ varies between them. Elsewhere on the negative line the functional equation is differentiated and the gradient is genuine.
 
 `spence` : Accepts real _and_ complex argument; `jax.scipy.special.spence` is real-only and raises on complex. Its derivative, $\log z/(1-z)$, is supplied analytically — evaluated as the limit $-1$ at $z = 1$, where the closed form is $0/0$, and $-\infty$ at $z = 0$ — which matters beyond speed: JAX's own `spence` differentiates to `nan` across roughly $1 < z < 2$, where `spexial` is exact. **Do not compare against SciPy's complex `spence` near $z = 3 \pm \sqrt3$.** It returns `0.01125` at $3 - \sqrt3$ where the true value is $-0.25186$; `spexial` returns the true value. Use `mpmath.polylog(2, 1 - z)` as the reference at those two points. SciPy's _real_ path is unaffected and agrees everywhere.
 
 ### `zeta` coverage against SciPy
 
-| Input                                | `spexial`   | `scipy.special.zeta` |
-| ------------------------------------ | ----------- | -------------------- |
-| $n > 1$                              | accurate    | accurate             |
-| $0 < n \le 1$ (the critical strip)   | `nan`       | accurate             |
-| negative integer $> -60$             | exact       | accurate             |
-| negative even integer, any magnitude | exactly `0` | `0`                  |
-| negative odd integer $\le -60$       | `nan`       | accurate             |
-| negative non-integer                 | `nan`       | accurate             |
+| Input | `spexial` | how |
+| --- | --- | --- |
+| $n > 1$ | $9\times10^{-16}$ | `jax.scipy.special` |
+| $n \ge 54$ | exactly `1` | constant |
+| $n = 1$ | `inf` | the pole |
+| $0 < n < 1$ (the critical strip) | $9\times10^{-13}$ | eta series |
+| negative integer $> -60$ | exact (0 ulp) | Bernoulli table |
+| negative even integer, any magnitude | exactly `0` | trivial zero |
+| negative odd integer $\le -60$ | $7\times10^{-14}$ | functional equation |
+| negative non-integer | $9\times10^{-16}$ | functional equation |
+
+Every real argument is covered, and SciPy agrees throughout.
 
 ## Reference implementations
 

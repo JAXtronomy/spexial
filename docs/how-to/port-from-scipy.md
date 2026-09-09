@@ -31,16 +31,16 @@ Before you trust a ported call, check the function against [Accuracy and domains
 
 **Is it as accurate?** Not always — the modified Bessel functions in particular are tested to a looser tolerance than SciPy delivers. Check the _Tested to_ column before you assume parity.
 
-**Does it cover the same arguments?** `zeta` and `gamma` each accept less than their SciPy counterparts. The _Supported domain_ column says what, and the `zeta` coverage table says exactly where the two disagree.
+**Does it cover the same arguments?** For the most part yes: `gamma` and `zeta` accept everything their SciPy counterparts do. Check the _Supported domain_ column for the exceptions, which are about representable range rather than coverage — `K0`, `K1` and `K2` underflow above $z \approx 705$, where `K0e`, `K1e` and `K2e` keep working.
 
-In the other direction, two functions cover _more_ than SciPy: `gamma` accepts negative reals and `zeta` accepts negative integers, neither of which `jax.scipy.special` offers.
+In the other direction, `spence` accepts complex input, which SciPy's real path does not, and `K0e`/`K1e`/`K2e` stay accurate to `DBL_MAX`, where `scipy.special.kve` returns `nan`.
 
 ## Expect `nan` where SciPy raised
 
 SciPy raises or warns on some bad input. Traced JAX code cannot raise, so `spexial` returns `nan` or `inf` instead, and that value propagates silently through `jit`, `vmap` and `grad`. If your SciPy code relied on an exception to catch bad input, replace it with an explicit check:
 
 ```pycon
->>> x = sp.zeta(0.5)  # the critical strip: unsupported
+>>> x = sp.K0(-1.0)  # negative argument: outside the domain
 >>> bool(jnp.isnan(x))
 True
 
