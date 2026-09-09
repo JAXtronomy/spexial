@@ -118,3 +118,41 @@ def test_the_crossover_is_continuous(n, k):
     join, which is what keeps the function continuous there.
     """
     np.testing.assert_allclose(sp.comb(n, k), scipy_comb(n, k), rtol=1e-11)
+
+
+@pytest.mark.parametrize(
+    "n", [8.988465674311582e307, 1e308, 1.5e308, float(np.finfo(np.float64).max)]
+)
+def test_n_choose_one_past_the_subnormal_cliff(n):
+    """`C(N, 1) == N` must hold above ``N = 2**1023``.
+
+    `jax.scipy.special.betaln` divides its smaller argument by its larger one,
+    and XLA flushes that quotient to zero the moment it is subnormal -- which
+    drops a term worth exactly the smaller argument, making `comb` a factor of
+    ``e**-2`` low. 86% wrong, silently, at the very top of the range.
+
+    The tolerance is 1e-12 rather than the ulp because the value goes through
+    ``exp`` of a logarithm near 709, and that round trip alone costs about
+    ``709 * eps``, i.e. 1.6e-13. Measured worst here is 3.1e-14.
+    """
+    np.testing.assert_allclose(sp.comb(n, 1.0), n, rtol=1e-12)
+    np.testing.assert_allclose(sp.comb(n, 1.0), scipy_comb(n, 1.0), rtol=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("k", "expected"), [(0.0, 1.0), (1.0, 1e308), (2.0, np.inf), (1e308, 1.0)]
+)
+def test_the_whole_subnormal_band(k, expected):
+    """Every `k` that gives a finite answer at ``N = 1e308``, and one that does not.
+
+    ``k >= 2`` overflows there because ``C(N, 2) ~ N**2 / 2``, so `inf` is the
+    right answer rather than a failure.
+    """
+    got = sp.comb(1e308, k)
+    if np.isinf(expected):
+        assert np.isinf(got)
+    else:
+        np.testing.assert_allclose(got, expected, rtol=1e-12)
+    assert np.isinf(scipy_comb(1e308, k)) or np.allclose(
+        got, scipy_comb(1e308, k), rtol=1e-12
+    )

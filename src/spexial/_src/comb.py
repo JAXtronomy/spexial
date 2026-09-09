@@ -83,11 +83,27 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     #
     # `comb(N, k) = 1 / ((N + 1) B(N - k + 1, k + 1))` has no such subtraction.
     # It is the weaker of the two on small N, where the Beta function's own
-    # argument reduction costs digits, and holds at ~1e-14 from N = 1000 up to
-    # `DBL_MAX / 2` -- see the docs for the ceiling there, which belongs to
-    # `jax.scipy.special.betaln` rather than to this formula.
+    # argument reduction costs digits, and holds at ~1e-14 from N = 1000 to
+    # `DBL_MAX`, given the subnormal correction below.
     log_comb = gammaln(n_safe + 1) - gammaln(k_safe + 1) - gammaln(n_safe - k_safe + 1)
-    from_beta = -betaln(n_safe - k_safe + 1, k_safe + 1) - jnp.log(n_safe + 1)
+    # `jax.scipy.special.betaln` orders its arguments and forms `small / big`.
+    # XLA on CPU flushes that quotient to zero as soon as it is subnormal, and
+    # the term it feeds, `(big + small - 0.5) * log1p(small / big)`, is worth
+    # `small`. Dropping it makes `comb` a factor of `e**-small` low -- 86% for
+    # `comb(N, 1)`, where `small` is 2. The quotient goes subnormal once
+    # `small < big * tiny`, which for `k = 1` is `N > 2**1023`.
+    #
+    # That same limit is where `log1p(h) == h` to the last bit, so the whole of
+    # `algdiv` collapses to its leading term and `-log B = small * log(big) -
+    # lgamma(small)` is exact -- checked against `mpmath` at 400 digits, 0 ulp
+    # at `N = DBL_MAX`, integer and non-integer `k` alike.
+    left, right = n_safe - k_safe + 1, k_safe + 1
+    small, big = jnp.minimum(left, right), jnp.maximum(left, right)
+    flushed = small < big * jnp.finfo(n_safe.dtype).tiny
+    neg_log_beta = jnp.where(
+        flushed, small * jnp.log(big) - gammaln(small), -betaln(left, right)
+    )
+    from_beta = neg_log_beta - jnp.log(n_safe + 1)
     out = jnp.where(
         in_domain, jnp.exp(jnp.where(n_arr > _BETA_FROM, from_beta, log_comb)), 0.0
     )
