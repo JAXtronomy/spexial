@@ -336,14 +336,14 @@ _ROWS: Final = (
         custom_jvp=True,
         derivative="log(z) / (1 - z)",
         cost=Cost(
-            speed=26.6 / 95.7,
-            memory=15.6 / 601.6,
+            speed=55.4 / 277.6,
+            memory=80.0 / 3080.0,
             against="jax.scipy.special.spence",
         ),
         notes=(
             "JAX has had `spence` since before our floor, but it is real-only "
             "and raises on complex input; this accepts both, which is the "
-            "reason the row exists. It also wins on both cost columns -- 3.6x "
+            "reason the row exists. It also wins on both cost columns -- 5.0x "
             "faster on 38.5x less residual -- because the analytic derivative "
             "log(z)/(1-z) is simply the integrand of the definition. The "
             "custom JVP is not merely an optimisation here: `lax.select` "

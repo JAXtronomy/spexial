@@ -18,7 +18,7 @@ import spexial as sp
 ## Which library to reach for
 
 1. **`jax.scipy.special` first.** If it has what you need over the domain you need, use it — it is maintained upstream and generally faster.
-2. **`spexial` when `jax.scipy.special` has a gap.** It has no modified Bessel `K`, no Gegenbauer and no general polylogarithm at any version. Its `zeta` does not take negative arguments; `spexial.zeta` does. Its `spence` is real-only and its gradient is `nan` across roughly `1 < x < 2`. For `gamma` and `spence` the values come _from_ JAX — `spexial` wraps them only to supply a cheaper analytic derivative (4.3x and 3.6x faster, on 3x and 38x less memory).
+2. **`spexial` when `jax.scipy.special` has a gap.** It has no modified Bessel `K`, no Gegenbauer and no general polylogarithm at any version. Its `zeta` does not take negative arguments; `spexial.zeta` does. Its `spence` is real-only and its gradient is `nan` across roughly `1 < x < 2`. For `gamma` and `spence` the values come _from_ JAX — `spexial` wraps them only to supply a cheaper analytic derivative. The saving is mostly **memory**: 3x less residual for `gamma` (at parity on time) and 38x less for `spence` (which is also 5x faster).
 3. **`scipy.special` when you are not in JAX.** `spexial` buys you nothing outside a traced context, and is less accurate for the Bessel functions.
 
 ## What is available

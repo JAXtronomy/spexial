@@ -72,7 +72,7 @@ This is the procedure the library is organised around, and it is driven entirely
 3. **As fast** to differentiate — `cost.speed >= 1.0`.
 4. **As lean** to differentiate — `cost.memory >= 1.0`.
 
-Points 3 and 4 are why `gamma` survived a floor at which it was otherwise redundant: JAX computes the value, but differentiating JAX's implementation costs 4.3x the time and 3x the residual memory of `Gamma'(x) = Gamma(x) psi(x)`. **Memory is usually the deciding column, not speed** — a custom JVP replaces a whole series' worth of saved intermediates with one array, and for `K0` that is 67x less residual against a 2.1x speed-up.
+Points 3 and 4 are why `gamma` survived a floor at which it was otherwise redundant: JAX computes the value, but differentiating JAX's implementation costs 3x the residual memory of `Gamma'(x) = Gamma(x) psi(x)`, at **no** saving in time (measured 1.0x, i.e. parity — an earlier revision of this file claimed 4.3x faster, which was a measurement error). `gamma` is therefore the clearest case of the general rule: **memory is usually the deciding column, not speed** — a custom JVP replaces a whole series' worth of saved intermediates with one array, and for `K0` that is 67x less residual against a 2.0x speed-up. A row that wins on memory alone still earns its place; a row that wins on neither does not.
 
 If a row fails only 3 or 4, it does not get removed — it becomes `Status.DELEGATES`: call upstream for the value so it cannot drift, and keep our `jax.custom_jvp`. That is strictly better than reimplementing.
 

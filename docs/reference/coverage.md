@@ -25,7 +25,7 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 | `Li` | -- | -- | -- | yes | 1.73x (1.7x worse) | 0.00373x (268.0x better) | only here |
 | `eval_gegenbauer` | -- | -- | -- | available | -- | -- | only here |
 | `eval_gegenbauers` | -- | -- | -- | -- | -- | -- | only here |
-| `spence` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.278x (3.6x better) | 0.0259x (38.6x better) | extends upstream |
+| `spence` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.2x (5.0x better) | 0.026x (38.5x better) | extends upstream |
 | `zeta` | yes (all >= 0.7.2) | value + autodiff | -- | -- | 1.15x (1.1x worse) | -- | extends upstream |
 | `comb` | yes (>= 0.10.2) | value + autodiff | -- | -- | 0.97x (1.0x better) | -- | redundant above floor |
 | `gamma` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 1.03x (1.0x worse) | 0.333x (3.0x better) | delegates + our JVP |
@@ -90,11 +90,11 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 :   No counterpart anywhere: returns every order up to n in one pass, which is the point of it.
 
 `spence`
-:   JAX has had `spence` since before our floor, but it is real-only and raises on complex input; this accepts both, which is the reason the row exists. It also wins on both cost columns -- 3.6x faster on 38.5x less residual -- because the analytic derivative log(z)/(1-z) is simply the integrand of the definition. The custom JVP is not merely an optimisation here: `lax.select` evaluates every branch, so differentiating the implementation yields `nan` -- and JAX's own `spence` differentiates to `nan` across roughly 1 < x < 2, where ours is exact. Contributed by Colm Talbot, translated from scipy's Cython implementation.
+:   JAX has had `spence` since before our floor, but it is real-only and raises on complex input; this accepts both, which is the reason the row exists. It also wins on both cost columns -- 5.0x faster on 38.5x less residual -- because the analytic derivative log(z)/(1-z) is simply the integrand of the definition. The custom JVP is not merely an optimisation here: `lax.select` evaluates every branch, so differentiating the implementation yields `nan` -- and JAX's own `spence` differentiates to `nan` across roughly 1 < x < 2, where ours is exact. Contributed by Colm Talbot, translated from scipy's Cython implementation.
 
     Derivative: `log(z) / (1 - z)`.
 
-    Gradient cost vs jax.scipy.special.spence: speed 0.278x (3.6x better), memory 0.0259x (38.6x better).
+    Gradient cost vs jax.scipy.special.spence: speed 0.2x (5.0x better), memory 0.026x (38.5x better).
 
 `zeta`
 :   `jax.scipy.special.zeta` is the Hurwitz form and returns `nan` for negative arguments; `spexial` adds the negative integers via the functional equation. scipy raises `NotImplementedError` for the Riemann form on JAX arrays. No closed form for zeta', so no custom JVP.
