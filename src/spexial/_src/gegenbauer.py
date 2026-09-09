@@ -13,7 +13,7 @@ from .custom_types import AnyArray, AnyArrayLike, ScalarLike, Vector
 _Carry: TypeAlias = tuple[ScalarLike, AnyArray, AnyArray, AnyArray]
 
 
-def C0(x: AnyArrayLike, /) -> AnyArray:  # noqa: N802
+def C0(x: AnyArrayLike, /) -> AnyArray:
     """Return the Gegenbauer polynomial of order 0, which is 1.
 
     It still has to broadcast: returning the Python scalar ``1.0`` would drop
@@ -33,7 +33,7 @@ def C0(x: AnyArrayLike, /) -> AnyArray:  # noqa: N802
     return jnp.asarray(x) * 0.0 + 1.0
 
 
-def C1(alpha: ScalarLike, x: AnyArrayLike, /) -> AnyArray:  # noqa: N802
+def C1(alpha: ScalarLike, x: AnyArrayLike, /) -> AnyArray:
     r"""Return the Gegenbauer polynomial of order 1, :math:`2 \alpha x`.
 
     Examples
@@ -50,7 +50,7 @@ def C1(alpha: ScalarLike, x: AnyArrayLike, /) -> AnyArray:  # noqa: N802
     return 2 * jnp.asarray(alpha) * jnp.asarray(x) * 1.0
 
 
-def _C_n_plus_1(carry: _Carry, n: AnyArray) -> tuple[_Carry, AnyArray]:  # noqa: N802
+def _C_n_plus_1(carry: _Carry, n: AnyArray) -> tuple[_Carry, AnyArray]:
     """Apply the three-term Gegenbauer recurrence once."""
     alpha, x, Cn, Cn_minus_1 = carry
     accumulate = (2 * (n + alpha) * x * Cn - (n + 2 * alpha - 1) * Cn_minus_1) / (n + 1)

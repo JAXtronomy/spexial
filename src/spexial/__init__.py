@@ -11,9 +11,9 @@ Two exports have **no** `scipy.special` counterpart:
   *and every lower degree*, as a by-product of the recurrence.
 
 The remaining exports do have one, but are not always drop-in replacements --
-`gamma` is real-only, `zeta` covers only part of the negative half-line, and
-`K0`/`K1`/`K2` are accurate to ~1e-8 rather than to machine precision. Each
-docstring states its own domain and accuracy.
+`zeta` covers only part of the negative half-line, and `K0`/`K1`/`K2` are
+accurate to ~1e-8 rather than to machine precision. Each docstring states its
+own domain and accuracy.
 
 Examples
 --------
@@ -48,6 +48,3 @@ with install_import_hook("spexial"):
     from ._src.spence import spence
     from ._src.zeta import zeta
     from ._version import version as __version__
-
-# Clean up the namespace
-del install_import_hook

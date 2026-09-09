@@ -56,7 +56,7 @@ def _bernoulli_poly(n: int, x: AnyArray) -> AnyArray:
     )
 
 
-def Li(n: int, z: ScalarLike, /) -> Scalar:  # noqa: N802
+def Li(n: int, z: ScalarLike, /) -> Scalar:
     r"""Compute the polylogarithm :math:`\mathrm{Li}_n(z)`.
 
     There is no `scipy.special` counterpart; `mpmath.polylog` is the reference

@@ -15,16 +15,11 @@ from typing import Any, Final, Literal
 
 from jaxtyping import install_import_hook as _install_import_hook
 
-_RUNTIME_TYPECHECKER: str | Literal[False] | None
-match os.getenv("SPEXIAL_ENABLE_RUNTIME_TYPECHECKING", "False"):
-    case "False":
-        _RUNTIME_TYPECHECKER = False
-    case "None":
-        _RUNTIME_TYPECHECKER = None
-    case _ as _name:  # any other value names the typechecker
-        _RUNTIME_TYPECHECKER = _name
-
-RUNTIME_TYPECHECKER: Final[str | Literal[False] | None] = _RUNTIME_TYPECHECKER
+_env = os.getenv("SPEXIAL_ENABLE_RUNTIME_TYPECHECKING", "False")
+RUNTIME_TYPECHECKER: Final[str | Literal[False] | None] = {
+    "False": False,
+    "None": None,
+}.get(_env, _env)
 """Runtime type checking variable "SPEXIAL_ENABLE_RUNTIME_TYPECHECKING".
 
 Set to "False" to disable runtime typechecking (default).

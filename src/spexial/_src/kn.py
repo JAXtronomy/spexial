@@ -22,7 +22,9 @@ _SMALL_Z: Final = 9.0
 _MAX_Z: Final = 709.0
 """Above this `jax.scipy.special.i0` overflows, so `K1` is taken to underflow.
 
-`scipy.special.kn` also returns 0 from ~700 upwards, so this matches it.
+`K0` underflows near z = 706 regardless, which is the real ceiling. SciPy is not
+uniform here: `kn` underflows at ~698 while `k0`/`k1` return denormals out to
+~745, so beyond ~706 this package returns 0 where `k0`/`k1` still have a value.
 """
 
 _N_SMALL: Final = 30
@@ -32,7 +34,7 @@ _N_LARGE: Final = 10
 """Terms in the asymptotic series; enough for ~1e-8 relative accuracy at z > 9."""
 
 
-def _K0_small(z: AnyArray) -> AnyArray:  # noqa: N802
+def _K0_small(z: AnyArray) -> AnyArray:
     """Ascending series for `K0`; see Zhang & Jin, *Special Functions* (1996)."""
     k = jnp.arange(1.0, _N_SMALL + 1.0)
     harmonic = jnp.cumsum(1.0 / k)
@@ -44,7 +46,7 @@ def _K0_small(z: AnyArray) -> AnyArray:  # noqa: N802
     )
 
 
-def _K0_large(z: AnyArray) -> AnyArray:  # noqa: N802
+def _K0_large(z: AnyArray) -> AnyArray:
     """Asymptotic expansion for `K0`, via the ``1 / (2 z I0(z))`` form."""
     k = jnp.arange(1.0, _N_LARGE + 1.0)
     prod = jnp.cumprod(-(2.0 * k - 1.0) / (2.0 * k) * (2.0 * k - 1.0) ** 2.0)
@@ -55,7 +57,7 @@ def _K0_large(z: AnyArray) -> AnyArray:  # noqa: N802
 
 
 @jax.custom_jvp
-def K0(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
+def K0(z: RealArrayLike, /) -> AnyArray:
     """Compute the modified Bessel function of the second kind of order 0.
 
     Equivalent to ``scipy.special.kn(0, z)``. See Zhang and Jin,
@@ -99,7 +101,7 @@ def K0(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
 
 
 @jax.custom_jvp
-def K1(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
+def K1(z: RealArrayLike, /) -> AnyArray:
     """Compute the modified Bessel function of the second kind of order 1.
 
     Obtained from `K0` through the Wronskian
@@ -116,7 +118,7 @@ def K1(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
     -------
     Array
         Value(s) of :math:`K_1(z)`, accurate to ~3e-8 relative. Underflows to 0
-        for ``z >= 700``, where `jax.scipy.special.i0` overflows.
+        just below ``z = 709.8``, where `jax.scipy.special.i0` overflows.
 
     Examples
     --------
@@ -141,7 +143,7 @@ def K1(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
 
 
 @jax.custom_jvp
-def K2(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
+def K2(z: RealArrayLike, /) -> AnyArray:
     """Compute the modified Bessel function of the second kind of order 2.
 
     Obtained from the recurrence :math:`K_2(z) = K_0(z) + (2/z) K_1(z)`.
@@ -199,27 +201,21 @@ def K2(z: RealArrayLike, /) -> AnyArray:  # noqa: N802
 
 
 @K0.defjvp
-def _K0_jvp(  # noqa: N802
-    primals: tuple[Any], tangents: tuple[Any]
-) -> tuple[AnyArray, AnyArray]:
+def _K0_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
     """K0'(z) = -K1(z)."""
     (z,), (dz,) = primals, tangents
     return K0(z), -K1(z) * dz
 
 
 @K1.defjvp
-def _K1_jvp(  # noqa: N802
-    primals: tuple[Any], tangents: tuple[Any]
-) -> tuple[AnyArray, AnyArray]:
+def _K1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
     """K1'(z) = -(K0(z) + K2(z)) / 2."""
     (z,), (dz,) = primals, tangents
     return K1(z), -0.5 * (K0(z) + K2(z)) * dz
 
 
 @K2.defjvp
-def _K2_jvp(  # noqa: N802
-    primals: tuple[Any], tangents: tuple[Any]
-) -> tuple[AnyArray, AnyArray]:
+def _K2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
     """K2'(z) = -K1(z) - (2/z) K2(z)."""
     (z,), (dz,) = primals, tangents
     z_arr = jnp.asarray(z) * 1.0

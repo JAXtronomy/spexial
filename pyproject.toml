@@ -269,6 +269,7 @@ ignore = [
   "F821",    # undefined name '...' <- jaxtyping
   "FIX002",  # Line contains TODO
   "ISC001",  # Conflicts with formatter
+  "N802",    # Function name should be lowercase <- math notation (K0, C1)
   "N803",    # Argument name should be lowercase <- math notation (N, K0)
   "N806",    # Variable in function should be lowercase <- math notation
   "PD",      # Pandas

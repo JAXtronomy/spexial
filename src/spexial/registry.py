@@ -12,14 +12,7 @@ Examples
 
 """
 
-__all__ = [
-    "JAX_FLOOR",
-    "REGISTRY",
-    "Coverage",
-    "Status",
-    "Support",
-    "render_markdown",
-]
+__all__ = ["JAX_FLOOR", "REGISTRY", "Coverage", "Status", "Support", "render_markdown"]
 
 from ._src.registry import (
     JAX_FLOOR,

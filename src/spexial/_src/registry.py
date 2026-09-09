@@ -124,9 +124,6 @@ class Coverage:
     jax_support: Support
     """What the JAX equivalent can do."""
 
-    scipy_name: str | None
-    """Equivalent in `scipy.special`, or `None`."""
-
     scipy_array_api: Support
     """What `scipy.special` delivers *on JAX arrays* with `SCIPY_ARRAY_API=1`.
 
@@ -174,7 +171,6 @@ _ROWS: Final = (
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
-        scipy_name="k0",
         scipy_array_api=Support.VALUE,
         status=Status.UNIQUE,
         custom_jvp=True,
@@ -195,7 +191,6 @@ _ROWS: Final = (
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
-        scipy_name="k1",
         scipy_array_api=Support.VALUE,
         status=Status.UNIQUE,
         custom_jvp=True,
@@ -210,7 +205,6 @@ _ROWS: Final = (
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
-        scipy_name="kn",
         scipy_array_api=Support.NONE,
         status=Status.UNIQUE,
         custom_jvp=True,
@@ -228,7 +222,6 @@ _ROWS: Final = (
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
-        scipy_name=None,
         scipy_array_api=Support.NONE,
         status=Status.UNIQUE,
         custom_jvp=True,
@@ -253,7 +246,6 @@ _ROWS: Final = (
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
-        scipy_name="eval_gegenbauer",
         scipy_array_api=Support.NONE,
         status=Status.UNIQUE,
         custom_jvp=False,
@@ -273,7 +265,6 @@ _ROWS: Final = (
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
-        scipy_name=None,
         scipy_array_api=Support.NONE,
         status=Status.UNIQUE,
         custom_jvp=False,
@@ -289,7 +280,6 @@ _ROWS: Final = (
         jax_name="spence",
         jax_since="*",
         jax_support=Support.AUTODIFF,
-        scipy_name="spence",
         scipy_array_api=Support.AUTODIFF,
         status=Status.EXTENDS,
         custom_jvp=True,
@@ -318,7 +308,6 @@ _ROWS: Final = (
         jax_name="zeta",
         jax_since="*",
         jax_support=Support.AUTODIFF,
-        scipy_name="zeta",
         scipy_array_api=Support.NONE,
         status=Status.EXTENDS,
         custom_jvp=False,
@@ -339,7 +328,6 @@ _ROWS: Final = (
         jax_name="comb",
         jax_since="0.10.2",
         jax_support=Support.AUTODIFF,
-        scipy_name="comb",
         scipy_array_api=Support.NONE,
         status=Status.REDUNDANT_ABOVE_FLOOR,
         custom_jvp=False,
@@ -357,7 +345,6 @@ _ROWS: Final = (
         jax_name="gamma",
         jax_since="*",
         jax_support=Support.AUTODIFF,
-        scipy_name="gamma",
         scipy_array_api=Support.AUTODIFF,
         status=Status.DELEGATES,
         custom_jvp=True,
@@ -402,10 +389,8 @@ def _ratio(value: float | None) -> str:
     """Format a `Cost` ratio: `0.48x (2.1x better)`, or `--` when unmeasured."""
     if value is None:
         return "--"
-    better = 1.0 / value
-    direction = "better" if better > 1 else "worse"
-    magnitude = max(better, 1 / better)
-    return f"{value:.3g}x ({magnitude:.1f}x {direction})"
+    direction = "better" if value < 1 else "worse"
+    return f"{value:.3g}x ({max(value, 1 / value):.1f}x {direction})"
 
 
 def render_markdown() -> str:
