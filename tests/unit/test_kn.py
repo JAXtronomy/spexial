@@ -622,3 +622,25 @@ def test_signed_zero_is_still_the_pole():
     """`-0.0` is the one negative bit pattern that is not out of domain."""
     assert jnp.isinf(sp.K0(-0.0))
     assert jnp.isinf(sp.K0(0.0))
+
+
+@pytest.mark.parametrize("z", [1e-38, 5e-39, 3e-39])
+def test_k1_in_the_subnormal_band_where_one_over_z_still_fits(z):
+    """`K1(z) -> 1/z`, and in float32 that is representable below `tiny`.
+
+    The Wronskian form divides by `z * i0e(z)`, which flushes to zero for a
+    subnormal `z` and made the quotient `inf`. The band where this matters is a
+    factor of about two wide -- `tiny * max` is ~2 in any IEEE format -- but in
+    float32 it is the reachable 2.9e-39 to 1.2e-38.
+    """
+    argument = jnp.asarray(z, dtype=jnp.float32)
+    got = sp.K1(argument)
+    assert got.dtype == jnp.float32
+    np.testing.assert_allclose(got, float(mp.besselk(1, float(argument))), rtol=1e-5)
+
+
+@pytest.mark.parametrize("z", [2e-39, 1e-40, 1e-310])
+def test_k1_is_infinite_only_where_one_over_z_overflows(z):
+    """Past the band the true value exceeds the dtype, and `inf` is correct."""
+    dtype = jnp.float32 if z > 1e-45 else jnp.float64
+    assert jnp.isinf(sp.K1(jnp.asarray(z, dtype=dtype)))

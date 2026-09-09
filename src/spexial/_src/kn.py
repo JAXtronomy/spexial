@@ -23,6 +23,28 @@ _INT_OF_WIDTH: Final = {2: jnp.int16, 4: jnp.int32, 8: jnp.int64}
 """Signed integer of the same width as each float dtype, for `_log_no_flush`."""
 
 
+def _positive_subnormal(z: AnyArray) -> AnyArray:
+    """Mask of the arguments XLA has flushed to zero but that are not zero.
+
+    The float tests cannot do this. XLA compares a subnormal as if it were
+    zero, so ``z > 0`` is False for exactly these values and ``z == 0.0`` is
+    True for them -- which is how a subnormal argument reached `K1`'s pole
+    guard and came back ``inf``.
+    """
+    bits = lax.bitcast_convert_type(z, _INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
+    return (bits > 0) & (z < jnp.finfo(z.dtype).tiny)
+
+
+def _exactly_zero(z: AnyArray) -> AnyArray:
+    """``z == 0.0`` done on the bits, so a subnormal is not mistaken for zero.
+
+    Only two bit patterns are zero, ``+0.0`` and ``-0.0``; the latter is the
+    single integer more negative than every other float.
+    """
+    bits = lax.bitcast_convert_type(z, _INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
+    return (bits == 0) | (bits == jnp.iinfo(bits.dtype).min)
+
+
 def _log_no_flush(z: AnyArray) -> AnyArray:
     """``log(z)``, including where ``z`` is subnormal and XLA has flushed it.
 
@@ -239,7 +261,7 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
     # `1/0 - i1e(0) * K0e(0) == inf - 0 * inf == nan` there. At +inf it is
     # `(0 - 0 * 0) / 0 == nan` for the same reason `K0e` needs a guard.
     # Substitute both limits.
-    at_zero, at_inf = z_arr == 0.0, z_arr == jnp.inf
+    at_zero, at_inf = _exactly_zero(z_arr), z_arr == jnp.inf
     # `z_arr` itself, not a substituted `z_safe`. The degenerate points are
     # overwritten by the `where` below, so the substitution bought nothing --
     # and it cost a great deal: `K0e(z_safe)` is a *different* subgraph from the
@@ -253,6 +275,14 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
     # the unmultiplied form returned exactly 0 from there up. Multiplied
     # through, the numerator tends to 1/2 and the denominator to sqrt(z/2pi).
     k1e = (1.0 - z_safe * i1e(z_safe) * K0e(z_safe)) / (z_safe * i0e(z_safe))
+    # Below `tiny` the denominator flushes to zero and the quotient is `inf`,
+    # where the true value is `1/z` -- still representable for the factor of
+    # about two between `tiny` and `1/max`, which in float32 is the reachable
+    # band 2.9e-39 to 1.2e-38. `e^z K_1(z) -> 1/z` there to relative order
+    # `z**2`, and the logarithm is the one form that can read a flushed
+    # argument at all. Past that band `1/z` overflows and `inf` is correct.
+    subnormal = _positive_subnormal(z_arr)
+    k1e = jnp.where(subnormal, jnp.exp(-_log_no_flush(z_arr)), k1e)
     out = jnp.where(at_zero, jnp.inf, jnp.where(at_inf, 0.0, k1e))
     return _cast_like(out, z)
 

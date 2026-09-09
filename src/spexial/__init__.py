@@ -11,15 +11,20 @@ Two exports have **no** `scipy.special` counterpart:
   *and every lower degree*, as a by-product of the recurrence.
 
 The remaining exports do have one, but are not always drop-in replacements --
-`zeta` covers only part of the negative half-line, and `K0`/`K1`/`K2` are
-accurate to ~1e-8 rather than to machine precision. Each docstring states its
-own domain and accuracy.
+`K0`/`K1`/`K2` are accurate to ~2e-7 rather than to machine precision, and
+`comb` is the ``exact=False`` variant, so it returns a float that is only
+close to the integer. Each docstring states its own domain and accuracy.
 
 Examples
 --------
 >>> import spexial as sp
->>> float(sp.comb(5, 2))
-10.00000000000002
+>>> round(float(sp.comb(5, 2)), 9)
+10.0
+
+`comb` is inexact, so the value is near 10 rather than exactly 10:
+
+>>> float(sp.comb(5, 2)) == 10.0
+False
 
 """
 
