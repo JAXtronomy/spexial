@@ -19,7 +19,7 @@ Every function is tested against a reference implementation — `scipy.special` 
 | `K1e` | `k1e` | $z > 0$, no upper limit | as `K1`; verified to `DBL_MAX` |
 | `K2e` | `kve` ($v = 2$) | $z > 0$, no upper limit | as `K2`; verified to `DBL_MAX` |
 | `Li` | -- (`mpmath.polylog`) | scalar $z$, integer $n \ge 1$ | rtol $10^{-11}$, atol $10^{-12}$; worst $3.4 \times 10^{-12}$ for $1 \le n \le 20$, $\lvert z \rvert \le 1000$ |
-| `spence` | `spence` | real or complex $z$ | rtol $10^{-12}$, atol $10^{-13}$ vs scipy; worst $3.4 \times 10^{-14}$ |
+| `spence` | `spence` | real or complex $z$ | rtol $10^{-12}$, atol $10^{-13}$ vs scipy; worst $1.6 \times 10^{-14}$ real, $2.9 \times 10^{-15}$ complex |
 | `zeta` | `zeta` | $n > 1$, or $n$ a negative integer $> -60$ | rtol $10^{-12}$; worst $8.9 \times 10^{-16}$ |
 
 ## Per-function limits
@@ -42,7 +42,7 @@ In **float32** the cross-over moves to $z = 4.65$ rather than 9. The ascending s
 
 `zeta` : Bernoulli numbers are computed from exact `fractions.Fraction` arithmetic, not `jax.scipy.special.bernoulli`. At and above $n = 54$ the result is the constant `1.0`, which is not an approximation: $\zeta(n) - 1 \approx 2^{-n}$ falls below half an eps of 1 once $n > 53$, so every double-precision value from there up _is_ `1.0`. Taking the constant also steps around `jax.scipy.special.zeta`, which returns `nan` above $n \approx 10^{15}$; `spexial` is correct at every magnitude including `inf`, matching SciPy. `jax.grad(zeta)` is meaningful only for $n > 1$; on the negative line it returns a finite value that is not $\zeta'$.
 
-`spence` : Accepts real _and_ complex argument; `jax.scipy.special.spence` is real-only and raises on complex. Its derivative, $\log z/(1-z)$, is supplied analytically — evaluated as the limit $-1$ at $z = 1$, where the closed form is $0/0$, and $-\infty$ at $z = 0$ — which matters beyond speed: JAX's own `spence` differentiates to `nan` across roughly $1 < z < 2$, where `spexial` is exact. Translated from SciPy's Cython implementation.
+`spence` : Accepts real _and_ complex argument; `jax.scipy.special.spence` is real-only and raises on complex. Its derivative, $\log z/(1-z)$, is supplied analytically — evaluated as the limit $-1$ at $z = 1$, where the closed form is $0/0$, and $-\infty$ at $z = 0$ — which matters beyond speed: JAX's own `spence` differentiates to `nan` across roughly $1 < z < 2$, where `spexial` is exact. Translated from SciPy's Cython implementation — including, until this was found, a removable $0/0$ it contains: the accelerated series about $z = 1$ divides by $1 + 4t + t^2$ ($t = 1 - z$), which vanishes at Spence argument $3 - \sqrt3$, and again at $3 + \sqrt3$ through the reflected branch. `spexial` falls back to the defining series $\sum t^n/n^2$ where that denominator is small; SciPy's **complex** `spence` still returns `0.01125` at $3 - \sqrt3$ against a true $-0.25186$, so `mpmath` is the reference there, not SciPy. SciPy's _real_ path is Cephes and is unaffected.
 
 ### `zeta` coverage against SciPy
 

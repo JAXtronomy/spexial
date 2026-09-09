@@ -14,6 +14,7 @@ import sys
 import jax
 import jax.numpy as jnp
 import jax.scipy.special as jss
+import mpmath as mp
 import numpy as np
 import pytest
 from hypothesis import example, given, strategies as st
@@ -36,10 +37,19 @@ def test_spence_matches_scipy(x, phi):
     directly would straddle it and compare two different branches.
     """
     z = x * np.exp(1j * phi)
-    # rtol was 1e-5 here, eight orders looser than the measured worst case
-    # of 3.4e-14 -- slack that large would let the function be 1e8x wrong
-    # and still pass.
-    np.testing.assert_allclose(spence(z), scipy_spence(z), rtol=1e-12, atol=1e-13)
+    # SciPy is not a valid reference near 3 +- sqrt(3): its *complex* spence is
+    # the series this module was translated from, and shares the removable 0/0
+    # that `_series_about_one` now guards -- `scipy.special.spence(3 - sqrt(3) +
+    # 0j)` returns 0.01125 against a true -0.25186. Its *real* path is Cephes
+    # and is correct, so only the complex comparison is skipped. `mpmath` covers
+    # the excluded neighbourhood in `test_spence_at_the_removable_singularity`
+    # and in the mpmath parity suite.
+    if min(abs(z - (3 - np.sqrt(3))), abs(z - (3 + np.sqrt(3)))) > 0.05:
+        np.testing.assert_allclose(spence(z), scipy_spence(z), rtol=1e-12, atol=1e-13)
+    # rtol was 1e-5 here, seven orders looser than the measured worst case of
+    # 1.6e-14 -- slack that large would let the function be 1e7x wrong and still
+    # pass. (Before the root fix the true worst was 1.9e-12, so this assertion
+    # was latently failing, not merely slack.)
     np.testing.assert_allclose(spence(x), scipy_spence(x), rtol=1e-12, atol=1e-13)
 
 
@@ -155,3 +165,24 @@ def test_dtype_is_preserved(dtype, value, z):
     arg = complex(z, value.imag) if isinstance(value, complex) else z
     got = spence(jnp.asarray(arg, dtype=dtype))
     assert got.dtype == jnp.dtype(dtype)
+
+
+@pytest.mark.parametrize("z", [3 - np.sqrt(3), 3 + np.sqrt(3)])
+@pytest.mark.parametrize("delta", [0.0, 1e-8, -1e-8, 1e-4, -1e-4, 1e-2])
+def test_spence_at_the_removable_singularity(z, delta):
+    """REGRESSION: `spence(3 - sqrt(3))` was **59% wrong**.
+
+    `_series_about_one`'s accelerated form divides by `1 + 4t + t**2` with
+    `t = 1 - z`, which vanishes at `t = -2 + sqrt(3)`. The numerator vanishes
+    too, so the quotient is 0/0 and the relative error grows as ~1e-16/|denom|:
+    5.9e-1 at the root, and still 1.0e-8 a whole 1e-8 away. The second point,
+    `3 + sqrt(3)`, reaches the same root through the reflected branch, since
+    `z / (z - 1)` maps it onto `3 - sqrt(3)`.
+
+    Checked against mpmath, not SciPy: SciPy's *complex* spence is the code this
+    was translated from and returns 0.01125 here.
+    """
+    point = z + delta
+    with mp.workdps(40):
+        expected = float(mp.re(mp.polylog(2, 1 - mp.mpf(point))))
+    np.testing.assert_allclose(spence(point), expected, rtol=1e-13)

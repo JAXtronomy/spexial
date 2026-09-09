@@ -75,8 +75,27 @@ def _series_about_one(z: AnyArray) -> AnyArray:
 
     res *= 4 * z**2
     res += 4 * z + 5.75 * z**2 + 3 * (1 - z**2) * jnp.log1p(-z)
-    res /= 1 + 4 * z + z**2
-    return res
+
+    # The accelerated form divides by `1 + 4z + z**2`, which vanishes at
+    # `z = -2 +- sqrt(3)`. Only the first root is reachable -- both callers pass
+    # |z| < 1 -- and it sits at z = -0.2679, i.e. Spence argument 3 - sqrt(3),
+    # and again at 3 + sqrt(3) through the reflected branch. The numerator
+    # vanishes there too, so the quotient is 0/0 and the relative error grows as
+    # ~1e-16 / |denominator|: at the root itself `spence(3 - sqrt(3))` was
+    # **59% wrong**, and still 1e-8 wrong a whole 1e-8 away. `scipy.special`'s
+    # *complex* spence -- which this was translated from -- has the same defect,
+    # so a complex parity test against SciPy agrees on the wrong answer; its
+    # real path is Cephes and is unaffected, which is why real parity tests only
+    # caught it as a tolerance overshoot.
+    #
+    # Near the root, fall back to the defining series `Li_2(z) = sum z^n / n^2`.
+    # It is exact there for a different reason than the accelerated form is fast
+    # elsewhere: |z| <= 0.42 wherever the denominator is small, so 499 terms
+    # converge far below machine precision.
+    denom = 1 + 4 * z + z**2
+    near_root = jnp.abs(denom) < 0.5
+    plain = jnp.sum(z**nn / nn**2)
+    return jnp.where(near_root, plain, res / jnp.where(near_root, 1.0, denom))
 
 
 def _series_reflected(z: AnyArray) -> AnyArray:
