@@ -1,7 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="spexial">
   <title>spexial</title>
   <defs>
-    <linearGradient id="jax" x1="0" y1="0" x2="1" y2="1">
+    <!-- The axis runs along the glyph, not across its bounding box. In
+         objectBoundingBox units a corner-to-corner ramp puts its far end in the
+         notch under the bar, which is empty, so only the first two thirds of
+         the ramp ever landed on ink and the mark read as blue. Anchored in user
+         space from the right end of the bar to the foot of the stem, visible
+         ink spans offsets 0.08 to 0.94 and every stop shows. -->
+    <linearGradient id="jax" gradientUnits="userSpaceOnUse" x1="48" y1="12" x2="18" y2="52">
       <stop offset="0" stop-color="#26a69a"/>
       <stop offset="0.5" stop-color="#5e97f6"/>
       <stop offset="1" stop-color="#9c27b0"/>
