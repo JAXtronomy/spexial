@@ -6,8 +6,6 @@ Directions for specific tasks. These assume you already know what you want to do
 - [How to use spexial with jit, vmap and grad](use-with-jit-vmap-and-grad.md) — broadcasting, static integer parameters, the `Li` exception, and the one gradient you should not trust.
 - [How to port code from `scipy.special`](port-from-scipy.md) — what swaps cleanly, what is less accurate, and what has no counterpart.
 
+- [How to choose between `spexial` and `jax.scipy.special`](choose-between-spexial-and-jax.md) — the four functions where both libraries have something, and which to reach for.
+
 For the exact domain and tolerance of any function, see [Accuracy and domains](../reference/accuracy-and-domains.md).
-
-## Not yet written
-
-- How to choose between `spexial` and `jax.scipy.special` for a given function.

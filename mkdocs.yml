@@ -97,20 +97,25 @@ nav:
   - Tutorials:
       - "tutorials/index.md"
       - Compute the Stefan-Boltzmann constant: "tutorials/stefan-boltzmann.md"
+      - Check Gegenbauer orthogonality: "tutorials/gegenbauer-orthogonality.md"
   - How-to guides:
       - "how-to/index.md"
       - How to enable double precision: "how-to/enable-double-precision.md"
       - How to use spexial with jit, vmap and grad: "how-to/use-with-jit-vmap-and-grad.md"
       - How to port code from scipy.special: "how-to/port-from-scipy.md"
+      - How to choose between spexial and jax: "how-to/choose-between-spexial-and-jax.md"
   - Reference:
       - "reference/index.md"
       - Coverage: "reference/coverage.md"
       - API reference: "reference/api.md"
       - Accuracy and domains: "reference/accuracy-and-domains.md"
       - Conventions: "reference/conventions.md"
+      - Errors: "reference/errors.md"
   - Explanation:
       - "explanation/index.md"
       - About precision: "explanation/precision.md"
       - About domain edges: "explanation/edges.md"
+      - Why not upstream: "explanation/why-not-upstream.md"
+      - About the algorithms: "explanation/algorithms.md"
   - About:
       - Contributing: "about/contributing.md"
