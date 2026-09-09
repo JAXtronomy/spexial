@@ -57,6 +57,35 @@ def C1(alpha: AnyArrayLike, x: AnyArrayLike, /) -> AnyArray:
     return 2 * jnp.asarray(alpha) * jnp.asarray(x) * 1.0
 
 
+def _unify_dtypes(alpha: AnyArrayLike, x: AnyArrayLike, /) -> tuple[AnyArray, AnyArray]:
+    """Put `alpha` and `x` on their common dtype, leaving their shapes alone.
+
+    `jnp.broadcast_arrays` unifies *shapes* but not *dtypes*, and the recurrence
+    needs both: `C0` follows `x` while `C1` follows the promotion of the two, so
+    a float64 `alpha` against a float32 `x` gives the `lax.scan` carry one dtype
+    going in and another coming out. That surfaces as "scan body function carry
+    input and carry output must have equal types", naming neither the function
+    nor the argument at fault, and only from ``n >= 2`` -- orders 0 and 1 never
+    reach the scan, so the break looks arbitrary.
+
+    Separate from `_seed` because `eval_gegenbauers` needs the dtype half
+    without the shape half: its documented return shape is ``(n + 1,)``, which a
+    broadcast `alpha` would silently change.
+
+    Only when the dtypes actually differ: an unconditional `astype` strips
+    *weak* typing, which is deliberately preserved here -- see `C0`, written as
+    ``x * 0 + 1`` rather than `ones_like` for exactly that reason. Casting
+    regardless turned ``eval_gegenbauer(3, 0.5, 0.25)`` from a weak float64 into
+    a strong one, changing how the result promotes downstream.
+    """
+    alpha_arr = jnp.asarray(alpha) * 1.0
+    x_arr = jnp.asarray(x) * 1.0
+    if alpha_arr.dtype != x_arr.dtype:
+        dtype = jnp.result_type(alpha_arr, x_arr)
+        alpha_arr, x_arr = alpha_arr.astype(dtype), x_arr.astype(dtype)
+    return alpha_arr, x_arr
+
+
 def _seed(alpha: AnyArrayLike, x: AnyArrayLike, /) -> tuple[AnyArray, AnyArray]:
     """Broadcast `alpha` against `x` so the recurrence carry is shape-stable.
 
@@ -77,21 +106,9 @@ def _seed(alpha: AnyArrayLike, x: AnyArrayLike, /) -> tuple[AnyArray, AnyArray]:
     # n >= 2 dies" signature as the shape mismatch above. Promote both to their
     # common type first. Only strong dtypes trigger it; a weakly-typed Python
     # float follows `x`, which is why it went unnoticed.
-    alpha_arr = jnp.asarray(alpha) * 1.0
-    x_arr = jnp.asarray(x) * 1.0
-    # Only when they actually differ: an unconditional `astype` strips *weak*
-    # typing, and weak types are deliberately preserved here -- see `C0`, which
-    # is written as `x * 0 + 1` rather than `ones_like` for exactly that reason.
-    # Casting regardless turned `eval_gegenbauer(3, 0.5, 0.25)` from a weak
-    # float64 into a strong one, which changes how the result promotes against
-    # anything narrower downstream.
-    if alpha_arr.dtype != x_arr.dtype:
-        dtype = jnp.result_type(alpha_arr, x_arr)
-        alpha_arr = alpha_arr.astype(dtype)
-        x_arr = x_arr.astype(dtype)
-    # `tuple(...)`: `jnp.broadcast_arrays` returns a list, which the runtime type
-    # checker rejects against the annotation.
-    return tuple(jnp.broadcast_arrays(alpha_arr, x_arr))
+    # `jnp.broadcast_arrays` returns a list, which the runtime type checker
+    # rejects against the annotation, hence `tuple(...)`.
+    return tuple(jnp.broadcast_arrays(*_unify_dtypes(alpha, x)))
 
 
 def _at_infinity(n: int, alpha: AnyArray, x: AnyArray, value: AnyArray) -> AnyArray:
@@ -184,6 +201,7 @@ def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
     [1.0]
 
     """
+    alpha, x = _unify_dtypes(alpha, x)
     C0_val = C0(x)
     if n == 0:
         return jnp.atleast_1d(C0_val)

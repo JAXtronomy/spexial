@@ -221,7 +221,9 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     are fine -- ``grad`` at ``n = -101`` matches :math:`\zeta'` to 6e-14 --
     because those go through the functional equation, which differentiates.
 
-    Accuracy is ``6e-16`` for ``n > 1`` and ``1.8e-15`` on the strip. On the
+    Accuracy is ``6e-16`` for ``n > 1``, ``2.3e-15`` on the critical strip
+    itself and ``1e-14`` on the window below zero the same series covers, where
+    it works hardest right against `_ETA_FLOOR`. On the
     negative line it degrades with ``|n|``, because ``gammaln(1 - n)`` grows and
     the exponential of it carries that magnitude's rounding: ``9e-15`` out to
     ``n = -10``, ``1.8e-13`` by ``-100``, ``5e-13`` by ``-400``. Just off a

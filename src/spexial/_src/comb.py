@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from jax.scipy.special import betaln, gammaln
 
 from .custom_types import AnyArray, AnyArrayLike
-from .dtype import as_float, cast_like
+from .dtype import as_float, cast_like, is_negative
 
 _BETA_FROM: Final = 1000.0
 """Above this ``N``, the Beta form replaces the log-gamma difference, in float64.
@@ -84,7 +84,35 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # log-gamma difference needs more digits than either carries, and returned
     # `1.0` for a true 124750 at bfloat16 `N = 500`. See `spexial._src.dtype`.
     n_arr, k_arr = as_float(N, keep_weak=True), as_float(k, keep_weak=True)
-    in_domain = (n_arr >= 0) & (k_arr >= 0) & (k_arr <= n_arr)
+    # The dtype that governs everything below is the one the two arguments
+    # *promote to*, not `N`'s. `as_float(1000, keep_weak=True)` is a weak
+    # float64, which defers to a float32 `k` for every subsequent operation --
+    # so reading `eps` and `tiny` off `n_arr` alone picked float64's constants
+    # for a computation running in float32, and `comb(1000, float32(6))` came
+    # out 205x worse than the same call with both arguments float32.
+    # Two different dtypes, and conflating them is what went wrong before.
+    # `compute_dtype` is what the arithmetic actually runs in, and both
+    # arguments are widened to it -- otherwise a `(float32, float64)` call
+    # evaluated `gammaln` on the float32 half and returned a float64 carrying
+    # float32's error. `out_dtype` is what the *caller's* two arguments promote
+    # to, which is where the answer has to be narrowed back to; it is not the
+    # same, because `as_float` has already widened `float16` to float32.
+    #
+    # Cast only when it changes something. `astype` strips weak typing even
+    # when the dtype already matches, and a strong float64 from `comb(n, i)`
+    # with two Python ints promotes `polylog`'s complex64 scan carry to
+    # complex128 -- an error naming neither function, and the second time that
+    # exact regression has been introduced here.
+    compute_dtype = jnp.result_type(n_arr, k_arr)
+    if n_arr.dtype != compute_dtype:
+        n_arr = n_arr.astype(compute_dtype)
+    if k_arr.dtype != compute_dtype:
+        k_arr = k_arr.astype(compute_dtype)
+    out_dtype = jnp.result_type(jnp.asarray(N), jnp.asarray(k))
+    # `is_negative` rather than `< 0`: XLA compares a subnormal as if it were
+    # zero, so `k >= 0` was True for `k = -1e-40` and the guard let it through
+    # as `C(N, 0) = 1` where SciPy gives 0.
+    in_domain = ~is_negative(n_arr) & ~is_negative(k_arr) & (k_arr <= n_arr)
     # Mask *before* the gammaln call: gammaln of a non-positive integer is
     # +inf, and inf - inf would give nan rather than the 0 scipy returns.
     n_safe = jnp.where(in_domain, n_arr, 0.0)
@@ -102,7 +130,7 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # It is the weaker of the two on small N, where the Beta function's own
     # argument reduction costs digits, and holds at ~1e-14 from N = 1000 to
     # `DBL_MAX`, given the subnormal correction below.
-    eps = float(jnp.finfo(n_arr.dtype).eps)
+    eps = float(jnp.finfo(compute_dtype).eps)
     beta_from = _BETA_FROM if eps < 1e-10 else _BETA_FROM_LOW_PRECISION
     log_comb = gammaln(n_safe + 1) - gammaln(k_safe + 1) - gammaln(n_safe - k_safe + 1)
     # `jax.scipy.special.betaln` orders its arguments and forms `small / big`.
@@ -118,7 +146,7 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # at `N = DBL_MAX`, integer and non-integer `k` alike.
     left, right = n_safe - k_safe + 1, k_safe + 1
     small, big = jnp.minimum(left, right), jnp.maximum(left, right)
-    flushed = small < big * jnp.finfo(n_safe.dtype).tiny
+    flushed = small < big * jnp.finfo(compute_dtype).tiny
     neg_log_beta = jnp.where(
         flushed, small * jnp.log(big) - gammaln(small), -betaln(left, right)
     )
@@ -133,4 +161,9 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     at_infinity = jnp.where(
         k_arr == 0, 1.0, jnp.where(jnp.isinf(k_arr), jnp.nan, jnp.inf)
     )
-    return cast_like(jnp.where(in_domain & jnp.isinf(n_arr), at_infinity, out), N)
+    # Narrowed to what `N` and `k` promote to, not to `N`. `comb` is the only
+    # two-argument entry point here, and casting to `N` alone returned float32
+    # from a `(float32, float64)` call -- the *narrower* of the two, which is
+    # the opposite of what JAX's promotion entitles the caller to.
+    out = jnp.where(in_domain & jnp.isinf(n_arr), at_infinity, out)
+    return cast_like(out, jnp.zeros((), out_dtype))

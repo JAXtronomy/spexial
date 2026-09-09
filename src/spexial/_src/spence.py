@@ -19,7 +19,7 @@ import numpy as np
 from jax.scipy.special import spence as _jax_spence
 
 from .custom_types import AnyArray, AnyArrayLike
-from .dtype import as_float, cast_like
+from .dtype import as_float, cast_like, is_negative
 
 _MAXITER: Final = 500
 """Terms taken in each series branch."""
@@ -175,7 +175,14 @@ def spence(z: AnyArrayLike, /) -> AnyArray:
         # are computed one width up and rounded back, which is what `kn` and
         # `comb` do -- `keep_weak` so that an already-wide argument is handed
         # over untouched and keeps its weak typing.
-        return cast_like(_jax_spence(as_float(z, keep_weak=True)), z)
+        promoted = as_float(z, keep_weak=True)
+        # A negative subnormal reaches upstream's `z == 0` branch, because XLA
+        # compares one as if it were zero, and comes back as `pi**2/6` -- a
+        # perfectly ordinary number for an argument that is out of domain.
+        # SciPy returns `nan`; the sign has to be read off the bits, since
+        # `z < 0` is False for exactly these values.
+        out = _jax_spence(promoted)
+        return cast_like(jnp.where(is_negative(promoted), jnp.nan, out), z)
     return jax.lax.select(
         abs(z) < 0.5,
         _series_about_zero(z),

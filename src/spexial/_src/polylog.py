@@ -290,11 +290,21 @@ def _li_jvp(n: int, primals: tuple[Any], tangents: tuple[Any]) -> tuple[Scalar, 
     # disagreed about the supported domain at one order, which is worse than
     # either answer alone -- a caller guarding on `isnan(value)` was safe and
     # one guarding on `isnan(grad)` was not.
-    # The `nan` goes on the derivative *factor*, not on the product: a
-    # `where` whose branch is the constant `nan` transposes to a zero
-    # cotangent, so `jax.grad` came back 0.0 -- a plausible number in place of
-    # the `nan` that says "out of domain".
-    return value, jnp.where(jnp.isnan(value), jnp.nan, deriv) * dz
+    # Multiplied by a `nan`, rather than selected against one. Three attempts
+    # at this, and the first two were the same mistake at different orders: a
+    # `where` whose chosen branch is a constant transposes to a *zero*
+    # cotangent, so `nan` on the product gave `grad` 0.0, and `nan` on the
+    # factor gave `grad` the right answer but left `grad(grad)` at 0.0 --
+    # differentiating that `where` differentiates a constant. Putting `z * nan`
+    # there propagates but poisons the branch that was *not* taken, which cost
+    # `Li_3''(0)` its perfectly good 0.25.
+    #
+    # A multiplicative mask has neither problem. `deriv * nan` is `nan`, and so
+    # is every derivative of it, because the product rule keeps the factor;
+    # where the mask is 1.0 nothing is disturbed, and the mask's own derivative
+    # is zero either way, so no unselected branch leaks.
+    out_of_domain = jnp.where(jnp.isnan(value), jnp.nan, 1.0)
+    return value, deriv * out_of_domain * dz
 
 
 _li = jax.jit(_li_core, static_argnums=(0,))

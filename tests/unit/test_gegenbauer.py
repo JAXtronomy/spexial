@@ -192,3 +192,35 @@ def test_all_orders_at_infinity(alpha):
     got = np.asarray(sp.eval_gegenbauers(5, alpha, -np.inf))
     assert not np.isnan(got).any()
     assert got[0] == 1.0
+
+
+@pytest.mark.parametrize(
+    ("alpha_dtype", "x_dtype"),
+    [
+        ("float64", "float32"),
+        ("float32", "float64"),
+        ("float32", "float16"),
+        ("float32", "float32"),
+    ],
+)
+def test_eval_gegenbauers_accepts_mixed_dtypes(alpha_dtype, x_dtype):
+    """The plural form needs the dtype half of `_seed`, not the shape half.
+
+    `C0` follows `x` while `C1` follows the promotion of both, so a wider
+    `alpha` gave the `lax.scan` carry one dtype going in and another coming
+    out. It raised naming neither the function nor the argument, and only from
+    ``n >= 2`` -- orders 0 and 1 never reach the scan.
+    """
+    a_dt, x_dt = jnp.dtype(alpha_dtype), jnp.dtype(x_dtype)
+    got = sp.eval_gegenbauers(3, jnp.asarray(1.5, a_dt), jnp.asarray(0.3, x_dt))
+    assert got.dtype == jnp.promote_types(a_dt, x_dt)
+    assert got.shape == (4,)
+    # Against the *least precise input's* eps, not the result dtype's: with
+    # `x` a float32, the value held is 0.30000001192, so a float64 result is
+    # exactly right for an argument that is not exactly 0.3.
+    coarsest = max(float(jnp.finfo(a_dt).eps), float(jnp.finfo(x_dt).eps))
+    np.testing.assert_allclose(
+        np.asarray(got, dtype=np.float64),
+        [1.0, 0.9, -0.825, -1.7775],
+        rtol=32 * coarsest,
+    )

@@ -266,3 +266,14 @@ def test_third_derivative_at_zero_is_a_documented_pole():
     with mp.workdps(30):
         expected = float(mp.diff(lambda q: mp.polylog(2, 1 - q), mp.mpf("1e-4"), 3))
     np.testing.assert_allclose(float(third(jnp.asarray(1e-4))), expected, rtol=1e-7)
+
+
+@pytest.mark.parametrize("z", [-1e-320, -5e-324, -1.0])
+def test_negative_subnormal_is_nan(z):
+    """A negative subnormal is out of domain, and `pi**2/6` is not `nan`.
+
+    XLA compares one as if it were zero, so it reached upstream's `z == 0`
+    branch and came back as an ordinary number. SciPy returns `nan`.
+    """
+    assert jnp.isnan(spence(z))
+    assert np.isnan(scipy_spence(z))

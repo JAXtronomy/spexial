@@ -240,3 +240,27 @@ def test_value_and_gradient_agree_about_the_order_cap(n):
     value = sp.Li(n, z)
     grad = jax.grad(partial(sp.Li, n))(z)
     assert bool(jnp.isnan(value)) == bool(jnp.isnan(grad))
+
+
+@pytest.mark.parametrize("order", [1, 2, 3])
+@pytest.mark.parametrize("n", [61, 62])
+def test_every_derivative_order_respects_the_cap(order, n):
+    """Past the Bernoulli table nothing is defined, derivatives included.
+
+    Marking the tangent `nan` with a `where` fixed the first derivative and
+    left the second at `0.0`, because differentiating that `where` again
+    differentiates a constant. A multiplicative `nan` mask survives every
+    order without poisoning the branch that was not taken.
+    """
+    f = partial(sp.Li, n)
+    for _ in range(order):
+        f = jax.grad(f)
+    assert jnp.isnan(f(jnp.asarray(3.0)))
+
+
+def test_second_derivative_below_the_cap_is_untouched():
+    """The mask must not leak into orders that are perfectly well defined."""
+    for order, expected in ((2, 0.5), (3, 0.25)):
+        second = jax.grad(jax.grad(partial(sp.Li, order)))
+        got = float(second(jnp.asarray(0.0)))
+        np.testing.assert_allclose(got, expected, rtol=1e-12)

@@ -1,5 +1,7 @@
 """Unit tests for `spexial.comb`."""
 
+import math
+
 import jax
 import jax.numpy as jnp
 import mpmath as mp
@@ -180,3 +182,55 @@ def test_low_precision_is_within_its_own_dtype(dtype, n):
     # alone costs about `log(comb) * eps` -- ~7 eps at these sizes. Before the
     # fix, bfloat16 was 345% out and float16 returned `inf`.
     np.testing.assert_allclose(float(got), expected, rtol=16 * float(jnp.finfo(dt).eps))
+
+
+@pytest.mark.parametrize(
+    ("n_dtype", "k_dtype"),
+    [
+        ("float32", "float64"),
+        ("float64", "float32"),
+        ("float16", "float32"),
+        ("float16", "float16"),
+        ("bfloat16", "bfloat16"),
+    ],
+)
+def test_result_follows_promotion_of_both_arguments(n_dtype, k_dtype):
+    """`comb` is the only two-argument entry point, and both arguments count.
+
+    The result used to be narrowed to `N`'s dtype alone, so a
+    `(float32, float64)` call returned float32 -- the *narrower* of the two,
+    the opposite of what JAX's promotion entitles the caller to.
+    """
+    n_dt, k_dt = jnp.dtype(n_dtype), jnp.dtype(k_dtype)
+    got = sp.comb(jnp.asarray(20.0, n_dt), jnp.asarray(3.0, k_dt))
+    assert got.dtype == jnp.promote_types(n_dt, k_dt)
+    np.testing.assert_allclose(
+        float(got), 1140.0, rtol=32 * float(jnp.finfo(got.dtype).eps)
+    )
+
+
+def test_a_python_int_does_not_pick_the_wrong_crossover():
+    """The branch cross-over must come from the promoted dtype, not from `N`.
+
+    `as_float(1000, keep_weak=True)` is a *weak* float64, which defers to a
+    float32 `k` for every subsequent operation -- so reading `eps` off `N`
+    alone ran the float64-tuned cross-over in float32, and this call was 205x
+    worse than the same one with both arguments float32.
+    """
+    mixed = sp.comb(1000, jnp.float32(6))
+    both = sp.comb(jnp.float32(1000), jnp.float32(6))
+    assert mixed.dtype == both.dtype == jnp.float32
+    np.testing.assert_allclose(float(mixed), float(both), rtol=1e-6)
+    np.testing.assert_allclose(float(mixed), float(math.comb(1000, 6)), rtol=1e-5)
+
+
+@pytest.mark.parametrize("bad", [-1e-320, -5e-324])
+def test_negative_subnormals_are_out_of_domain(bad):
+    """XLA compares a subnormal as zero, so `k >= 0` was True for `k = -1e-40`.
+
+    The guard then let it through as `C(N, 0) = 1`, where SciPy gives 0.
+    """
+    assert float(sp.comb(5.0, bad)) == 0.0
+    assert float(sp.comb(bad, 0.0)) == 0.0
+    # `-0.0` is not negative for this purpose, and stays in the domain
+    assert float(sp.comb(5.0, -0.0)) == 1.0
