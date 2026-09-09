@@ -47,12 +47,20 @@ def _bernoulli_poly(n: int, x: AnyArray) -> AnyArray:
     6.166666666667
 
     """
-    bs = bernoulli_numbers()
+    # The Bernoulli table is float64 by construction (it comes from exact
+    # `Fraction` arithmetic), so a narrower `x` seeds the carry at its own width
+    # and the body then widens it -- which `lax.fori_loop` rejects outright,
+    # with an error naming neither `Li` nor the dtype. Casting the table to the
+    # carry's dtype keeps the loop type-stable at any input width.
+    x_arr = (
+        jnp.asarray(x) * 1.0
+    )  # promotes integers; leaves a weak float at the default
+    bs = bernoulli_numbers().astype(x_arr.dtype)
     return lax.fori_loop(
         0,
         n + 1,
-        lambda i, val: val + bs[i] * comb(n, i) * x ** (n - i),
-        jnp.zeros_like(x),
+        lambda i, val: val + bs[i] * comb(n, i) * x_arr ** (n - i),
+        jnp.zeros_like(x_arr),
     )
 
 

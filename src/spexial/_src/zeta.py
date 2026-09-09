@@ -91,6 +91,9 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     1.0
 
     """
+    # `* 1.0` promotes integers; the Bernoulli table is float64 by construction
+    # (exact `Fraction` arithmetic), so it is cast down to `n_arr`'s dtype below
+    # rather than being allowed to widen a float32 argument to float64.
     n_arr = jnp.asarray(n) * 1.0
     positive = n_arr > 0
     k = -n_arr  # zeta(-k)
@@ -114,7 +117,7 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     reflected = jnp.where(
         ~is_integer | (k_round + 1.0 > ORDER),
         jnp.nan,
-        sign * bernoulli_numbers()[index] / denom,
+        sign * bernoulli_numbers().astype(n_arr.dtype)[index] / denom,
     )
 
     # `_hurwitz_zeta` is `nan` for n above ~1e15, and is exactly 1.0 for every n

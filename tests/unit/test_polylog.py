@@ -192,3 +192,16 @@ def test_complex_argument_is_rejected(z):
     """
     with pytest.raises(ValueError, match="real z"):
         sp.Li(2, z)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_narrow_scalar_does_not_raise(dtype):
+    """REGRESSION: `Li(2, float32(0.5))` died inside `lax.fori_loop`.
+
+    The carry was seeded at the argument's dtype but the body multiplied by the
+    float64 Bernoulli table, widening it -- which `fori_loop` rejects, with an
+    error naming neither `Li` nor the dtype. `z` is documented as scalar, and a
+    float32 scalar is a scalar.
+    """
+    got = float(sp.Li(2, jnp.asarray(0.5, dtype=dtype)))
+    np.testing.assert_allclose(got, reference(2, 0.5), rtol=1e-6)

@@ -457,3 +457,54 @@ def test_tiny_but_normal_argument(order, func, z):
     """
     reference = (scipy_k0, scipy_k1)[order]
     np.testing.assert_allclose(func(z), reference(z), rtol=RTOL)
+
+
+@pytest.mark.parametrize(("order", "func"), [(0, sp.K0), (1, sp.K1), (2, sp.K2)])
+@pytest.mark.parametrize("z", [694.0, 700.0, 703.0, 705.0])
+def test_second_derivative_in_the_subnormal_tail(order, func, z):
+    """REGRESSION: `grad(grad(K1))` was 7.2e-4 low from z ~ 694.
+
+    The first derivative was fixed to sum in scaled variables, but it was an
+    *expression* inside the JVP, so differentiating it again formed
+    `d(1/z) * K1 * e^-z` -- about 4e-312 at z = 700, which XLA flushes. Exactly
+    the bug the first derivative was fixed for, one order up, and invisible
+    because no test went past the first derivative here. `K1'` and `K2'` are now
+    named functions carrying their own rules, so the second derivative is summed
+    scaled too.
+    """
+    with mp.workdps(50):
+        expected = float(mp.diff(lambda t: mp.besselk(order, t), z, 2))
+    np.testing.assert_allclose(jax.grad(jax.grad(func))(z), expected, rtol=1e-13)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float16", "bfloat16"])
+@pytest.mark.parametrize("func", ALL_FUNCS)
+def test_narrow_dtypes_survive_differentiation(dtype, func):
+    """REGRESSION: `grad(K2)` *raised* on bfloat16, and `jvp` widened the primal.
+
+    `_K2_jvp` narrowed its primal with `_cast_like` but left the tangent at the
+    internal width, so JAX rejected the rule outright ("must produce primal and
+    tangent outputs with corresponding ... dtypes"). The other five narrowed
+    neither, so `jax.jvp` quietly returned a wider primal than the plain call.
+    Value, `grad` and `jvp` must all agree with each other.
+    """
+    z = jnp.asarray(2.0, dtype=dtype)
+    tangent = jnp.asarray(1.0, dtype=dtype)
+    primal, tangent_out = jax.jvp(func, (z,), (tangent,))
+    assert func(z).dtype == jnp.dtype(dtype)
+    assert jax.grad(func)(z).dtype == jnp.dtype(dtype)
+    assert primal.dtype == jnp.dtype(dtype)
+    assert tangent_out.dtype == jnp.dtype(dtype)
+
+
+@pytest.mark.parametrize("func", ALL_FUNCS)
+def test_float32_is_not_silently_widened(func):
+    """REGRESSION: float32 input returned float64 whenever x64 was enabled.
+
+    `jnp.arange(1.0, n)` defaults to float64 under x64, so the series constants
+    promoted the whole computation. Nothing caught it: `_cast_like` narrowed
+    only float16/bfloat16, and every test runs in float64. This is the same
+    hazard the narrow-dtype test guards -- a widened output breaks a `lax.scan`
+    carry -- one dtype up.
+    """
+    assert func(jnp.asarray([2.0], dtype=jnp.float32)).dtype == jnp.float32

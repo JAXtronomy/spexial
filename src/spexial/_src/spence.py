@@ -30,12 +30,25 @@ def _series_about_zero(z: AnyArray) -> AnyArray:
     The third term diverges for :math:`|z| \rightarrow 0` so we special case
     it.
     """
-    nn = jnp.arange(1.0, _MAXITER)
+    # Real dtype matching `z`: a bare `arange(1.0, n)` is float64 whenever x64
+    # is on, which widened a float32 (or complex64) argument to float64.
+    nn = jnp.arange(1.0, _MAXITER, dtype=_real_dtype(z))
     temp = z**nn / nn
     sum1 = jnp.sum(temp / nn)
     sum2 = jnp.sum(temp)
 
     return jnp.where(z == 0, np.pi**2 / 6, np.pi**2 / 6 - sum1 + jnp.log(z) * sum2)
+
+
+def _real_dtype(z: AnyArray) -> Any:
+    """Give the real floating dtype to build series constants in.
+
+    `jnp.finfo(z.dtype)` is not enough: it raises on integer input, and `z` may
+    be complex, in which case the constants want the *real* component's width.
+    Multiplying by 1.0 promotes an integer to the default float and leaves
+    everything else alone.
+    """
+    return jnp.asarray(jnp.real(z) * 1.0).dtype
 
 
 @jnp.vectorize
@@ -50,7 +63,7 @@ def _series_about_one(z: AnyArray) -> AnyArray:
     # is on. Under float32 that silently corrupted 235 of the 499 terms (many
     # going negative) for a 3.8e-5 error at z = 2 -- 300x worse than float32
     # rounding alone. Compare `polylog.py`, which guards the same hazard.
-    nn = jnp.arange(1.0, _MAXITER)
+    nn = jnp.arange(1.0, _MAXITER, dtype=_real_dtype(z))
     res = jnp.sum(z**nn / (nn * (nn + 1) * (nn + 2)) ** 2)
 
     res *= 4 * z**2

@@ -40,7 +40,9 @@ _N_LARGE: Final = 10
 
 def _K0_small(z: AnyArray) -> AnyArray:
     """Ascending series for `K0`; see Zhang & Jin, *Special Functions* (1996)."""
-    k = jnp.arange(1.0, _N_SMALL + 1.0)
+    # `dtype=z.dtype`: a bare `arange(1.0, n)` is float64 whenever x64 is on, which
+    # promoted the whole series and returned float64 from a float32 argument.
+    k = jnp.arange(1.0, _N_SMALL + 1.0, dtype=z.dtype)
     harmonic = jnp.cumsum(1.0 / k)
     # `log(z) - log(2)`, never `log(z / 2)`: halving a z that is merely small --
     # but perfectly normal -- lands in the subnormal range, which XLA on CPU
@@ -68,7 +70,7 @@ def _K0e_large(z: AnyArray) -> AnyArray:
     # tends to 0 at +inf and every scipy counterpart returns that.
     at_inf = z == jnp.inf
     z = jnp.where(at_inf, 1.0, z)
-    k = jnp.arange(1.0, _N_LARGE + 1.0)
+    k = jnp.arange(1.0, _N_LARGE + 1.0, dtype=z.dtype)
     prod = jnp.cumprod(-(2.0 * k - 1.0) / (2.0 * k) * (2.0 * k - 1.0) ** 2.0)
     series = 1.0 + jnp.sum(
         (-1.0) ** k * prod / (2.0 * z[..., None]) ** (2.0 * k), axis=-1
@@ -105,14 +107,19 @@ def _two_over(z: AnyArray) -> AnyArray:
 
 
 def _cast_like(out: AnyArray, z: RealArrayLike) -> AnyArray:
-    """Return to a narrower input dtype after computing in at least float32.
+    """Return the caller's own floating dtype, whatever width we computed in.
 
-    Only `float16` and `bfloat16` are narrowed back; integer input stays
-    promoted, as it must.
+    Covers two separate widenings. `float16`/`bfloat16` are deliberately
+    promoted to float32 by `_as_float` and must come back. `float32` was widened
+    by accident, through series constants that defaulted to float64 under x64 --
+    fixed at the source, with this as the backstop. Integer input has no float
+    dtype to return to and stays promoted.
     """
     dtype = jnp.asarray(z).dtype
-    narrow = jnp.issubdtype(dtype, jnp.floating) and jnp.finfo(dtype).bits < 32
-    return out.astype(dtype) if narrow else out
+    if not jnp.issubdtype(dtype, jnp.floating):
+        return out  # integer input has no float dtype to go back to
+    narrower = jnp.finfo(dtype).bits < jnp.finfo(out.dtype).bits
+    return out.astype(dtype) if narrower else out
 
 
 def _as_float(z: RealArrayLike) -> AnyArray:
@@ -164,7 +171,7 @@ def K0e(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`e^z K_0(z)`, accurate to ~1.2e-7 relative
+        Value(s) of :math:`e^z K_0(z)`, accurate to ~2.2e-7 relative
         (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
@@ -209,7 +216,7 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`e^z K_1(z)`, accurate to ~1.0e-7 relative
+        Value(s) of :math:`e^z K_1(z)`, accurate to ~2.0e-7 relative
         (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
@@ -267,7 +274,7 @@ def K2e(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`e^z K_2(z)`, accurate to ~7.4e-8 relative
+        Value(s) of :math:`e^z K_2(z)`, accurate to ~1.4e-7 relative
         (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
@@ -306,7 +313,7 @@ def K0(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`K_0(z)`, accurate to ~1.2e-7 relative
+        Value(s) of :math:`K_0(z)`, accurate to ~2.2e-7 relative
         (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
@@ -350,7 +357,7 @@ def K1(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`K_1(z)`, accurate to ~1.0e-7 relative
+        Value(s) of :math:`K_1(z)`, accurate to ~2.0e-7 relative
         (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
@@ -390,7 +397,7 @@ def K2(z: RealArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        Value(s) of :math:`K_2(z)`, accurate to ~7.4e-8 relative
+        Value(s) of :math:`K_2(z)`, accurate to ~1.4e-7 relative
         (worst just below the ``z = 9`` cross-over; ~8e-9 out to z = 15,
         ~2e-13 to z = 30, and ~1e-15 beyond). Those are float64
         figures: in float32 the cross-over moves to 4.65 and the worst error is
@@ -431,11 +438,63 @@ def K2(z: RealArrayLike, /) -> AnyArray:
 # pick up the extra `+ Kn e` term from differentiating the `e^z` factor.
 
 
+# Each rule returns `_cast_like(..., z)` for the primal *and* for the derivative
+# factor. Without it the two disagree: `_K2_jvp` narrowed only its primal, so
+# `grad(K2)` on a bfloat16 argument raised outright ("Custom JVP rule must
+# produce primal and tangent outputs with corresponding ... dtypes"), while the
+# other rules narrowed neither and quietly handed `jax.jvp` a wider primal than
+# the plain call returns.
+
+
 @K0.defjvp
 def _K0_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
     """K0'(z) = -K1(z)."""
     (z,), (dz,) = primals, tangents
-    return K0(z), -K1(z) * dz
+    return K0(z), _cast_like(-K1(z), z) * dz
+
+
+@jax.custom_jvp
+def _dK1(z: AnyArray) -> AnyArray:
+    """K1'(z) = -K0(z) - K1(z)/z, summed scaled.
+
+    A named function with its own rule rather than an expression inside
+    `_K1_jvp`, so that differentiating it *again* also gets a scaled sum.
+    Left as raw arithmetic, `grad(grad(K1))` formed `d(1/z) * K1 * e^-z`, which
+    is ~4e-312 at z = 700 -- subnormal, so XLA flushed it and the second
+    derivative came out 7.2e-4 low. Exactly the bug the first derivative was
+    fixed for, one order up.
+    """
+    return -(K0e(z) + 0.5 * _two_over(z) * K1e(z)) * jnp.exp(-z)
+
+
+@_dK1.defjvp
+def _dK1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """K1''(z) = K1(z) + K0(z)/z + 2 K1(z)/z^2."""
+    (z,), (dz,) = primals, tangents
+    two_over = _two_over(z)
+    second = (K1e(z) + 0.5 * two_over * K0e(z) + 0.5 * two_over**2 * K1e(z)) * jnp.exp(
+        -z
+    )
+    return _dK1(z), second * dz
+
+
+@jax.custom_jvp
+def _dK2(z: AnyArray) -> AnyArray:
+    """K2'(z) = -K1(z) - (2/z) K2(z), summed scaled. See `_dK1`."""
+    two_over = _two_over(z)
+    k0e, k1e = K0e(z), K1e(z)
+    return -(k1e + two_over * (k0e + two_over * k1e)) * jnp.exp(-z)
+
+
+@_dK2.defjvp
+def _dK2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """K2''(z) = K0(z) + 3 K1(z)/z + 6 K2(z)/z^2."""
+    (z,), (dz,) = primals, tangents
+    two_over = _two_over(z)
+    second = (K0e(z) + 1.5 * two_over * K1e(z) + 1.5 * two_over**2 * K2e(z)) * jnp.exp(
+        -z
+    )
+    return _dK2(z), second * dz
 
 
 @K1.defjvp
@@ -447,8 +506,7 @@ def _K1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArr
     """
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    deriv = -(K0e(z_arr) + 0.5 * _two_over(z_arr) * K1e(z_arr)) * jnp.exp(-z_arr)
-    return K1(z_arr), deriv * dz
+    return _cast_like(K1e(z_arr) * jnp.exp(-z_arr), z), _cast_like(_dK1(z_arr), z) * dz
 
 
 @K2.defjvp
@@ -466,8 +524,7 @@ def _K2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArr
     two_over_z = _two_over(z_arr)
     k2e = k0e + two_over_z * k1e
     scale = jnp.exp(-z_arr)
-    deriv = -(k1e + two_over_z * k2e) * scale
-    return _cast_like(k2e * scale, z), deriv * dz
+    return _cast_like(k2e * scale, z), _cast_like(_dK2(z_arr), z) * dz
 
 
 # At z = 0 each of these is a difference of two infinities, so the closed form
@@ -495,7 +552,8 @@ def _K0e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyAr
     """(e^z K0)' = e^z (K0 - K1)."""
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    return K0e(z_arr), _at_pole(z_arr, K0e(z_arr) - K1e(z_arr)) * dz
+    deriv = _at_pole(z_arr, K0e(z_arr) - K1e(z_arr))
+    return _cast_like(K0e(z_arr), z), _cast_like(deriv, z) * dz
 
 
 @K1e.defjvp
@@ -504,7 +562,7 @@ def _K1e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyAr
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
     deriv = K1e(z_arr) - K0e(z_arr) - 0.5 * _two_over(z_arr) * K1e(z_arr)
-    return K1e(z_arr), _at_pole(z_arr, deriv) * dz
+    return _cast_like(K1e(z_arr), z), _cast_like(_at_pole(z_arr, deriv), z) * dz
 
 
 @K2e.defjvp
@@ -513,4 +571,4 @@ def _K2e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyAr
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
     deriv = K2e(z_arr) - K1e(z_arr) - _two_over(z_arr) * K2e(z_arr)
-    return K2e(z_arr), _at_pole(z_arr, deriv) * dz
+    return _cast_like(K2e(z_arr), z), _cast_like(_at_pole(z_arr, deriv), z) * dz

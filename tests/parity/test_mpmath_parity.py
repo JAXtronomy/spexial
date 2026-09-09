@@ -179,7 +179,7 @@ _SCALED = [(0, sp.K0e), (1, sp.K1e), (2, sp.K2e)]
 def test_kn(order, func, z):
     """1e-6, the honest tolerance for a 30-term series meeting a 10-term one.
 
-    Worst measured is 1.2e-7 (`K0`) just below the z = 9 cross-over; away from
+    Worst measured is 2.2e-7 (`K0`) just below the z = 9 cross-over; away from
     it the same code is good to 1e-15.
     """
     np.testing.assert_allclose(func(z), _ref(mp.besselk, order, z), rtol=1e-6)
@@ -238,7 +238,9 @@ def test_li(n, z):
     branch explicitly rather than sampling across it.
     """
     expected = _cref(mp.polylog, n, z).real
-    np.testing.assert_allclose(sp.Li(n, z), expected, rtol=1e-11, atol=1e-12)
+    # 1e-13, not 1e-11: measured worst over this domain is 1.3e-14, so the
+    # looser gate would pass a 100x regression.
+    np.testing.assert_allclose(sp.Li(n, z), expected, rtol=1e-13, atol=1e-14)
 
 
 @pytest.mark.parametrize("n", [1, 2, 3, 5, 10, 20])

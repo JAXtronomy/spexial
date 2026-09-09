@@ -47,7 +47,7 @@ The public namespace is deliberately **flat** — `spexial.gamma`, not `spexial.
 This is a numerics library. The interesting review question is never "does it run" — it is **"over what domain is this correct, and how do you know?"**
 
 - Every function has a parity test against `scipy.special`, or against `mpmath` where SciPy has no counterpart (`Li`).
-- **Never widen a tolerance to make a test pass.** The tolerances in `tests/parity/` are measured worst-case errors with modest headroom, and several are _not_ machine precision — `K0`/`K1`/`K2` assert rtol `1e-6` because a 30-term series meeting a 10-term asymptotic expansion at `z = 9` delivers `1.2e-7`, and no more — and that is the _float64_ figure; in float32 the cross-over moves to 4.65 and the worst is `7.1e-3`. Loosening one of these silently converts a regression into a pass.
+- **Never widen a tolerance to make a test pass.** The tolerances in `tests/parity/` are measured worst-case errors with modest headroom, and several are _not_ machine precision — `K0`/`K1`/`K2` assert rtol `1e-6` because a 30-term series meeting a 10-term asymptotic expansion at `z = 9` delivers `2.2e-7`, and no more — and that is the _float64_ figure; in float32 the cross-over moves to 4.65 and the worst is `7.1e-3`. Loosening one of these silently converts a regression into a pass.
 - Where a domain is genuinely unsupported, it is expressed as a domain restriction with a comment, or as an explicit test of the `nan`/degraded behaviour — not as a skip. Keep it that way.
 - Every documented domain and tolerance lives in [docs/reference/accuracy-and-domains.md](docs/reference/accuracy-and-domains.md). **A change to numerical behaviour must update that page in the same PR.**
 

@@ -133,3 +133,13 @@ def test_the_constant_branch_starts_where_it_is_exact():
 def test_large_argument_has_zero_derivative():
     """`zeta'(n) ~ -2**-n log 2`, which is 0 in float64 past the cut-off."""
     assert float(jax.grad(sp.zeta)(1e16)) == 0.0
+
+
+def test_float32_is_not_silently_widened():
+    """REGRESSION: a float32 argument came back float64.
+
+    The Bernoulli table is float64 by construction (exact `Fraction`
+    arithmetic), so indexing it widened the result. It is cast to the argument's
+    dtype instead.
+    """
+    assert sp.zeta(jnp.asarray([2.0], dtype=jnp.float32)).dtype == jnp.float32

@@ -201,7 +201,7 @@ def test_kn_across_the_crossover(order, z):
 @pytest.mark.parametrize("order", [0, 1, 2])
 @given(z=floats(1e-30, 690.0))
 def test_kn(order, z):
-    """~8e-8 worst case, at the z = 9 cross-over between the two series.
+    """~2.2e-7 worst case, at the z = 9 cross-over between the two series.
 
     That is the accuracy the truncated series can deliver (30 ascending terms,
     10 asymptotic ones), so 1e-6 is the honest tolerance -- not machine
@@ -221,8 +221,13 @@ def test_kn(order, z):
 
 @given(n=floats(1.0001, 60.0))
 def test_zeta_positive(n):
-    """Delegated to JAX; measured worst case 6.7e-16 relative."""
-    np.testing.assert_allclose(sp.zeta(n), scipy_zeta(n), rtol=1e-12)
+    """Delegated to JAX; measured worst case 6.7e-16 relative.
+
+    `rtol` is 5e-15, not 1e-12: three orders of slack would let a 100x
+    regression through unnoticed, and this is a delegated value that should
+    track upstream to the last few ulps.
+    """
+    np.testing.assert_allclose(sp.zeta(n), scipy_zeta(n), rtol=5e-15)
 
 
 @given(n=st.integers(min_value=-59, max_value=0))
