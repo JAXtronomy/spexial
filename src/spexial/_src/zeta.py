@@ -75,21 +75,25 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     n_arr = jnp.asarray(n) * 1.0
     positive = n_arr > 0
     k = -n_arr  # zeta(-k)
-    k_int = jnp.round(k).astype(int)
+    # Kept in float throughout: `astype(int)` canonicalises to int32 unless x64
+    # is on, which would overflow the parity and range tests around 2.1e9
+    # instead of the 9.2e18 the docs claim. Float is exact to 2^53 either way.
+    k_round = jnp.round(k)
 
-    is_integer = k == k_int
-    # Clip before indexing: `k + 1` is negative for n > -1 and past the end of
-    # the table for n <= -60. Under `jax.jit` an out-of-bounds index is
-    # silently clamped rather than raising, so the guard has to be explicit.
-    index = jnp.clip(k_int + 1, 0, ORDER)
+    is_integer = k == k_round
+    # Clip *before* the cast, so the index cannot overflow whatever width `int`
+    # happens to be: `k + 1` is negative for n > -1 and past the end of the
+    # table for n <= -60. Under `jax.jit` an out-of-bounds index is silently
+    # clamped rather than raising, so the guard has to be explicit.
+    index = jnp.clip(k_round + 1.0, 0.0, ORDER).astype(int)
     # `(-1) ** k` would be `nan` under `jax.grad` (it differentiates through
-    # `log(-1)`); take the sign off the *integer* k instead.
-    sign = jnp.where(k_int % 2 == 0, 1.0, -1.0)
+    # `log(-1)`); take the sign off the parity of k instead.
+    sign = jnp.where(jnp.mod(k_round, 2.0) == 0.0, 1.0, -1.0)
     # Likewise keep the denominator away from 0: k == -1 (i.e. n == 1) is the
     # pole, and belongs to the `positive` branch.
     denom = jnp.where(positive, 1.0, k + 1.0)
     reflected = jnp.where(
-        ~is_integer | (k_int + 1 > ORDER),
+        ~is_integer | (k_round + 1.0 > ORDER),
         jnp.nan,
         sign * bernoulli_numbers()[index] / denom,
     )
@@ -97,5 +101,7 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     return jnp.where(
         positive,
         _hurwitz_zeta(jnp.where(positive, n_arr, 2.0), 1.0),
-        jnp.where((n_arr < 0) & is_integer & (k_int % 2 == 0), 0.0, reflected),
+        jnp.where(
+            (n_arr < 0) & is_integer & (jnp.mod(k_round, 2.0) == 0.0), 0.0, reflected
+        ),
     )

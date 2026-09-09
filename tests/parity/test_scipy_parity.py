@@ -72,26 +72,30 @@ def test_comb_non_integer(N, k):
 @example(x=1.0)
 @example(x=-0.5)
 def test_gamma(x):
-    """Measured worst case (poles avoided by 1e-4) is 6.1e-12 relative."""
+    """Measured worst case (poles avoided by 1e-4) is 3.5e-13 relative.
+
+    Tightened from 1e-10 when `gamma` began delegating to
+    `jax.scipy.special.gamma`: the old hand-rolled Lanczos needed the looser
+    bound, JAX's does not, and leaving the slack in would hide a regression.
+    """
     assume(x >= 0.5 or abs(x - round(x)) > 1e-4)
-    np.testing.assert_allclose(sp.gamma(x), scipy_gamma(x), rtol=1e-10)
+    np.testing.assert_allclose(sp.gamma(x), scipy_gamma(x), rtol=1e-11)
 
 
 @given(x=floats(-170.0, -30.0))
 def test_gamma_negative_tail(x):
-    """Below -30 the reflection formula degrades; 5e-10, not the 1e-10 above.
+    """The documented domain reaches |x| ~ 171; the strategy above stops at -30.
 
-    The documented domain reaches |x| ~ 171 but the strategy above stops at -30.
-    Measured worst case over [-170, -30] is 2.4e-10, so the tighter tolerance
-    genuinely does not hold here -- it is stated separately rather than either
-    loosened everywhere or left untested.
+    The old hand-rolled reflection formula degraded here and needed 5e-10. Since
+    `gamma` delegates to JAX the measured worst case over [-170, -30] is
+    4.3e-13, so this now holds the same 1e-11 as the rest of the range.
     """
     assume(abs(x - round(x)) > 1e-4)
     expected = scipy_gamma(x)
     # Below ~1e-300 the true value is subnormal, and XLA on CPU flushes those to
     # zero; see the accuracy docs.
     assume(abs(expected) > 1e-300)
-    np.testing.assert_allclose(sp.gamma(x), expected, rtol=5e-10)
+    np.testing.assert_allclose(sp.gamma(x), expected, rtol=1e-11)
 
 
 @pytest.mark.parametrize("pole", [-7.0, -25.0, -40.0, -55.0])
@@ -103,12 +107,12 @@ def test_gamma_near_a_pole(pole, distance):
     ``sin(pi x)`` denominator loses exactly the digits that ``x`` is close to
     an integer by. Documented rather than papered over.
     """
-    # The loss scales as |x| * 1e-16 / distance, not 1e-17 / distance: the
-    # argument error in `sin(pi x)` grows with |x|. Pinned at several poles
-    # because the old single hard-coded -7.0 passed with 2.3x margin and would
-    # have failed at -25 or beyond on its own tolerance.
+    # There is no near-pole blow-up any more. The hand-rolled Lanczos lost
+    # precision as |x| * 1e-16 / distance -- 4.3e-8 at x = -7 - 1e-8. JAX's
+    # implementation holds ~1e-13 right up to the pole, so this pins the same
+    # tolerance as everywhere else rather than a distance-dependent one.
     x = pole + distance
-    np.testing.assert_allclose(sp.gamma(x), scipy_gamma(x), rtol=abs(pole) * 1e-8)
+    np.testing.assert_allclose(sp.gamma(x), scipy_gamma(x), rtol=1e-11)
 
 
 # ---------------------------------------------------------------------------
@@ -138,10 +142,12 @@ def test_eval_gegenbauer(n, alpha, x):
         sp.eval_gegenbauer(n, alpha, x),
         scipy_eval_gegenbauer(n, alpha, x),
         rtol=1e-10,
-        # 1e-13, not 1e-9: the loose value never fired (max residual beyond rtol
-        # is 0 over 420k samples) and would have hidden a 1000x error on any
-        # result below 1e-9 -- the near-root values it was meant to protect.
-        atol=1e-13,
+        # 1e-11, not the original 1e-9: that was dead slack that would have
+        # hidden a 100x error on any result below 1e-9 -- the near-root values
+        # it was meant to protect. Not 1e-13 either, which was tried and
+        # falsified at n=8, alpha=10, where a value sitting on a root needs
+        # 1.9e-12 absolute.
+        atol=1e-11,
     )
 
 
@@ -168,7 +174,7 @@ def test_eval_gegenbauers(n, alpha, x):
     got = sp.eval_gegenbauers(n, alpha, x)
     expected = [scipy_eval_gegenbauer(k, alpha, x) for k in range(n + 1)]
     assert got.shape == (n + 1,)
-    np.testing.assert_allclose(got, expected, rtol=1e-10, atol=1e-13)
+    np.testing.assert_allclose(got, expected, rtol=1e-10, atol=1e-11)
 
 
 # ---------------------------------------------------------------------------

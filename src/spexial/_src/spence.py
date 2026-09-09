@@ -57,14 +57,12 @@ def _series_about_one(z: AnyArray) -> AnyArray:
 def _series_reflected(z: AnyArray) -> AnyArray:
     """Evaluate the reflected form, for :math:`|z| > 1/2` and :math:`|1 - z| > 1`.
 
-    This gives a :code:`ZeroDivisionError` for `z = 1`. Since every branch is
-    evaluated when this has been :code:`vmap`-ed, we perturb the value
-    slightly.
+    Divides by :math:`z - 1`, so it is `nan` at ``z = 1``. That is harmless:
+    ``z = 1`` is never selected into this branch, `jax.lax.select` takes the
+    chosen operand elementwise, and the gradient comes from a `jax.custom_jvp`
+    that does not go through here at all.
     """
-    val = jnp.where(z == 1, z, z + 1e-10)
-    return (
-        -_series_about_one(val / (val - 1)) - np.pi**2 / 6 - jnp.log(val - 1) ** 2 / 2
-    )
+    return -_series_about_one(z / (z - 1)) - np.pi**2 / 6 - jnp.log(z - 1) ** 2 / 2
 
 
 @jax.jit
