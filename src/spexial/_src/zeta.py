@@ -201,25 +201,37 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
       critical strip, which `jax.scipy.special.zeta` does not implement, plus a
       little below zero where the reflection below cannot be used.
     * ``n`` a negative *even* integer -- exactly ``0``, at any magnitude.
-    * ``n`` a negative integer down to ``-60`` -- from the tabulated
-      :math:`B_{1-n}`, which is exact to the ulp.
+    * ``n`` a negative integer down to ``-59`` -- from the tabulated
+      :math:`B_{1-n}`, which is exact to the ulp. ``-60`` is covered too, but
+      as an even integer rather than by the table, which ends at
+      :math:`B_{60}`.
     * every other ``n <= -0.5`` -- the functional equation
       :math:`\zeta(s) = 2^s \pi^{s-1} \sin(\pi s/2) \Gamma(1-s) \zeta(1-s)`,
       evaluated in log space so that :math:`\Gamma(1-s)` overflowing at
       :math:`s \approx -170.6` does not cost a domain the result is finite on.
 
     `jax.grad` is genuine wherever the eta series or the functional equation
-    supplies the value, which is everywhere except two sets: the tabulated
-    integers ``0 >= n >= -60``, where a *table* carries no information about how
-    :math:`\zeta` varies between its entries, and the negative *even* integers
-    at any magnitude, which are a constant ``0``. Both report a finite number
-    that is not :math:`\zeta'`. The odd integers past the table are fine --
-    ``grad`` at ``n = -101`` matches :math:`\zeta'` to 6e-14 -- because those go
-    through the functional equation, which differentiates.
+    supplies the value, which is everywhere except three sets, all of which
+    report a finite number that is not :math:`\zeta'`: the tabulated integers
+    ``0 >= n >= -59``, where a *table* carries no information about how
+    :math:`\zeta` varies between its entries; the negative *even* integers at
+    any magnitude, which are a constant ``0``; and ``n >= 54``, where the value
+    is the constant ``1.0`` and the reported derivative is ``0`` against a true
+    :math:`\zeta'(54) = -3.8\times10^{-17}`. The odd integers past the table
+    are fine -- ``grad`` at ``n = -101`` matches :math:`\zeta'` to 6e-14 --
+    because those go through the functional equation, which differentiates.
 
-    Accuracy is worst near the trivial zeros, where the sine of the functional
-    equation is small: a few times ``1e-13`` relative within ``1e-13`` of a
-    negative even integer, against ``1e-15`` or better elsewhere.
+    Accuracy is ``6e-16`` for ``n > 1`` and ``1.8e-15`` on the strip. On the
+    negative line it degrades with ``|n|``, because ``gammaln(1 - n)`` grows and
+    the exponential of it carries that magnitude's rounding: ``9e-15`` out to
+    ``n = -10``, ``1.8e-13`` by ``-100``, ``5e-13`` by ``-400``. Just off a
+    negative even integer, where the sine of the functional equation is near a
+    zero of its own, it is a few times ``1e-13`` -- still better than SciPy,
+    which is ``2e-4`` there.
+
+    Those are the *scalar* figures. XLA re-associates the 32-term eta sum
+    differently once there is a batch axis, so an array or `jax.jit` argument
+    can differ from the scalar one by up to ``1.5e-14`` on the strip.
 
     Examples
     --------
