@@ -214,3 +214,25 @@ def test_second_derivative_at_the_pole_is_positive_infinity():
     """
     assert float(jax.grad(jax.grad(spence))(0.0)) == np.inf
     assert float(jax.grad(jax.grad(spence))(-0.0)) == np.inf
+
+
+@pytest.mark.parametrize("order", [1, 2, 3, 4, 5])
+def test_derivatives_at_the_removable_point_to_every_order(order):
+    """REGRESSION: each order in turn was 0 at z = 1, one round after the last.
+
+    The first derivative was 0 there (true -1), then the second was 0 (true
+    1/2), then the third was 0 (true -2/3) -- three separate findings, one
+    defect: a `jnp.where` substituting a *constant* at the removable point, and
+    a constant differentiates to zero. Patching one more order would only have
+    moved the boundary again.
+
+    `log(z)/(1-z)` is analytic at z = 1, so it is now evaluated there as the
+    series it equals. Differentiating a polynomial is right at every order, so
+    this asserts the whole chain rather than the next rung of it.
+    """
+    f = spence
+    for _ in range(order):
+        f = jax.grad(f)
+    with mp.workdps(40):
+        expected = float(mp.re(mp.diff(lambda t: mp.polylog(2, 1 - t), 1, order)))
+    np.testing.assert_allclose(f(1.0), expected, rtol=1e-9, atol=1e-12)

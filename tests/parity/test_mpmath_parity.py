@@ -235,7 +235,12 @@ def test_scaled_kn_in_the_tail_scipy_cannot_reach(order, func, z):
 @_SLOW
 @given(n=st.integers(min_value=1, max_value=20), z=floats(-1000.0, 0.999))
 def test_li(n, z):
-    """Measured worst case 3.4e-12 relative over 1 <= n <= 20, |z| <= 1000.
+    """Measured worst case 3.8e-14 relative over 1 <= n <= 20, |z| <= 1000.
+
+    The worst point sits just past the |z| = 2 branch boundary
+    (n = 12, z = -2 - 1e-9), which uniform sampling does not find; an
+    earlier figure of 1.3e-14 came from a grid that missed it. The gate
+    keeps 2.8x headroom, the tightest in the suite.
 
     `z` stops below 1: `Li_n` has a branch point there, and `Li_1(1)` is a pole.
     Values above it are covered by `tests/unit/test_polylog.py`, which pins the

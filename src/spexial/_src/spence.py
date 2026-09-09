@@ -175,9 +175,24 @@ def _spence_gradient(z: AnyArrayLike) -> AnyArray:
     # would be a plausible-looking wrong answer at exactly one point, and the
     # one place a user is most likely to evaluate. `z = 0` needs no special
     # case: log(0)/(1-0) is -inf, which is the true derivative.
-    at_one = z == 1
-    z_safe = jnp.where(at_one, 2.0, z)
-    return jnp.where(at_one, -1.0, jnp.log(z_safe) / (1 - z_safe))
+    # Near z = 1 this is evaluated as the power series it equals, not as the
+    # quotient with a constant patched in at the singular point. `log(z)/(1-z)`
+    # is *itself* analytic there: with u = z - 1,
+    #
+    #     log(1 + u) / (-u) = -1 + u/2 - u^2/3 + ... = sum_j (-1)^(j+1) u^j/(j+1)
+    #
+    # so a `where(z == 1, -1.0, ...)` gets the value right and every derivative
+    # wrong -- a constant differentiates to zero. That cost `spence''(1)` (0
+    # against 1/2) and then `spence'''(1)` (0 against -2/3), each found one
+    # round after the last. The series has no such floor: differentiating a
+    # polynomial is correct at every order, so this closes the whole chain
+    # rather than one more rung of it.
+    near_one = jnp.abs(z - 1) < 0.5
+    u = jnp.where(near_one, z - 1, 0.0)
+    j = jnp.arange(_PLAIN_TERMS, dtype=_real_dtype(jnp.asarray(z)))
+    series = jnp.polyval(((-1.0) ** (j + 1) / (j + 1))[::-1], u)
+    z_safe = jnp.where(near_one, 2.0, z)
+    return jnp.where(near_one, series, jnp.log(z_safe) / (1 - z_safe))
 
 
 @_spence_gradient.defjvp
@@ -200,11 +215,20 @@ def _spence_gradient_jvp(
     side, since `1/z` outruns `log z`.
     """
     (z,), (dz,) = primals, tangents
-    at_one = z == 1
+    # Same treatment as the gradient itself, and for the same reason: term-by-
+    # term differentiation of that series, `sum_m (m+1)(-1)^m u^m/(m+2)`, which
+    # is again a polynomial and therefore right to every further order.
+    near_one = jnp.abs(z - 1) < 0.5
+    u = jnp.where(near_one, z - 1, 0.0)
+    m = jnp.arange(_PLAIN_TERMS - 1, dtype=_real_dtype(jnp.asarray(z)))
+    series = jnp.polyval(((m + 1) * (-1.0) ** m / (m + 2))[::-1], u)
     at_zero = z == 0
-    z_safe = jnp.where(at_one | at_zero, 2.0, z)
-    second = 1.0 / (z_safe * (1 - z_safe)) + jnp.log(z_safe) / (1 - z_safe) ** 2
-    second = jnp.where(at_one, 0.5, jnp.where(at_zero, jnp.inf, second))
+    z_safe = jnp.where(near_one | at_zero, 2.0, z)
+    closed = 1.0 / (z_safe * (1 - z_safe)) + jnp.log(z_safe) / (1 - z_safe) ** 2
+    # `z = 0` is a genuine pole, not a removable point: every order diverges,
+    # so a constant is the only answer available and orders past this one are
+    # 0 there. `z = 1` needs no such guard any more.
+    second = jnp.where(near_one, series, jnp.where(at_zero, jnp.inf, closed))
     return _spence_gradient(z), second * dz
 
 

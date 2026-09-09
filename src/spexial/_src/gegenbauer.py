@@ -31,10 +31,12 @@ def C0(x: AnyArrayLike, /) -> AnyArray:
 
     """
     x_arr = jnp.asarray(x)
-    # `x * 0 + 1` is `nan` at +-inf, and that `nan` then propagates through the
-    # recurrence to every order. `C_0 == 1` at every x including the infinities,
-    # which is what `scipy.special.eval_gegenbauer` returns. A `nan` x still
-    # gives `nan`.
+    # `x * 0 + 1` is `nan` at +-inf. `C_0 == 1` at every x including the
+    # infinities, which is what `scipy.special.eval_gegenbauer` returns, and a
+    # `nan` x still gives `nan`. This fixes orders 0 to 2 only: from n = 3 the
+    # recurrence itself forms `inf - inf` and returns `nan` where the true value
+    # is +-inf. That is outside the supported |x| <= 1 and is documented on the
+    # accuracy page; SciPy is not self-consistent there either.
     return jnp.where(jnp.isinf(x_arr), 1.0, x_arr * 0.0 + 1.0)
 
 

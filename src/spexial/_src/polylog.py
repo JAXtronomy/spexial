@@ -96,8 +96,11 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:
     -----
     Measured against `mpmath.polylog` over ``1 <= n <= 20`` and
     ``|z| <= 1000``, the relative error stays below ~1e-12 in all three
-    branches. Large ``n`` is bounded by :math:`\Gamma(n+1)`, which overflows
-    above ``n = 170``.
+    branches. The bound on ``n`` is branch-dependent, and the tighter
+    one bites first: for :math:`\lvert z \rvert \ge 2` the inversion formula
+    needs the Bernoulli table, which stops at :math:`B_{60}`, so ``n > 60``
+    there returns `nan`. The other two branches run to ``n = 170``, where
+    :math:`\Gamma(n+1)` overflows.
 
     Examples
     --------
