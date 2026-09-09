@@ -23,7 +23,9 @@ optionflags = ELLIPSIS | NORMALIZE_WHITESPACE
 # jax: an example that trips a fresh trace/compile, or just lands on a busy CPU
 # during a full-suite run, blows past it. The deadline failure then does not
 # reproduce on replay, so it surfaces as an unactionable `FlakyFailure`. Turn it
-# off globally; per-test `@settings` still override this.
+# off globally. Per-test `@settings` still override this, which is a trap:
+# `tests/parity/test_spence.py` carried `@settings(deadline=1000)` on two
+# tests and duly went flaky under load, so do not reintroduce one.
 try:
     import hypothesis
 except ImportError:

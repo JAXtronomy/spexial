@@ -16,7 +16,7 @@ import jax.numpy as jnp
 import jax.scipy.special as jss
 import numpy as np
 import pytest
-from hypothesis import example, given, settings, strategies as st
+from hypothesis import example, given, strategies as st
 from scipy.special import spence as scipy_spence
 
 from spexial import spence
@@ -28,7 +28,6 @@ from spexial import spence
 )
 @example(1.0, 0.0)
 @example(5, 0)
-@settings(deadline=1000)
 def test_spence_matches_scipy(x, phi):
     r"""`spexial.spence` matches `scipy.special.spence`, real and complex.
 
@@ -45,7 +44,6 @@ def test_spence_matches_scipy(x, phi):
 
 
 @given(st.floats(min_value=0.05, max_value=10))
-@settings(deadline=1000)
 def test_gradient_matches_the_closed_form(x):
     r"""The derivative is the integrand of the definition, :math:`\log z/(1-z)`.
 
