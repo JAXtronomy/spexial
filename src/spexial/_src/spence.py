@@ -16,6 +16,7 @@ from typing import Any, Final
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax.scipy.special import spence as _jax_spence
 
 from .custom_types import AnyArray, AnyArrayLike
 
@@ -157,6 +158,18 @@ def spence(z: AnyArrayLike, /) -> AnyArray:
     z = jnp.asarray(z)
     if not jnp.issubdtype(z.dtype, jnp.inexact):
         z = z.astype(jnp.asarray(0.0).dtype)
+    # Real input is handed straight to JAX, which is the same choice `gamma`
+    # makes and for the same reason: a delegated value cannot drift from
+    # upstream, and upstream is more accurate here (2.0e-15 against 2.4e-14 for
+    # the series below, measured over [1e-6, 50] against mpmath at 40 digits).
+    # It also sidesteps the removable 0/0 the series inherited from SciPy's
+    # Cython at Spence argument 3 +- sqrt(3).
+    #
+    # The series is kept for complex input, which `jax.scipy.special.spence`
+    # rejects outright, and `spexial` supplies the derivative in both cases --
+    # JAX's own gradient is `nan` across roughly 1 < z < 2.
+    if not jnp.issubdtype(z.dtype, jnp.complexfloating):
+        return _jax_spence(z)
     return jax.lax.select(
         abs(z) < 0.5,
         _series_about_zero(z),

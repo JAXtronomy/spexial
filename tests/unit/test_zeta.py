@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import mpmath as mp
 import numpy as np
 import pytest
 from scipy.special import zeta as scipy_zeta
@@ -19,14 +20,18 @@ def test_float_input_does_not_raise():
 
 
 @pytest.mark.parametrize("n", [-61.0, -101.0, -1001.0])
-def test_odd_negatives_past_the_table_are_nan(n):
-    """REGRESSION: out-of-range indices used to be silently clamped.
+def test_odd_negatives_past_the_table(n):
+    """Beyond the Bernoulli table these come from the functional equation.
 
-    ``bernoulli_ary[-n + 1]`` past the end of the table is clamped by JAX to
-    the last element, so ``zeta(-61)`` quietly returned ``zeta(-59)``'s
-    Bernoulli number instead of failing.
+    They used to be `nan`, which was better than the silent index clamping it
+    replaced -- `zeta(-61)` once returned `zeta(-59)`'s Bernoulli number -- but
+    still a gap SciPy did not have. The reflection formula needs only
+    `gamma` and `zeta(1 - n)` with `1 - n > 1`, both of which are available, so
+    the whole negative half-line is now reachable.
     """
-    assert jnp.isnan(sp.zeta(n))
+    with mp.workdps(30):
+        expected = float(mp.zeta(n))
+    np.testing.assert_allclose(sp.zeta(n), expected, rtol=1e-12)
 
 
 @pytest.mark.parametrize("n", [-60.0, -100.0, -1000.0])
@@ -46,20 +51,32 @@ def test_pole_at_one():
 
 
 @pytest.mark.parametrize("n", [0.1, 0.5, 0.9])
-def test_critical_strip_is_unsupported(n):
-    """0 < n <= 1 is `nan`: `jax.scipy.special.zeta` does not cover it.
+def test_critical_strip(n):
+    """`0 < n <= 1` comes from the eta series; upstream returns `nan` there.
 
-    `scipy.special.zeta` does; this is a genuine gap, not a rounding issue.
+    `jax.scipy.special.zeta` does not implement the Riemann zeta on the strip,
+    and the functional equation does not help because it maps the strip onto
+    itself. The alternating series converges there but far too slowly to use
+    directly, so Borwein's acceleration supplies it in 32 terms.
     """
-    assert jnp.isnan(sp.zeta(n))
-    assert np.isfinite(scipy_zeta(n))
+    with mp.workdps(30):
+        expected = float(mp.zeta(n))
+    np.testing.assert_allclose(sp.zeta(n), expected, rtol=1e-12)
+    np.testing.assert_allclose(sp.zeta(n), scipy_zeta(n), rtol=1e-12)
 
 
 @pytest.mark.parametrize("n", [-0.5, -1.5, -2.5])
-def test_non_integer_negatives_are_unsupported(n):
-    """The functional equation used here needs an integer, so these are `nan`."""
-    assert jnp.isnan(sp.zeta(n))
-    assert np.isfinite(scipy_zeta(n))
+def test_non_integer_negatives(n):
+    """The reflection formula covers these; the Bernoulli one could not.
+
+    `zeta(-k) = (-1)^k B_{k+1}/(k+1)` needs `(-1)^-n`, which is undefined for a
+    non-integer, so these were `nan`. The functional equation has no such
+    restriction.
+    """
+    with mp.workdps(30):
+        expected = float(mp.zeta(n))
+    np.testing.assert_allclose(sp.zeta(n), expected, rtol=1e-12)
+    np.testing.assert_allclose(sp.zeta(n), scipy_zeta(n), rtol=1e-12)
 
 
 def test_array_input():

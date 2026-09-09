@@ -2,10 +2,13 @@
 
 __all__ = ["zeta"]
 
+from fractions import Fraction
+from functools import cache
+from math import factorial
 from typing import Final
 
 import jax.numpy as jnp
-from jax.scipy.special import zeta as _hurwitz_zeta
+from jax.scipy.special import gammaln, zeta as _hurwitz_zeta
 
 from .bernoulli import ORDER, bernoulli_numbers
 from .custom_types import AnyArray, RealArrayLike
@@ -20,6 +23,95 @@ Returning
 the constant is not an approximation, and it sidesteps
 `jax.scipy.special.zeta`, which gives `nan` above ``n`` of about ``1e15``.
 """
+
+
+_ETA_TERMS: Final = 32
+"""Terms in the Borwein acceleration used on the critical strip.
+
+32 gives ~1e-15 over most of `0 < n < 1`, degrading to ~9e-13 as `n` approaches
+the pole at 1, where the value itself is diverging.
+"""
+
+
+@cache
+def _eta_coefficients() -> tuple[float, ...]:
+    r"""Borwein's :math:`d_k`, built from exact integer arithmetic.
+
+    .. math::
+
+        d_k = N \sum_{i=0}^{k} \frac{(N+i-1)!\,4^i}{(N-i)!\,(2i)!}
+
+    Exact `Fraction` arithmetic for the same reason `bernoulli_numbers` uses it:
+    the terms span many orders of magnitude and a floating-point recurrence
+    loses digits that the accelerated sum then cannot recover. The table is
+    small and fixed, so it is built once.
+    """
+    n = _ETA_TERMS
+    coefficients = []
+    total = Fraction(0)
+    for i in range(n + 1):
+        total += Fraction(
+            factorial(n + i - 1) * 4**i, factorial(n - i) * factorial(2 * i)
+        )
+        coefficients.append(float(n * total))
+    return tuple(coefficients)
+
+
+def _by_eta(n: AnyArray) -> AnyArray:
+    r""":math:`\zeta(n)` on the critical strip, through the eta function.
+
+    .. math::
+
+        \zeta(s) = \frac{\eta(s)}{1 - 2^{1-s}},
+        \qquad \eta(s) = \sum_{k \ge 1} \frac{(-1)^{k-1}}{k^s}
+
+    `jax.scipy.special.zeta` does not implement `0 < n <= 1` and returns `nan`
+    there, and the functional equation does not help: it maps the strip onto
+    itself. The alternating series does converge, just far too slowly to use
+    directly, so Borwein's acceleration supplies the answer in 32 terms.
+
+    At ``n = 1`` the denominator is exactly 0 and the result is `inf`, which is
+    the pole.
+    """
+    coefficients = jnp.asarray(_eta_coefficients(), dtype=n.dtype)
+    last = coefficients[_ETA_TERMS]
+    k = jnp.arange(1.0, _ETA_TERMS + 1.0, dtype=n.dtype)
+    # `n[..., None]` puts the 32 terms on a *trailing* axis and sums over that
+    # one only. Without it an array argument broadcasts against the term axis
+    # and the shapes collide -- the same mistake `_K0_small` once made with a
+    # bare `jnp.sum`, which silently collapsed the caller's own axis instead.
+    weights = (-1.0) ** (k - 1.0) * (coefficients[:_ETA_TERMS] - last)
+    eta = -jnp.sum(weights / k ** jnp.asarray(n)[..., None], axis=-1) / last
+    return eta / (1.0 - 2.0 ** (1.0 - n))
+
+
+def _by_reflection(n: AnyArray) -> AnyArray:
+    r""":math:`\zeta(n)` for negative `n`, via the functional equation.
+
+    .. math::
+
+        \zeta(s) = 2^s \pi^{s-1} \sin(\pi s/2)\, \Gamma(1-s)\, \zeta(1-s)
+
+    Every piece is already available: :math:`1 - s > 1` there, which is exactly
+    the range `jax.scipy.special.zeta` covers, and `gammaln` supplies the rest.
+    That makes the whole negative half-line reachable -- non-integers included,
+    and integers of any magnitude -- where the Bernoulli functional equation
+    reaches only the integers, and only as far as the table.
+
+    Evaluated in log space. :math:`\Gamma(1-s)` overflows a double from
+    :math:`s \approx -170.6`, while the *result* stays finite far beyond that
+    (:math:`\zeta(-171) \approx 1.3\times10^{172}`), so forming the product
+    directly would throw away a domain that is perfectly representable.
+    """
+    sine = jnp.sin(jnp.pi * n / 2)
+    log_magnitude = (
+        n * jnp.log(2.0)
+        + (n - 1.0) * jnp.log(jnp.pi)
+        + jnp.log(jnp.abs(sine))
+        + gammaln(1.0 - n)
+        + jnp.log(_hurwitz_zeta(1.0 - n, 1.0))
+    )
+    return jnp.sign(sine) * jnp.exp(log_magnitude)
 
 
 def zeta(n: RealArrayLike, /) -> AnyArray:
@@ -116,19 +208,33 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     # Likewise keep the denominator away from 0: k == -1 (i.e. n == 1) is the
     # pole, and belongs to the `positive` branch.
     denom = jnp.where(positive, 1.0, k + 1.0)
+    # The Bernoulli table is exact where it reaches -- 0 ulp against mpmath at
+    # the negative odd integers, better than SciPy -- so it is kept for those.
+    # Everything else on the negative half-line goes through the functional
+    # equation, which used to be `nan`: non-integers, and odd integers past the
+    # table. `1 - n` is safe there by construction, but the reflection is also
+    # evaluated on the unselected positive branch, so feed it a negative
+    # argument to keep `gammaln` and `log` off their own edges.
+    from_table = sign * bernoulli_numbers().astype(n_arr.dtype)[index] / denom
+    in_table = is_integer & (k_round + 1.0 <= ORDER)
     reflected = jnp.where(
-        ~is_integer | (k_round + 1.0 > ORDER),
-        jnp.nan,
-        sign * bernoulli_numbers().astype(n_arr.dtype)[index] / denom,
+        in_table, from_table, _by_reflection(jnp.where(n_arr < 0, n_arr, -0.5))
     )
 
     # `_hurwitz_zeta` is `nan` for n above ~1e15, and is exactly 1.0 for every n
     # past `_UNIT` anyway, so it is only ever called on the range it handles.
     unit = n_arr >= _UNIT
+    # `0 < n <= 1` is the critical strip, which upstream does not implement; the
+    # eta series covers it. Above 1, delegate as before. Both branches are
+    # evaluated, so each gets an argument the other's domain can survive.
+    strip = positive & (n_arr <= 1.0)
+    above = jnp.where(positive & ~unit & ~strip, n_arr, 2.0)
     return jnp.where(
         positive,
         jnp.where(
-            unit, 1.0, _hurwitz_zeta(jnp.where(positive & ~unit, n_arr, 2.0), 1.0)
+            strip,
+            _by_eta(jnp.where(strip, n_arr, 0.5)),
+            jnp.where(unit, 1.0, _hurwitz_zeta(above, 1.0)),
         ),
         jnp.where(
             (n_arr < 0) & is_integer & (jnp.mod(k_round, 2.0) == 0.0), 0.0, reflected

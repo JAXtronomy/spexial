@@ -3,7 +3,7 @@
 __all__ = ["comb"]
 
 import jax.numpy as jnp
-from jax.scipy.special import gammaln
+from jax.scipy.special import betaln, gammaln
 
 from .custom_types import AnyArray, AnyArrayLike
 
@@ -60,8 +60,22 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # +inf, and inf - inf would give nan rather than the 0 scipy returns.
     n_safe = jnp.where(in_domain, n_arr, 0.0)
     k_safe = jnp.where(in_domain, k_arr, 0.0)
+    # Two forms, because neither is best everywhere.
+    #
+    # The log-gamma difference is the more accurate of the two on the supported
+    # `N <= 170` domain (worst 3.2e-13 against 1.9e-11), but it cancels
+    # catastrophically beyond it: the two log-gammas converge as N grows and by
+    # N = 1e18 their difference is exactly 0, so the result collapsed to `1.0` --
+    # a plausible number where the truth is 5e35.
+    #
+    # `comb(N, k) = 1 / ((N + 1) B(N - k + 1, k + 1))` has no such subtraction
+    # and holds to ~1e-14 all the way to `DBL_MAX`. Used above the documented
+    # domain, it turns a silent wrong answer into a correct one.
     log_comb = gammaln(n_safe + 1) - gammaln(k_safe + 1) - gammaln(n_safe - k_safe + 1)
-    out = jnp.where(in_domain, jnp.exp(log_comb), 0.0)
+    from_beta = -betaln(n_safe - k_safe + 1, k_safe + 1) - jnp.log(n_safe + 1)
+    out = jnp.where(
+        in_domain, jnp.exp(jnp.where(n_arr > 170, from_beta, log_comb)), 0.0
+    )
     # `gammaln(inf) - gammaln(inf) - ...` is `inf - inf == nan`; the limit is
     # plainly +inf and scipy returns that -- except at k = 0, where C(N, 0) = 1
     # for every N including infinity, as scipy also returns.
