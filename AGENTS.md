@@ -47,7 +47,7 @@ The public namespace is deliberately **flat** — `spexial.gamma`, not `spexial.
 This is a numerics library. The interesting review question is never "does it run" — it is **"over what domain is this correct, and how do you know?"**
 
 - Every function has a parity test against `scipy.special`, or against `mpmath` where SciPy has no counterpart (`Li`).
-- **Never widen a tolerance to make a test pass.** The tolerances in `tests/parity/` are measured worst-case errors with modest headroom, and several are _not_ machine precision — `K0`/`K1`/`K2` assert rtol `1e-6` because a 30-term series meeting a 10-term asymptotic expansion at `z = 9` delivers `8e-8`, and no more. Loosening one of these silently converts a regression into a pass.
+- **Never widen a tolerance to make a test pass.** The tolerances in `tests/parity/` are measured worst-case errors with modest headroom, and several are _not_ machine precision — `K0`/`K1`/`K2` assert rtol `1e-6` because a 30-term series meeting a 10-term asymptotic expansion at `z = 9` delivers `1.2e-7`, and no more — and that is the _float64_ figure; in float32 the cross-over moves to 4.65 and the worst is `7.1e-3`. Loosening one of these silently converts a regression into a pass.
 - Where a domain is genuinely unsupported, it is expressed as a domain restriction with a comment, or as an explicit test of the `nan`/degraded behaviour — not as a skip. Keep it that way.
 - Every documented domain and tolerance lives in [docs/reference/accuracy-and-domains.md](docs/reference/accuracy-and-domains.md). **A change to numerical behaviour must update that page in the same PR.**
 
@@ -72,7 +72,7 @@ This is the procedure the library is organised around, and it is driven entirely
 3. **As fast** to differentiate — `cost.speed >= 1.0`.
 4. **As lean** to differentiate — `cost.memory >= 1.0`.
 
-Points 3 and 4 are why `gamma` survived a floor at which it was otherwise redundant: JAX computes the value, but differentiating JAX's implementation costs 3x the residual memory of `Gamma'(x) = Gamma(x) psi(x)`, at **no** saving in time (measured 1.0x, i.e. parity — an earlier revision of this file claimed 4.3x faster, which was a measurement error). `gamma` is therefore the clearest case of the general rule: **memory is usually the deciding column, not speed** — a custom JVP replaces a whole series' worth of saved intermediates with one array, and for `K0` that is 67x less residual against a 2.0x speed-up. A row that wins on memory alone still earns its place; a row that wins on neither does not.
+Points 3 and 4 are why `gamma` survived a floor at which it was otherwise redundant: JAX computes the value, but differentiating JAX's implementation costs 3x the residual memory of `Gamma'(x) = Gamma(x) psi(x)`, at **no** saving in time (measured 1.0x, i.e. parity — an earlier revision of this file claimed 4.3x faster, which was a measurement error). `gamma` is therefore the clearest case of the general rule: **memory is usually the deciding column, not speed** — a custom JVP replaces a whole series' worth of saved intermediates with one array, and for `K0` that is 68x less residual against a 1.5x speed-up. A row that wins on memory alone still earns its place; a row that wins on neither does not.
 
 If a row fails only 3 or 4, it does not get removed — it becomes `Status.DELEGATES`: call upstream for the value so it cannot drift, and keep our `jax.custom_jvp`. That is strictly better than reimplementing.
 

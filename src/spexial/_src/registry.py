@@ -93,7 +93,7 @@ class Cost:
 
     Memory is the column that usually decides. A custom JVP replaces a whole
     series' worth of saved intermediates with a single array, and the saving is
-    far larger than the speed-up: `K0` differentiates 2.1x faster but keeps 67x
+    far larger than the speed-up: `K0` differentiates 1.5x faster but keeps 68x
     less residual.
     """
 
@@ -175,15 +175,13 @@ _ROWS: Final = (
         status=Status.UNIQUE,
         custom_jvp=True,
         derivative="-K1(z)",
-        cost=Cost(
-            speed=1 / 2.04, memory=1 / 67.3, against="differentiating our own series"
-        ),
+        cost=Cost(speed=0.674, memory=0.0146, against="differentiating our own series"),
         notes=(
             "JAX has no modified Bessel function of the second kind at any "
             "version. scipy's `k0` returns a value under `jit` but raises under "
-            "`grad`. `spexial` defines the analytic derivative, which measured 2.04x "
-            "faster than differentiating the 30-term series (579us -> 285us "
-            "for `grad` over 1000 points)."
+            "`grad`. `spexial` defines the analytic derivative, which measured 1.5x "
+            "faster than differentiating the 30-term series, and keeps 68x "
+            "less residual -- the column that actually decides."
         ),
     ),
     Coverage(
@@ -195,12 +193,12 @@ _ROWS: Final = (
         status=Status.UNIQUE,
         custom_jvp=True,
         derivative="-K0(z) - K1(z) / z",
-        cost=Cost(speed=1.11, memory=1 / 3.0, against="differentiating our own series"),
+        cost=Cost(speed=0.994, memory=0.333, against="differentiating our own series"),
         notes=(
-            "As `K0`, but the trade is now the other way round: `K1` is a thin "
-            "wrapper over `K1e`, whose own rule autodiff already picks up, so "
-            "the hand-written rule buys 3x less residual for 11% more "
-            "wall-clock. Kept for the memory column. K1'(z) = -K0(z) - K1(z)/z."
+            "As `K0`. `K1` is a thin wrapper over `K1e`, whose own rule autodiff "
+            "already picks up, so the hand-written rule earns its place on the "
+            "memory column -- 3x less residual at neutral wall-clock. "
+            "K1'(z) = -K0(z) - K1(z)/z."
         ),
     ),
     Coverage(
@@ -212,7 +210,7 @@ _ROWS: Final = (
         status=Status.UNIQUE,
         custom_jvp=True,
         derivative="-K1(z) - (2/z) K2(z)",
-        cost=Cost(speed=1.06, memory=1 / 3.0, against="differentiating our own series"),
+        cost=Cost(speed=0.989, memory=0.333, against="differentiating our own series"),
         notes=(
             "`scipy.special.kn` does not dispatch on JAX arrays at all, even "
             "with the array API enabled. As `K1`, kept for the memory column. "
@@ -230,9 +228,7 @@ _ROWS: Final = (
         status=Status.UNIQUE,
         custom_jvp=True,
         derivative="K0e(z) - K1e(z)",
-        cost=Cost(
-            speed=1 / 1.38, memory=1 / 67.3, against="differentiating our own series"
-        ),
+        cost=Cost(speed=0.573, memory=0.0146, against="differentiating our own series"),
         notes=(
             "Exponentially scaled e^z K0(z), matching `scipy.special.k0e`. JAX "
             "has no scaled Bessel K at any version, and scipy's does not "
@@ -249,9 +245,7 @@ _ROWS: Final = (
         status=Status.UNIQUE,
         custom_jvp=True,
         derivative="K1e(z) - K0e(z) - K1e(z) / z",
-        cost=Cost(
-            speed=1 / 1.09, memory=1 / 11.1, against="differentiating our own series"
-        ),
+        cost=Cost(speed=0.875, memory=0.0755, against="differentiating our own series"),
         notes="As `K0e`; matches `scipy.special.k1e`.",
     ),
     Coverage(
@@ -263,9 +257,7 @@ _ROWS: Final = (
         status=Status.UNIQUE,
         custom_jvp=True,
         derivative="K2e(z) - K1e(z) - (2/z) K2e(z)",
-        cost=Cost(
-            speed=1 / 1.01, memory=1 / 5.0, against="differentiating our own series"
-        ),
+        cost=Cost(speed=0.982, memory=0.195, against="differentiating our own series"),
         notes="As `K0e`; matches `scipy.special.kve(2, z)`.",
     ),
     Coverage(
@@ -278,7 +270,7 @@ _ROWS: Final = (
         custom_jvp=True,
         derivative="Li_{n-1}(z) / z",
         cost=Cost(
-            speed=1.73,
+            speed=1.288,
             memory=1 / 268.0,
             against="differentiating our own series",
         ),
@@ -364,7 +356,7 @@ _ROWS: Final = (
         custom_jvp=False,
         derivative=None,
         cost=Cost(
-            speed=1.15, memory=None, against="jax.scipy.special.zeta, n > 1 only"
+            speed=1.078, memory=None, against="jax.scipy.special.zeta, n > 1 only"
         ),
         notes=(
             "`jax.scipy.special.zeta` is the Hurwitz form and returns `nan` for "
@@ -383,7 +375,7 @@ _ROWS: Final = (
         status=Status.REDUNDANT_ABOVE_FLOOR,
         custom_jvp=False,
         derivative=None,
-        cost=Cost(speed=0.97, memory=None, against="jax.scipy.special.comb"),
+        cost=Cost(speed=1.067, memory=None, against="jax.scipy.special.comb"),
         notes=(
             "Added to JAX in 0.10.2, below which `spexial` is still needed. "
             "`jax.scipy.special.comb` agrees on every edge case `spexial` "
@@ -400,7 +392,7 @@ _ROWS: Final = (
         status=Status.DELEGATES,
         custom_jvp=True,
         derivative="gamma(x) psi(x)",
-        cost=Cost(speed=1.03, memory=1 / 3.0, against="jax.scipy.special.gamma"),
+        cost=Cost(speed=0.998, memory=0.333, against="jax.scipy.special.gamma"),
         notes=(
             "The value is `jax.scipy.special.gamma`, called directly, so it "
             "cannot drift. What `spexial` adds is the derivative: "

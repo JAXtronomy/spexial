@@ -90,6 +90,20 @@ def _crossover(dtype: Any) -> float:
     return _SMALL_Z if jnp.finfo(dtype).eps < 1e-10 else _SMALL_Z_LOW_PRECISION
 
 
+def _two_over(z: AnyArray) -> AnyArray:
+    """``2 / z``, with `-0.0` treated as the same pole as `+0.0`.
+
+    `2 / -0.0` is `-inf`, which turns `K2`'s `K0e + (2/z) K1e` into
+    `inf - inf == nan` -- at a point ordinary arithmetic reaches, since
+    `jnp.asarray(0.0) * -1` is `-0.0`. Taking `abs` first is correct over the
+    whole domain and costs nothing: for `z > 0` it is the identity, at either
+    zero it gives `+inf`, and for `z < 0` -- the only place the sign could
+    matter -- `K0e` and `K1e` are already `nan`, so the result is `nan` either
+    way.
+    """
+    return 2.0 / jnp.abs(z)
+
+
 def _cast_like(out: AnyArray, z: RealArrayLike) -> AnyArray:
     """Return to a narrower input dtype after computing in at least float32.
 
@@ -102,7 +116,7 @@ def _cast_like(out: AnyArray, z: RealArrayLike) -> AnyArray:
 
 
 def _as_float(z: RealArrayLike) -> AnyArray:
-    """Promote to at least float32, and normalise the sign of zero.
+    """Promote to at least float32.
 
     The promotion is not cosmetic. `_SMALL_Z_LOW_PRECISION` was measured for
     float32; `float16` and `bfloat16` have no working cross-over at all, because
@@ -113,14 +127,14 @@ def _as_float(z: RealArrayLike) -> AnyArray:
     in float32 and rounding back (see `_cast_like`) keeps the caller's dtype
     while giving it the ~3e-3 that dtype can actually represent.
 
-    `-0.0` is the same pole as `+0.0` and every K_n is `inf` at it, but `2 / -0.0`
-    is `-inf`, which turns `K2`'s `K0e + (2/z) K1e` into `inf - inf == nan`. It
-    is reachable from ordinary arithmetic (`jnp.asarray(0.0) * -1`), so it is
-    normalised once here rather than guarded at each use.
+    This deliberately does *not* normalise `-0.0`. It used to, with
+    `where(z == 0.0, 0.0, z)` -- which cost a select on every call, and, because
+    XLA's comparison treats subnormals as zero, silently mapped every subnormal
+    argument to an exact zero as well. Signed zero is handled where it actually
+    matters instead; see `_two_over`.
     """
     z_arr = jnp.asarray(z) * 1.0
-    wide = z_arr.astype(jnp.promote_types(z_arr.dtype, jnp.float32))
-    return jnp.where(wide == 0.0, 0.0, wide)
+    return z_arr.astype(jnp.promote_types(z_arr.dtype, jnp.float32))
 
 
 def _split(z: RealArrayLike) -> tuple[AnyArray, AnyArray, AnyArray, AnyArray]:
@@ -218,7 +232,12 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
     # `(0 - 0 * 0) / 0 == nan` for the same reason `K0e` needs a guard.
     # Substitute both limits.
     at_zero, at_inf = z_arr == 0.0, z_arr == jnp.inf
-    z_safe = jnp.where(at_zero | at_inf, 1.0, z_arr)
+    # `z_arr` itself, not a substituted `z_safe`. The degenerate points are
+    # overwritten by the `where` below, so the substitution bought nothing --
+    # and it cost a great deal: `K0e(z_safe)` is a *different* subgraph from the
+    # `K0e(z_arr)` its callers evaluate, so `K2`, `K2e` and every JVP that needs
+    # both ran the 30-term series twice with no CSE available.
+    z_safe = z_arr
     # The Wronskian gives `(1/z - i1e K0e) / i0e`; this is that identity with
     # numerator and denominator both multiplied by z. Algebraically the same,
     # but every term stays normal: `1/z` alone goes subnormal above z = 4.5e307
@@ -266,7 +285,7 @@ def K2e(z: RealArrayLike, /) -> AnyArray:
 
     """
     z_arr = _as_float(z)
-    return _cast_like(K0e(z_arr) + 2.0 / z_arr * K1e(z_arr), z)
+    return _cast_like(K0e(z_arr) + _two_over(z_arr) * K1e(z_arr), z)
 
 
 @jax.custom_jvp
@@ -428,7 +447,7 @@ def _K1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArr
     """
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    deriv = -(K0e(z_arr) + K1e(z_arr) / z_arr) * jnp.exp(-z_arr)
+    deriv = -(K0e(z_arr) + 0.5 * _two_over(z_arr) * K1e(z_arr)) * jnp.exp(-z_arr)
     return K1(z_arr), deriv * dz
 
 
@@ -444,9 +463,10 @@ def _K2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArr
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
     k0e, k1e = K0e(z_arr), K1e(z_arr)
-    k2e = k0e + 2.0 / z_arr * k1e
+    two_over_z = _two_over(z_arr)
+    k2e = k0e + two_over_z * k1e
     scale = jnp.exp(-z_arr)
-    deriv = -(k1e + 2.0 / z_arr * k2e) * scale
+    deriv = -(k1e + two_over_z * k2e) * scale
     return _cast_like(k2e * scale, z), deriv * dz
 
 
@@ -483,7 +503,7 @@ def _K1e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyAr
     """(e^z K1)' = e^z K1 - e^z K0 - e^z K1 / z."""
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    deriv = K1e(z_arr) - K0e(z_arr) - K1e(z_arr) / z_arr
+    deriv = K1e(z_arr) - K0e(z_arr) - 0.5 * _two_over(z_arr) * K1e(z_arr)
     return K1e(z_arr), _at_pole(z_arr, deriv) * dz
 
 
@@ -492,5 +512,5 @@ def _K2e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyAr
     """(e^z K2)' = e^z K2 - e^z K1 - (2/z) e^z K2."""
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    deriv = K2e(z_arr) - K1e(z_arr) - 2.0 / z_arr * K2e(z_arr)
+    deriv = K2e(z_arr) - K1e(z_arr) - _two_over(z_arr) * K2e(z_arr)
     return K2e(z_arr), _at_pole(z_arr, deriv) * dz

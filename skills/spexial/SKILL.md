@@ -30,6 +30,7 @@ import spexial as sp
 | `eval_gegenbauer(n, alpha, x)` | `eval_gegenbauer` | `n` is a static integer |
 | `eval_gegenbauers(n, alpha, x)` | -- | all orders `0..n` at once |
 | `K0(z)`, `K1(z)`, `K2(z)` | `k0`, `k1`, `kn` | modified Bessel, 2nd kind |
+| `K0e(z)`, `K1e(z)`, `K2e(z)` | `k0e`, `k1e`, `kve` | the same, scaled by `e^z`; **the only ones that work past `z = 705`** |
 | `Li(n, z)` | -- | polylogarithm; **scalar `z` only** |
 | `zeta(n)` | `zeta` | handles negative integers |
 
@@ -67,7 +68,11 @@ result = jax.vmap(lambda z: sp.Li(2, z))(zs)
 
 `n` must be an integer `>= 1`, and is bounded above by gamma overflow around 170.
 
-**`K0`/`K1`/`K2` are accurate to ~`1e-7`, not machine precision.** A 30-term ascending series meets a 10-term asymptotic expansion at `z = 9`; the worst relative error is `8e-8`, right at that cross-over. Away from it, ~`1e-10`. If you need full double precision from a modified Bessel function, this is not it. `K1` underflows to 0 above `z ~ 700`.
+**`K0`/`K1`/`K2` are accurate to ~`1e-7`, not machine precision.** A 30-term ascending series meets a 10-term asymptotic expansion at `z = 9`; the worst relative error is `1.2e-7`, right at that cross-over. It improves in stages away from it: ~`8e-9` to `z = 15`, ~`1e-15` past `z = 30`. If you need full double precision from a modified Bessel function, this is not it.
+
+**Above `z = 705.5`, use `K0e`/`K1e`/`K2e`.** The unscaled functions underflow to 0 there — the true value is smaller than any normal double, and XLA on CPU flushes it. The scaled `e^z K_n(z)` decays only as `1/sqrt(z)` and stays exact to `DBL_MAX`.
+
+**In float32 the cross-over moves to `z = 4.65` and the worst error is `7.1e-3`** — about 2.5 digits. `float16`/`bfloat16` are computed in float32 and rounded back. Enable x64 if you need better.
 
 **`n` in the Gegenbauer functions is static.** It is a Python integer baked into the trace, not a traced value — a different `n` triggers recompilation. Do not `vmap` over it.
 
@@ -80,6 +85,7 @@ Everything below assumes x64. Full detail, including how each was measured, is a
 | `comb`            | `0 <= N, k <= 170`                      | `3e-13`      |
 | `gamma`           | real or complex, `\|x\| < 171`          | `4e-13`      |
 | `eval_gegenbauer` | `n <= 20`, `alpha > -0.5`, `\|x\| <= 1` | `2e-12` atol |
-| `K0`/`K1`/`K2`    | `0 < z < 700`                           | `8e-8`       |
+| `K0`/`K1`/`K2`    | `0 < z < 705.5`                         | `1.2e-7`     |
+| `K0e`/`K1e`/`K2e` | `z > 0`, no upper limit                 | `1.2e-7`     |
 | `Li`              | scalar `z`, `n >= 1`                    | `6e-13`      |
 | `zeta`            | `n > 1`, or negative integer `> -60`    | `7e-16`      |
