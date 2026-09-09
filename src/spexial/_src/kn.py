@@ -547,13 +547,75 @@ def _at_pole(z: AnyArray, deriv: AnyArray) -> AnyArray:
     return jnp.where((z >= 0.0) & jnp.isnan(deriv), -jnp.inf, deriv)
 
 
+def _at_second_pole(z: AnyArray, second: AnyArray) -> AnyArray:
+    """`+inf` where a second-derivative rule degenerates on the non-negative axis.
+
+    Every K_n'' diverges to `+inf` at the pole (the `1/z^2` term dominates), but
+    the closed forms are `inf - inf` there. Guarded the same way as `_at_pole`,
+    on the result rather than on a magnitude, and to `+inf` rather than `-inf`
+    because the second derivative approaches from the other side.
+    """
+    return jnp.where((z >= 0.0) & jnp.isnan(second), jnp.inf, second)
+
+
+@jax.custom_jvp
+def _dK0e(z: AnyArray) -> AnyArray:
+    """(e^z K0)' = e^z (K0 - K1). See `_dK1` for why this is a named function."""
+    return _at_pole(z, K0e(z) - K1e(z))
+
+
+@_dK0e.defjvp
+def _dK0e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """(e^z K0)'' = 2 e^z K0 - 2 e^z K1 + e^z K1 / z."""
+    (z,), (dz,) = primals, tangents
+    k0e, k1e = K0e(z), K1e(z)
+    second = 2.0 * k0e - 2.0 * k1e + 0.5 * _two_over(z) * k1e
+    return _dK0e(z), _at_second_pole(z, second) * dz
+
+
+@jax.custom_jvp
+def _dK1e(z: AnyArray) -> AnyArray:
+    """(e^z K1)' = e^z K1 - e^z K0 - e^z K1 / z."""
+    return _at_pole(z, K1e(z) - K0e(z) - 0.5 * _two_over(z) * K1e(z))
+
+
+@_dK1e.defjvp
+def _dK1e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """(e^z K1)'' = 2G1 - 2G0 - 2G1/z + G0/z + 2G1/z^2, with Gn = e^z K_n."""
+    (z,), (dz,) = primals, tangents
+    k0e, k1e, half = K0e(z), K1e(z), 0.5 * _two_over(z)
+    second = 2.0 * k1e - 2.0 * k0e - 2.0 * half * k1e + half * k0e + 2.0 * half**2 * k1e
+    return _dK1e(z), _at_second_pole(z, second) * dz
+
+
+@jax.custom_jvp
+def _dK2e(z: AnyArray) -> AnyArray:
+    """(e^z K2)' = e^z K2 - e^z K1 - (2/z) e^z K2."""
+    return _at_pole(z, K2e(z) - K1e(z) - _two_over(z) * K2e(z))
+
+
+@_dK2e.defjvp
+def _dK2e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """(e^z K2)'' = G0 - 2G1 + G2 + 3G1/z - 4G2/z + 6G2/z^2."""
+    (z,), (dz,) = primals, tangents
+    k0e, k1e, k2e, half = K0e(z), K1e(z), K2e(z), 0.5 * _two_over(z)
+    second = (
+        k0e
+        - 2.0 * k1e
+        + k2e
+        + 3.0 * half * k1e
+        - 4.0 * half * k2e
+        + 6.0 * half**2 * k2e
+    )
+    return _dK2e(z), _at_second_pole(z, second) * dz
+
+
 @K0e.defjvp
 def _K0e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
     """(e^z K0)' = e^z (K0 - K1)."""
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    deriv = _at_pole(z_arr, K0e(z_arr) - K1e(z_arr))
-    return _cast_like(K0e(z_arr), z), _cast_like(deriv, z) * dz
+    return _cast_like(K0e(z_arr), z), _cast_like(_dK0e(z_arr), z) * dz
 
 
 @K1e.defjvp
@@ -561,8 +623,7 @@ def _K1e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyAr
     """(e^z K1)' = e^z K1 - e^z K0 - e^z K1 / z."""
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    deriv = K1e(z_arr) - K0e(z_arr) - 0.5 * _two_over(z_arr) * K1e(z_arr)
-    return _cast_like(K1e(z_arr), z), _cast_like(_at_pole(z_arr, deriv), z) * dz
+    return _cast_like(K1e(z_arr), z), _cast_like(_dK1e(z_arr), z) * dz
 
 
 @K2e.defjvp
@@ -570,5 +631,4 @@ def _K2e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyAr
     """(e^z K2)' = e^z K2 - e^z K1 - (2/z) e^z K2."""
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    deriv = K2e(z_arr) - K1e(z_arr) - _two_over(z_arr) * K2e(z_arr)
-    return _cast_like(K2e(z_arr), z), _cast_like(_at_pole(z_arr, deriv), z) * dz
+    return _cast_like(K2e(z_arr), z), _cast_like(_dK2e(z_arr), z) * dz

@@ -10,7 +10,7 @@ import jax.numpy as jnp
 
 from .custom_types import AnyArray, AnyArrayLike, ScalarLike, Vector
 
-_Carry: TypeAlias = tuple[ScalarLike, AnyArray, AnyArray, AnyArray]
+_Carry: TypeAlias = tuple[AnyArray, AnyArray, AnyArray, AnyArray]
 
 
 def C0(x: AnyArrayLike, /) -> AnyArray:
@@ -38,7 +38,7 @@ def C0(x: AnyArrayLike, /) -> AnyArray:
     return jnp.where(jnp.isinf(x_arr), 1.0, x_arr * 0.0 + 1.0)
 
 
-def C1(alpha: ScalarLike, x: AnyArrayLike, /) -> AnyArray:
+def C1(alpha: AnyArrayLike, x: AnyArrayLike, /) -> AnyArray:
     r"""Return the Gegenbauer polynomial of order 1, :math:`2 \alpha x`.
 
     Examples
@@ -53,6 +53,27 @@ def C1(alpha: ScalarLike, x: AnyArrayLike, /) -> AnyArray:
     # while `C0` is always float, and `lax.scan` then rejects the carry as having
     # mismatched types. scipy promotes integer input to float, so we do too.
     return 2 * jnp.asarray(alpha) * jnp.asarray(x) * 1.0
+
+
+def _seed(alpha: AnyArrayLike, x: AnyArrayLike, /) -> tuple[AnyArray, AnyArray]:
+    """Broadcast `alpha` against `x` so the recurrence carry is shape-stable.
+
+    `C0` follows `x`'s shape while `C1` follows the broadcast of both, so an
+    `alpha` wider than `x` gave the `lax.scan` carry one shape going in and
+    another coming out. That surfaced as "scan body function carry input and
+    carry output must have equal types" -- naming neither this function nor the
+    argument at fault -- but only from ``n >= 2``, since orders 0 and 1 never
+    reach the scan. `scipy.special.eval_gegenbauer` broadcasts here, so rather
+    than reject it, match it -- in `eval_gegenbauer` only. `eval_gegenbauers`
+    keeps `alpha` scalar: its documented return shape is ``(n + 1,)``, which an
+    array `alpha` would silently change.
+    """
+    # Unpacked into a real tuple: `jnp.broadcast_arrays` returns a list, which
+    # the runtime type checker rejects against the annotation.
+    alpha_arr, x_arr = jnp.broadcast_arrays(
+        jnp.asarray(alpha) * 1.0, jnp.asarray(x) * 1.0
+    )
+    return alpha_arr, x_arr
 
 
 def _C_n_plus_1(carry: _Carry, n: AnyArray) -> tuple[_Carry, AnyArray]:
@@ -134,7 +155,7 @@ def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
 
 # TODO: support n non-integer
 @partial(jax.jit, static_argnums=(0,))
-def eval_gegenbauer(n: int, alpha: ScalarLike, x: AnyArrayLike, /) -> AnyArray:
+def eval_gegenbauer(n: int, alpha: AnyArrayLike, x: AnyArrayLike, /) -> AnyArray:
     r"""Evaluate the Gegenbauer polynomial :math:`C_n^{(\alpha)}(x)`.
 
     The Gegenbauer polynomials can be defined via the Gauss hypergeometric
@@ -189,12 +210,16 @@ def eval_gegenbauer(n: int, alpha: ScalarLike, x: AnyArrayLike, /) -> AnyArray:
     [3.0, -1.0, 3.0]
 
     """
+    # Seeded before the early returns too: at n == 0 the result is `C0(x)`,
+    # whose shape follows `x` alone, so an `alpha` wider than `x` came back the
+    # wrong shape instead of broadcasting as scipy does.
+    alpha_arr, x_arr = _seed(alpha, x)
     if n == 0:
-        return C0(x)
+        return C0(x_arr)
     if n == 1:
-        return C1(alpha, x)
+        return C1(alpha_arr, x_arr)
 
-    carry = (alpha, x, C1(alpha, x), C0(x))
+    carry = (alpha_arr, x_arr, C1(alpha_arr, x_arr), C0(x_arr))
     n_values = jnp.arange(1, n)  # 0 is already done
     _, C_values = jax.lax.scan(_C_n_plus_1, carry, n_values)
     return C_values[-1]

@@ -508,3 +508,34 @@ def test_float32_is_not_silently_widened(func):
     carry -- one dtype up.
     """
     assert func(jnp.asarray([2.0], dtype=jnp.float32)).dtype == jnp.float32
+
+
+@pytest.mark.parametrize("func", ALL_FUNCS)
+def test_second_derivative_at_the_pole_is_positive_infinity(func):
+    """REGRESSION: the scaled family gave `nan` where the unscaled gave `inf`.
+
+    Every K_n'' diverges to `+inf` at 0 (the `1/z^2` term dominates), but the
+    closed forms are `inf - inf` there, and `2/|z|` has derivative `sign(0) = 0`
+    so the product was `-inf * 0`. `test_derivative_at_the_pole_is_minus_infinity`
+    stops the two families disagreeing at first order; this does the same at
+    second order.
+    """
+    assert float(jax.grad(jax.grad(func))(0.0)) == np.inf
+    assert float(jax.grad(jax.grad(func))(-0.0)) == np.inf
+
+
+@pytest.mark.parametrize(("order", "func"), [(0, sp.K0e), (1, sp.K1e), (2, sp.K2e)])
+@pytest.mark.parametrize("z", [0.5, 3.0, 50.0, 700.0])
+def test_scaled_second_derivative(order, func, z):
+    """The scaled second derivatives, against mpmath.
+
+    `rtol` is 1e-9, looser than the values' own 2.2e-7 would suggest is needed,
+    because `(e^z K_0)'' = 2G0 - 2G1 + G1/z` subtracts two nearly equal numbers:
+    at z = 8.9 the cancellation costs about two decades, and it worsens with z
+    (measured 3e-6 at z = 1e5). The absolute error stays at machine precision.
+    Points near the cross-over are therefore excluded and covered by the
+    documented figure instead.
+    """
+    with mp.workdps(50):
+        expected = float(mp.diff(lambda t: mp.exp(t) * mp.besselk(order, t), z, 2))
+    np.testing.assert_allclose(jax.grad(jax.grad(func))(z), expected, rtol=1e-9)

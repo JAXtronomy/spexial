@@ -106,3 +106,27 @@ def test_integer_alpha_and_integer_x(n):
     expected = scipy_eval_gegenbauer(n, 1, np.array([0, 1]))
     assert jnp.issubdtype(got.dtype, jnp.floating)
     np.testing.assert_allclose(got, expected, rtol=1e-12, atol=1e-13)
+
+
+@pytest.mark.parametrize("n", [0, 1, 2, 3, 5])
+@pytest.mark.parametrize(
+    ("alpha", "x"),
+    [
+        (jnp.asarray([0.5, 1.0]), 0.3),  # alpha wider than x
+        (jnp.asarray([0.5, 1.0, 2.0]), jnp.asarray([0.3])),  # both arrays, broadcasting
+        (jnp.asarray([0.5, 1.0]), jnp.asarray([0.3, 0.4])),  # same shape
+    ],
+)
+def test_alpha_broadcasts_against_x(n, alpha, x):
+    """REGRESSION: an `alpha` wider than `x` died in `lax.scan` from n >= 2.
+
+    `C0` follows `x`'s shape while `C1` follows the broadcast of both, so the
+    scan carry had one shape going in and another coming out -- surfacing as
+    "carry input and carry output must have equal types", which names neither
+    this function nor the argument at fault. Orders 0 and 1 never reach the scan
+    and so appeared to work, which made the break look arbitrary.
+    `scipy.special.eval_gegenbauer` broadcasts here, so this matches it.
+    """
+    got = sp.eval_gegenbauer(n, alpha, x)
+    expected = scipy_eval_gegenbauer(n, np.asarray(alpha), np.asarray(x))
+    np.testing.assert_allclose(got, expected, rtol=1e-10, atol=1e-12)
