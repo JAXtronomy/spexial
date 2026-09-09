@@ -30,7 +30,12 @@ def C0(x: AnyArrayLike, /) -> AnyArray:
     [1.0, 1.0, 1.0]
 
     """
-    return jnp.asarray(x) * 0.0 + 1.0
+    x_arr = jnp.asarray(x)
+    # `x * 0 + 1` is `nan` at +-inf, and that `nan` then propagates through the
+    # recurrence to every order. `C_0 == 1` at every x including the infinities,
+    # which is what `scipy.special.eval_gegenbauer` returns. A `nan` x still
+    # gives `nan`.
+    return jnp.where(jnp.isinf(x_arr), 1.0, x_arr * 0.0 + 1.0)
 
 
 def C1(alpha: ScalarLike, x: AnyArrayLike, /) -> AnyArray:

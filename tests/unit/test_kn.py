@@ -111,8 +111,14 @@ def test_vmap(func):
 
 @pytest.mark.parametrize("z", [0.5, 2.0, 5.0, 20.0])
 def test_grad_k0_is_minus_k1(z):
-    """K0'(z) == -K1(z)."""
-    np.testing.assert_allclose(jax.grad(sp.K0)(z), -scipy_kn(1, z), rtol=1e-6)
+    """K0'(z) == -K1(z).
+
+    `rtol` is 1e-10, not the 1e-6 these functions are documented to: none of
+    these four points is near the z = 9 cross-over, so the true error is 5.2e-12
+    and a 1e-6 gate would sit ~190,000x above it -- passing a 10,000x
+    regression in `grad(K0)` without noticing.
+    """
+    np.testing.assert_allclose(jax.grad(sp.K0)(z), -scipy_kn(1, z), rtol=1e-10)
 
 
 @pytest.mark.parametrize("func", ALL_FUNCS)
@@ -367,3 +373,87 @@ def test_scaled_has_no_practical_ceiling(func, reference, z):
     """
     assert float(func(z)) > 0.0
     np.testing.assert_allclose(func(z), reference(z), rtol=1e-13)
+
+
+# ---------------------------------------------------------------------------
+# Low precision. The whole suite runs with `JAX_ENABLE_X64=True` (pinned in
+# `pyproject.toml`), so without these the dtype-dependent cross-over -- the fix
+# for the most serious bug found in this package -- is never evaluated at all.
+# 100% branch coverage does not help: a one-line conditional `return` is not a
+# branch as far as coverage.py is concerned.
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float16", "bfloat16"])
+@pytest.mark.parametrize("func", ALL_FUNCS)
+def test_low_precision_is_never_the_wrong_sign(dtype, func):
+    """REGRESSION: `K0(float32(8.5))` was **negative** (true +8.6e-5).
+
+    `_SMALL_Z` was 9.0 at every dtype. The ascending series cancels two terms of
+    size e^z/sqrt(z) down to a result of size e^-z, costing ~2z/ln(10) decimal
+    digits: float64 has 16 and still holds 8 at z = 9, float32 has 7 and had
+    none. `float16`/`bfloat16` have no working cross-over at any z, so they are
+    computed in float32 and rounded back.
+    """
+    z = jnp.asarray(np.linspace(0.5, 12.0, 60), dtype=dtype)
+    got = np.asarray(func(z), dtype=np.float64)
+    assert np.all(got > 0.0), f"{dtype}: {func.__name__} is not positive"
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float16", "bfloat16"])
+@pytest.mark.parametrize(
+    ("func", "reference"),
+    [
+        (sp.K0, scipy_k0),
+        (sp.K1, scipy_k1),
+        (sp.K0e, scipy_k0e),
+        (sp.K1e, scipy_k1e),
+    ],
+)
+def test_low_precision_accuracy(dtype, func, reference):
+    """Each dtype gets roughly what it can represent, and no more is claimed.
+
+    Measured worst over a dense sweep: 7.1e-3 for float32 (at the z = 4.65
+    cross-over), 6.7e-3 for float16 and 1.9e-2 for bfloat16 -- the last two
+    dominated by the quantisation of `z` itself, not by the algorithm.
+    """
+    z32 = np.linspace(0.5, 12.0, 120)
+    z = np.asarray(
+        jnp.asarray(z32, dtype=dtype), dtype=np.float64
+    )  # as the dtype sees it
+    got = np.asarray(func(jnp.asarray(z32, dtype=dtype)), dtype=np.float64)
+    expected = reference(z)
+    usable = expected > np.finfo(np.float32).tiny
+    tol = {"float32": 1e-2, "float16": 2e-2, "bfloat16": 6e-2}[dtype]
+    np.testing.assert_allclose(got[usable], expected[usable], rtol=tol)
+
+
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16"])
+@pytest.mark.parametrize("func", ALL_FUNCS)
+def test_narrow_dtypes_are_preserved(dtype, func):
+    """Computing in float32 must not silently widen the caller's dtype.
+
+    Returning float32 from a bfloat16 input would break a `lax.scan` carry, and
+    JAX's own `i0`/`log` preserve these dtypes.
+    """
+    assert func(jnp.asarray(2.0, dtype=dtype)).dtype == jnp.dtype(dtype)
+
+
+def test_integer_input_still_promotes():
+    """Integer input has no narrow dtype to go back to, so it stays promoted."""
+    assert jnp.issubdtype(sp.K0(jnp.asarray([1, 2])).dtype, jnp.floating)
+
+
+@pytest.mark.parametrize(("order", "func"), [(0, sp.K0), (1, sp.K1)])
+@pytest.mark.parametrize("z", [2.3e-308, 3e-308, 4.45e-308, 1e-300, 1e-100])
+def test_tiny_but_normal_argument(order, func, z):
+    """REGRESSION: `K0(3e-308)` was `inf` and `K1(3e-308)` was `nan`.
+
+    `_K0_small` computed `log(z / 2)`. Halving a `z` that is small but
+    perfectly *normal* lands in the subnormal range, XLA on CPU flushes it to
+    zero, and `log(0)` is `-inf` -- so the whole band 2.2e-308 <= z < 4.45e-308
+    returned `inf`/`nan` where the true values are ~708 and ~3e307. Note this is
+    the opposite of the documented subnormal limitation, which is about
+    subnormal *outputs*: here both input and output are normal.
+    """
+    reference = (scipy_k0, scipy_k1)[order]
+    np.testing.assert_allclose(func(z), reference(z), rtol=RTOL)
