@@ -82,7 +82,7 @@ Everything below assumes x64. Full detail, including how each was measured, is a
 
 | Function          | Domain                                  | Accurate to  |
 | ----------------- | --------------------------------------- | ------------ |
-| `comb`            | `0 <= k <= N`, to `N ~ 9e307`           | `1.2e-12`    |
+| `comb`            | `0 <= k <= N`, to `DBL_MAX`             | `1.2e-12`    |
 | `gamma`           | real or complex, `\|x\| < 171`          | `4e-13`      |
 | `eval_gegenbauer` | `n <= 20`, `alpha > -0.5`, `\|x\| <= 1` | `2e-12` atol |
 | `K0`/`K1`/`K2`    | `0 < z < 705.5`                         | `2.0e-7`     |
