@@ -14,7 +14,7 @@ the caller keeps its dtype and gets the accuracy that dtype can represent.
 __all__: tuple[str, ...] = ()
 
 from math import log
-from typing import Final
+from typing import Any, Final
 
 import jax.numpy as jnp
 from jax import lax
@@ -140,7 +140,7 @@ def is_negative(z: AnyArray) -> AnyArray:
     return (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
 
 
-def log_no_flush(z: AnyArray) -> AnyArray:
+def log_no_flush(z: AnyArray, /, *, dtype: Any = None) -> AnyArray:
     """``log(z)``, including where ``z`` is subnormal and XLA has flushed it.
 
     XLA on CPU flushes a subnormal *input* to zero, so `jnp.log` returns
@@ -160,7 +160,13 @@ def log_no_flush(z: AnyArray) -> AnyArray:
     """
     info = jnp.finfo(z.dtype)
     bits = lax.bitcast_convert_type(z, INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
-    mantissa = jnp.bitwise_and(bits, (1 << info.nmant) - 1).astype(z.dtype)
+    # The bits must be read at the argument's own width, but the arithmetic on
+    # them need not be done there. `dtype` widens that half: a logarithm near
+    # -87 has no room in bfloat16, where the spacing is 0.5, so the caller that
+    # exponentiates it back gets a factor of `e**0.25` for free. Widening is not
+    # automatic because `kn` wants its result in the width it asked for.
+    arithmetic = jnp.dtype(dtype) if dtype is not None else z.dtype
+    mantissa = jnp.bitwise_and(bits, (1 << info.nmant) - 1).astype(arithmetic)
     # `bits > 0` is the sign test, done on the integer because the float one
     # cannot be: XLA compares a subnormal as if it were zero, so `z > 0` is
     # False for exactly the values this branch exists to catch. It is also why
@@ -175,5 +181,5 @@ def log_no_flush(z: AnyArray) -> AnyArray:
     negative = (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
     from_bits = jnp.log(mantissa) + (log(float(info.tiny)) - info.nmant * _LN2)
     # Every branch evaluates, so keep `log` off the flushed value.
-    plain = jnp.log(jnp.where(subnormal, info.tiny, z))
+    plain = jnp.log(jnp.where(subnormal, info.tiny, z).astype(arithmetic))
     return jnp.where(negative, jnp.nan, jnp.where(subnormal, from_bits, plain))

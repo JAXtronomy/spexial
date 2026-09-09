@@ -48,7 +48,7 @@ These are series and asymptotic expansions. In float32 the accuracy figures belo
 
 **`nan` does not raise.** JAX has no exceptions inside traced code. Every domain violation below returns `nan` or `inf` and propagates silently through `jit`, `vmap` and `grad`. Check your inputs before the call, or check the output after.
 
-**`zeta` covers every real argument**, by four methods stitched together (see the docs table). Worst accuracy `4e-13`, just off a negative even integer. `jax.grad` is an artefact only at the tabulated integers `0 >= n >= -60` and at the negative even integers.
+**`zeta` covers every real argument**, by four methods stitched together (see the docs table). Worst accuracy `6e-13`, at large `|n|`; past `n ~ -260.2` the true value exceeds `DBL_MAX` and the answer is `±inf`, as in SciPy. `jax.grad` is an artefact only at the tabulated integers `0 >= n >= -59`, at the negative even integers, and at `n >= 54`.
 
 **`jax.grad(zeta)` is only meaningful for `n > 1`.** The negative line is evaluated from a Bernoulli table, so the derivative reported there is finite but is not `ζ'`. It will not warn you.
 

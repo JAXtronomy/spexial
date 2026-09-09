@@ -9,6 +9,7 @@ import jax
 import jax.numpy as jnp
 
 from .custom_types import AnyArray, AnyArrayLike, ScalarLike, Vector
+from .dtype import promote_integers
 
 _Carry: TypeAlias = tuple[AnyArray, AnyArray, AnyArray, AnyArray]
 
@@ -51,10 +52,12 @@ def C1(alpha: AnyArrayLike, x: AnyArrayLike, /) -> AnyArray:
     [0.30000000000000004, 0.6000000000000001]
 
     """
-    # `* 1.0` promotes: with integer `alpha` *and* integer `x` this stays int64,
+    # `promote_integers` rather than `* 1.0`: both promote, but the multiply
+    # also flushes a subnormal `x` to zero. With integer `alpha` *and* integer
+    # `x` the product would otherwise stay int64,
     # while `C0` is always float, and `lax.scan` then rejects the carry as having
     # mismatched types. scipy promotes integer input to float, so we do too.
-    return 2 * jnp.asarray(alpha) * jnp.asarray(x) * 1.0
+    return 2 * promote_integers(alpha) * promote_integers(x)
 
 
 def _unify_dtypes(alpha: AnyArrayLike, x: AnyArrayLike, /) -> tuple[AnyArray, AnyArray]:
@@ -78,8 +81,12 @@ def _unify_dtypes(alpha: AnyArrayLike, x: AnyArrayLike, /) -> tuple[AnyArray, An
     regardless turned ``eval_gegenbauer(3, 0.5, 0.25)`` from a weak float64 into
     a strong one, changing how the result promotes downstream.
     """
-    alpha_arr = jnp.asarray(alpha) * 1.0
-    x_arr = jnp.asarray(x) * 1.0
+    # `promote_integers`, not `* 1.0`: the multiply promotes integers, which is
+    # what it is for, but it also flushes a subnormal `x` to zero on XLA. That
+    # took `eval_gegenbauer(1, 1e300, 5e-324)` -- an ordinary 9.9e-24 -- to
+    # exactly 0, inside the documented `|x| <= 1`.
+    alpha_arr = promote_integers(alpha)
+    x_arr = promote_integers(x)
     if alpha_arr.dtype != x_arr.dtype:
         dtype = jnp.result_type(alpha_arr, x_arr)
         alpha_arr, x_arr = alpha_arr.astype(dtype), x_arr.astype(dtype)

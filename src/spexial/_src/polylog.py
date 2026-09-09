@@ -304,7 +304,13 @@ def _li_jvp(n: int, primals: tuple[Any], tangents: tuple[Any]) -> tuple[Scalar, 
     # where the mask is 1.0 nothing is disturbed, and the mask's own derivative
     # is zero either way, so no unselected branch leaks.
     out_of_domain = jnp.where(jnp.isnan(value), jnp.nan, 1.0)
-    return value, deriv * out_of_domain * dz
+    # The tangent must carry the *primal's* dtype, and the `n == 1` branch does
+    # not get that for free: it builds `1/(1 - z)` from the argument, while the
+    # primal comes back promoted. Every order from 2 up routes its derivative
+    # through `_li_core` and is promoted already, which is why only order 1
+    # raised -- and only for a dtype narrower than the promoted one.
+    tangent = (deriv * out_of_domain).astype(value.dtype)
+    return value, tangent * dz
 
 
 _li = jax.jit(_li_core, static_argnums=(0,))

@@ -52,3 +52,18 @@ def test_hook_is_installed_only_when_asked(monkeypatch, value, installs):
     assert isinstance(hook, contextlib.nullcontext) is not installs
     with hook:  # both forms must be usable as a context manager
         pass
+
+
+def test_the_import_hook_is_not_a_top_level_attribute():
+    """`install_import_hook` is documented on `spexial.setup_package` only.
+
+    It is imported into `spexial/__init__.py` to wrap the package's own
+    imports, and deleted afterwards: leaving it bound made
+    `spexial.install_import_hook` a name users could come to depend on by
+    accident. Keeping it out of `__all__` is not enough, since that governs
+    `import *` and nothing else.
+    """
+    package = importlib.import_module("spexial")
+    assert not hasattr(package, "install_import_hook")
+    assert not hasattr(package, "_install_import_hook")
+    assert hasattr(setup_package, "install_import_hook")

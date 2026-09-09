@@ -264,3 +264,18 @@ def test_second_derivative_below_the_cap_is_untouched():
         second = jax.grad(jax.grad(partial(sp.Li, order)))
         got = float(second(jnp.asarray(0.0)))
         np.testing.assert_allclose(got, expected, rtol=1e-12)
+
+
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16", "float32", "float64"])
+def test_order_one_differentiates_at_every_width(dtype):
+    """The `n == 1` tangent must carry the primal's dtype, not the argument's.
+
+    It builds `1/(1 - z)` directly while the primal comes back promoted, so the
+    `custom_jvp` contract was violated and `grad` raised for any dtype narrower
+    than the promoted one. Orders from 2 up route through `_li_core` and were
+    promoted already, which is what hid it.
+    """
+    dt = jnp.dtype(dtype)
+    got = jax.grad(partial(sp.Li, 1))(jnp.asarray(0.25, dt))
+    assert got.dtype == dt
+    np.testing.assert_allclose(float(got), 4.0 / 3.0, rtol=8 * float(jnp.finfo(dt).eps))

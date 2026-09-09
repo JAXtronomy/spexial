@@ -178,6 +178,27 @@ def test_generated_docs_page_is_current():
     )
 
 
+@pytest.mark.parametrize("drop", ["START", "END", "both"])
+def test_the_generator_refuses_a_page_without_its_markers(drop):
+    """A missing marker must raise, not produce a plausible-looking page.
+
+    `str.partition` returns the whole string as its *first* element when the
+    separator is absent, so the unguarded splice failed two different silent
+    ways: without `START` it appended a second table at EOF, and without `END`
+    it deleted everything that followed the marker. This script's entire job is
+    keeping the page and the registry in agreement, so a page it cannot parse
+    is precisely the case that has to stop.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "gen_coverage_table", ROOT / "scripts" / "gen_coverage_table.py"
+    )
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    keep = {"START": gen.END, "END": gen.START, "both": ""}[drop]
+    with pytest.raises(ValueError, match="marker"):
+        gen.apply(f"HEADER\n{keep}\nTRAILER\n")
+
+
 def _residual_bytes(fn, x):
     """Bytes the backward pass must keep alive, via the first-class VJP object.
 

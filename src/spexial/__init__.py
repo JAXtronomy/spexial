@@ -45,9 +45,9 @@ __all__ = [
     "zeta",
 ]
 
-from .setup_package import install_import_hook
+from .setup_package import install_import_hook as _install_import_hook
 
-with install_import_hook("spexial"):
+with _install_import_hook("spexial"):
     from ._src.comb import comb
     from ._src.gamma import gamma
     from ._src.gegenbauer import eval_gegenbauer, eval_gegenbauers
@@ -56,3 +56,9 @@ with install_import_hook("spexial"):
     from ._src.spence import spence
     from ._src.zeta import zeta
     from ._version import version as __version__
+
+# The hook is documented as living on `spexial.setup_package`, so it should not
+# also be reachable as `spexial.install_import_hook` -- a name users could come
+# to depend on by accident. Deleted rather than merely left out of `__all__`,
+# which governs `import *` and nothing else.
+del _install_import_hook

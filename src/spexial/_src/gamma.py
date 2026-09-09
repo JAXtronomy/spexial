@@ -85,11 +85,19 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
     # SciPy gives the finite value there. This is the one place the delegated
     # value is deliberately overridden, and only where upstream has no answer.
     magnitude = jnp.abs(x_arr)
-    subnormal = positive_subnormal(magnitude)
-    reciprocal = jnp.exp(-log_no_flush(magnitude))
-    return jnp.where(
-        subnormal, jnp.where(is_negative(x_arr), -reciprocal, reciprocal), out
-    )
+    # The logarithm and its exponential are taken at the default float width,
+    # not the caller's. A bfloat16 subnormal is a *float32* subnormal too --
+    # the two share an exponent range -- so only float64 gives `log |x| ~ -87`
+    # any room, and doing it in bfloat16 came out 36% wrong.
+    wide = jnp.asarray(0.0).dtype
+    reciprocal = jnp.exp(-log_no_flush(magnitude, dtype=wide)).astype(x_arr.dtype)
+    signed = jnp.where(is_negative(x_arr), -reciprocal, reciprocal)
+    # Substituted only where upstream has no answer of its own, which is the
+    # entire justification for overriding a delegated value -- and is
+    # dtype-dependent in a way the first version assumed away.
+    # `jax.scipy.special.gamma` does *not* flush float16 subnormals, and is 60x
+    # more accurate than this branch there, so float16 keeps upstream's answer.
+    return jnp.where(positive_subnormal(magnitude) & ~jnp.isfinite(out), signed, out)
 
 
 @gamma.defjvp
@@ -110,4 +118,16 @@ def _gamma_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, Any
     # Same promotion as the value above, through the same helper so the two
     # cannot drift apart -- they already had, once, leaving a comment here that
     # described a spelling the code no longer used.
-    return g, g * digamma(promote_integers(x)) * dx
+    x_arr = promote_integers(x)
+    # `digamma` is handed a subnormal it will flush, giving `nan` where the
+    # derivative is a perfectly definite infinity: with `Gamma(x) ~ 1/x` near
+    # zero, `Gamma'(x) ~ -1/x**2`, which overflows every float width in this
+    # band and so is `-inf` from either side. That is what the function already
+    # returns one ulp above `tiny`; substituting it keeps the derivative
+    # continuous across a boundary that is an artefact of the representation,
+    # not of the mathematics.
+    #
+    # A constant, because this is a genuine pole rather than a removable point:
+    # every order diverges here, so no reformulation buys the next one.
+    diverges = positive_subnormal(jnp.abs(x_arr))
+    return g, jnp.where(diverges, -jnp.inf, g * digamma(x_arr)) * dx

@@ -226,7 +226,9 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     it works hardest right against `_ETA_FLOOR`. On the
     negative line it degrades with ``|n|``, because ``gammaln(1 - n)`` grows and
     the exponential of it carries that magnitude's rounding: ``9e-15`` out to
-    ``n = -10``, ``1.8e-13`` by ``-100``, ``5e-13`` by ``-400``. Just off a
+    ``n = -10``, ``2.2e-13`` by ``-100`` and ``6e-13`` by ``-260``, past which
+    the true value exceeds ``DBL_MAX`` and the answer is ``±inf`` -- as it is in
+    SciPy -- so only the trivial zeros and their neighbours are finite. Just off a
     negative even integer, where the sine of the functional equation is near a
     zero of its own, it is a few times ``1e-13`` -- still better than SciPy,
     which is ``2e-4`` there.

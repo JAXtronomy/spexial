@@ -205,3 +205,34 @@ def test_floating_input_keeps_its_dtype(dtype):
     """
     dt = jnp.dtype(dtype)
     assert sp.gamma(jnp.asarray(2.5, dt)).dtype == dt
+
+
+@pytest.mark.parametrize("x", [5e-39, 1.2e-38, -5e-39])
+def test_subnormal_gradient_is_infinite_not_nan(x):
+    """`Gamma'(x) ~ -1/x**2` in the subnormal band, which overflows to `-inf`.
+
+    `digamma` is handed an argument XLA flushes, so it returned `nan` where the
+    derivative is a definite infinity -- and where the function already returns
+    `-inf` one ulp above `tiny`.
+    """
+    got = jax.grad(sp.gamma)(jnp.asarray(x, dtype=jnp.float32))
+    assert jnp.isneginf(got)
+
+
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16", "float32", "float64"])
+def test_the_subnormal_override_never_beats_upstream_where_upstream_works(dtype):
+    """The override is only justified where `jax.scipy.special.gamma` has no answer.
+
+    It does not flush float16 subnormals, and is 60x more accurate there than
+    the `exp(-log)` round trip this branch uses, so float16 must keep upstream's
+    value. Checked as a rule rather than a special case: wherever upstream is
+    finite, `spexial` returns exactly it.
+    """
+    dt = jnp.dtype(dtype)
+    below = float(jnp.finfo(dt).tiny) / 4.0
+    x = jnp.asarray(below, dtype=dt)
+    upstream = jss.gamma(x)
+    if jnp.isfinite(upstream):
+        assert float(sp.gamma(x)) == float(upstream)
+    else:
+        assert jnp.isfinite(sp.gamma(x)) or jnp.isinf(sp.gamma(x))
