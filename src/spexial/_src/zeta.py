@@ -28,8 +28,20 @@ the constant is not an approximation, and it sidesteps
 _ETA_TERMS: Final = 32
 """Terms in the Borwein acceleration used on the critical strip.
 
-32 gives ~1e-15 over most of `0 < n < 1`, degrading to ~9e-13 as `n` approaches
-the pole at 1, where the value itself is diverging.
+32 holds to ~1e-15 across the whole strip, including right up against the pole
+at 1, and keeps that accuracy a short way below zero as well -- 2e-15 at
+``n = -0.5``. It decays from there (2e-9 by ``n = -5``), which is what
+`_ETA_FLOOR` is for.
+"""
+
+_ETA_FLOOR: Final = -0.5
+"""Below this the reflection takes over from the eta series.
+
+The series is needed below zero because the reflection forms ``1 - n``, which
+rounds to exactly ``1`` once ``|n|`` drops under half an eps -- putting the pole
+of :math:`\\zeta(1)` into a formula whose answer is a finite ``-0.5``. The two
+methods cross here: at ``-0.5`` the series is 2.1e-15 and the reflection
+2.1e-16, and going the other way the series is the only one that works at all.
 """
 
 
@@ -70,8 +82,8 @@ def _by_eta(n: AnyArray) -> AnyArray:
     itself. The alternating series does converge, just far too slowly to use
     directly, so Borwein's acceleration supplies the answer in 32 terms.
 
-    At ``n = 1`` the denominator is exactly 0 and the result is `inf`, which is
-    the pole.
+    The same series continues to hold below zero, so `zeta` also uses it down
+    to `_ETA_FLOOR` -- see there for why the reflection cannot cover that part.
     """
     coefficients = jnp.asarray(_eta_coefficients(), dtype=n.dtype)
     last = coefficients[_ETA_TERMS]
@@ -82,7 +94,28 @@ def _by_eta(n: AnyArray) -> AnyArray:
     # bare `jnp.sum`, which silently collapsed the caller's own axis instead.
     weights = (-1.0) ** (k - 1.0) * (coefficients[:_ETA_TERMS] - last)
     eta = -jnp.sum(weights / k ** jnp.asarray(n)[..., None], axis=-1) / last
-    return eta / (1.0 - 2.0 ** (1.0 - n))
+    # `1 - 2**(1-n)` cancels to nothing as `n` approaches 1 -- it is exactly 0
+    # half an eps below it, and only ~4 digits survive by `1 - 1e-12`. `expm1`
+    # of the same quantity carries every digit, which matters because the pole
+    # it is dividing by is what makes the value large in the first place.
+    return eta / -jnp.expm1((1.0 - n) * jnp.log(2.0))
+
+
+def _sin_pi_half(n: AnyArray) -> AnyArray:
+    r"""Evaluate :math:`\sin(\pi n / 2)` accurately near its zeros.
+
+    ``jnp.sin(jnp.pi * n / 2)`` loses the answer near an even integer, where the
+    sine is small but ``pi * n / 2`` is not: at :math:`n = -102 + 4\times10^{-15}`
+    the product carries an absolute rounding error of about ``3e-14`` while the
+    true sine is ``1e-14``, so nothing survives. Reducing the argument first
+    keeps the small residue exact -- ``half - nearest`` is a subtraction of two
+    nearby values, so it is exact in floating point -- and the sine is then
+    evaluated where it has full relative precision.
+    """
+    half = n / 2.0
+    nearest = jnp.round(half)
+    parity = jnp.where(jnp.mod(nearest, 2.0) == 0.0, 1.0, -1.0)
+    return parity * jnp.sin(jnp.pi * (half - nearest))
 
 
 def _by_reflection(n: AnyArray) -> AnyArray:
@@ -103,7 +136,7 @@ def _by_reflection(n: AnyArray) -> AnyArray:
     (:math:`\zeta(-171) \approx 1.3\times10^{172}`), so forming the product
     directly would throw away a domain that is perfectly representable.
     """
-    sine = jnp.sin(jnp.pi * n / 2)
+    sine = _sin_pi_half(n)
     log_magnitude = (
         n * jnp.log(2.0)
         + (n - 1.0) * jnp.log(jnp.pi)
@@ -137,29 +170,38 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
 
     Notes
     -----
-    The negative half-line is only supported where the functional equation can
-    be evaluated from the tabulated Bernoulli numbers:
+    Every real ``n`` is covered, by whichever of four methods is accurate there:
 
-    * ``n > 1`` -- delegated to `jax.scipy.special.zeta`, except at and above
-      ``n = 54`` where the exact double-precision value is ``1.0``. Taking that
-      constant also avoids `jax.scipy.special.zeta` returning `nan` for ``n``
-      above roughly ``1e15``.
-    * ``0 < n <= 1`` -- `nan`. `jax.scipy.special.zeta` does not implement the
-      critical strip, and this function does not paper over that; use
-      `scipy.special.zeta` on the host if you need it.
-    * ``n`` a negative *even* integer -- exactly 0, at any magnitude.
-    * ``n`` a negative *odd* integer with ``n > -60`` -- from :math:`B_{1-n}`.
-    * ``n <= -60`` and odd -- `nan`; the Bernoulli table stops at
-      :math:`B_{60}`.
-    * ``n < 0`` and *not* an integer -- `nan`. The functional equation used here
-      needs :math:`(-1)^{-n}`, which is undefined for non-integers, so unlike
-      `scipy.special.zeta` this implementation does not cover, e.g.,
-      ``zeta(-0.5)``.
+    * ``n >= 54`` -- exactly ``1.0``. :math:`\zeta(n) - 1 \approx 2^{-n}` is
+      below half an eps of 1 from there up, so this is the exact
+      double-precision value rather than an approximation. It also avoids
+      `jax.scipy.special.zeta`, which returns `nan` for ``n`` above about
+      ``1e15``.
+    * ``n > 1`` -- delegated to `jax.scipy.special.zeta`.
+    * ``n = 1`` -- the pole, ``inf``.
+    * ``-0.5 < n < 1`` -- Borwein's acceleration of the eta series. This is the
+      critical strip, which `jax.scipy.special.zeta` does not implement, plus a
+      little below zero where the reflection below cannot be used.
+    * ``n`` a negative *even* integer -- exactly ``0``, at any magnitude.
+    * ``n`` a negative integer down to ``-60`` -- from the tabulated
+      :math:`B_{1-n}`, which is exact to the ulp.
+    * every other ``n <= -0.5`` -- the functional equation
+      :math:`\zeta(s) = 2^s \pi^{s-1} \sin(\pi s/2) \Gamma(1-s) \zeta(1-s)`,
+      evaluated in log space so that :math:`\Gamma(1-s)` overflowing at
+      :math:`s \approx -170.6` does not cost a domain the result is finite on.
 
-    `jax.grad` is only meaningful for ``n > 1``. On the negative half-line the
-    value comes out of a Bernoulli *table*, which carries no information about
-    how :math:`\zeta` varies between the integers, so the derivative reported
-    there is an artefact -- finite, but not :math:`\zeta'`.
+    `jax.grad` is genuine wherever the eta series or the functional equation
+    supplies the value, which is everywhere except two sets: the tabulated
+    integers ``0 >= n >= -60``, where a *table* carries no information about how
+    :math:`\zeta` varies between its entries, and the negative *even* integers
+    at any magnitude, which are a constant ``0``. Both report a finite number
+    that is not :math:`\zeta'`. The odd integers past the table are fine --
+    ``grad`` at ``n = -101`` matches :math:`\zeta'` to 6e-14 -- because those go
+    through the functional equation, which differentiates.
+
+    Accuracy is worst near the trivial zeros, where the sine of the functional
+    equation is small: a few times ``1e-13`` relative within ``1e-13`` of a
+    negative even integer, against ``1e-15`` or better elsewhere.
 
     Examples
     --------
@@ -217,26 +259,48 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     # argument to keep `gammaln` and `log` off their own edges.
     from_table = sign * bernoulli_numbers().astype(n_arr.dtype)[index] / denom
     in_table = is_integer & (k_round + 1.0 <= ORDER)
-    reflected = jnp.where(
-        in_table, from_table, _by_reflection(jnp.where(n_arr < 0, n_arr, -0.5))
-    )
 
     # `_hurwitz_zeta` is `nan` for n above ~1e15, and is exactly 1.0 for every n
     # past `_UNIT` anyway, so it is only ever called on the range it handles.
     unit = n_arr >= _UNIT
-    # `0 < n <= 1` is the critical strip, which upstream does not implement; the
-    # eta series covers it. Above 1, delegate as before. Both branches are
-    # evaluated, so each gets an argument the other's domain can survive.
-    strip = positive & (n_arr <= 1.0)
-    above = jnp.where(positive & ~unit & ~strip, n_arr, 2.0)
-    return jnp.where(
-        positive,
+    # The eta series takes the critical strip, which upstream does not
+    # implement, and continues below zero as far as `_ETA_FLOOR`. The integers
+    # it would otherwise cover -- only ``n = 0`` lies in the window -- stay with
+    # the table, which is exact there.
+    by_eta = (n_arr < 1.0) & (n_arr > _ETA_FLOOR) & ~in_table
+    # Every branch is evaluated whatever the argument, so each gets one its own
+    # domain can survive when it is not the branch being selected.
+    above = jnp.where(positive & ~unit & (n_arr > 1.0), n_arr, 2.0)
+    eta_arg = jnp.where(by_eta, n_arr, 0.5)
+    trivial_zero = (n_arr < 0) & is_integer & (jnp.mod(k_round, 2.0) == 0.0)
+    # The trivial zeros are excluded from the reflection's argument as well as
+    # from its result. Reducing the sine's argument makes it exactly 0 there
+    # rather than the 1.2e-16 an unreduced `sin(pi * n / 2)` leaves behind, so
+    # `log(|sin|)` is `-inf` and its derivative `nan` -- and `jnp.where` takes
+    # the `nan` from the branch it did not select.
+    reflect_arg = jnp.where((n_arr <= _ETA_FLOOR) & ~trivial_zero, n_arr, -1.5)
+    result = jnp.where(
+        unit,
+        1.0,
         jnp.where(
-            strip,
-            _by_eta(jnp.where(strip, n_arr, 0.5)),
-            jnp.where(unit, 1.0, _hurwitz_zeta(above, 1.0)),
-        ),
-        jnp.where(
-            (n_arr < 0) & is_integer & (jnp.mod(k_round, 2.0) == 0.0), 0.0, reflected
+            n_arr > 1.0,
+            _hurwitz_zeta(above, 1.0),
+            jnp.where(
+                n_arr == 1.0,
+                jnp.inf,  # the pole, not a guard around one
+                jnp.where(
+                    by_eta,
+                    _by_eta(eta_arg),
+                    jnp.where(
+                        trivial_zero,
+                        0.0,
+                        jnp.where(in_table, from_table, _by_reflection(reflect_arg)),
+                    ),
+                ),
+            ),
         ),
     )
+    # `nan > 0` is False, so a `nan` argument would otherwise fall down the
+    # negative side and come back as whatever the placeholder above evaluates
+    # to -- a real-looking number in place of the `nan` that went in.
+    return jnp.where(jnp.isnan(n_arr), jnp.nan, result)

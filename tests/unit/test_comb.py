@@ -95,3 +95,26 @@ def test_infinite_n_with_zero_k_is_one():
     # k >= 1 is still infinite, as before.
     assert jnp.isinf(sp.comb(jnp.inf, 1.0))
     assert jnp.isinf(sp.comb(jnp.inf, 2.0))
+
+
+@pytest.mark.parametrize("exponent", range(18))
+def test_n_choose_one_is_n(exponent):
+    """``C(N, 1) == N`` is an identity, so it needs no reference implementation.
+
+    It is the cheapest probe of the large-`N` branch: the log-gamma difference
+    collapsed to ``1.0`` here once the two terms converged.
+    """
+    n = 10.0**exponent
+    np.testing.assert_allclose(sp.comb(n, 1.0), n, rtol=1e-12)
+
+
+@pytest.mark.parametrize("n", [999.0, 1000.0, 1001.0])
+@pytest.mark.parametrize("k", [1.0, 2.0, 3.0, 30.0, 60.0])
+def test_the_crossover_is_continuous(n, k):
+    """The two formulas must agree where they are stitched together.
+
+    Below ``N = 1000`` the log-gamma difference is the accurate one and above it
+    the Beta form is; they are within a few times 1e-13 of each other at the
+    join, which is what keeps the function continuous there.
+    """
+    np.testing.assert_allclose(sp.comb(n, k), scipy_comb(n, k), rtol=1e-11)

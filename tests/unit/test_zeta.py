@@ -160,3 +160,75 @@ def test_float32_is_not_silently_widened():
     dtype instead.
     """
     assert sp.zeta(jnp.asarray([2.0], dtype=jnp.float32)).dtype == jnp.float32
+
+
+@pytest.mark.parametrize("n", [-(10.0**-k) for k in range(1, 21)])
+def test_just_below_zero(n):
+    """`zeta` stays accurate as `n` approaches 0 from below.
+
+    The reflection forms ``1 - n``, which rounds to exactly ``1`` once ``|n|``
+    falls under half an eps -- feeding the pole of ``zeta(1)`` into a formula
+    whose answer is a finite ``-0.5``, and returning ``-inf``. The eta series
+    covers a window below zero for this reason.
+    """
+    with mp.workdps(30):
+        expected = float(mp.zeta(n))
+    assert np.isfinite(sp.zeta(n))
+    np.testing.assert_allclose(sp.zeta(n), expected, rtol=1e-12)
+
+
+@pytest.mark.parametrize("n", [1.0 - 10.0**-k for k in range(1, 17)])
+def test_approaching_the_pole_from_below(n):
+    """The eta denominator must not cancel as `n` approaches 1.
+
+    ``1 - 2**(1-n)`` loses every digit there and is exactly 0 half an eps below
+    1, which made the value `inf` with the wrong sign. ``expm1`` of the same
+    quantity keeps full precision, which is what the diverging value needs.
+    """
+    with mp.workdps(30):
+        expected = float(mp.zeta(n))
+    np.testing.assert_allclose(sp.zeta(n), expected, rtol=1e-12)
+
+
+def test_nan_propagates():
+    """A `nan` argument must not come back as a plausible number.
+
+    ``nan > 0`` is False, so `nan` falls down the negative branch and picks up
+    whatever placeholder the unselected branches are fed -- which came back as
+    ``zeta(-0.5)``, indistinguishable from a real answer.
+    """
+    assert np.isnan(sp.zeta(np.nan))
+    got = sp.zeta(jnp.asarray([np.nan, 2.0, -np.inf]))
+    assert np.isnan(got[0])
+    np.testing.assert_allclose(got[1], scipy_zeta(2.0), rtol=1e-12)
+    assert np.isnan(got[2])
+
+
+@pytest.mark.parametrize("k", [1, 2, 5, 25, 50])
+@pytest.mark.parametrize("j", [6, 9, 12, 14])
+@pytest.mark.parametrize("sign", [-1, 1])
+def test_near_the_trivial_zeros(k, j, sign):
+    """Just off a negative even integer, where the reflection's sine is small.
+
+    ``sin(pi * n / 2)`` has to be evaluated by reducing the argument first: the
+    product ``pi * n / 2`` carries an absolute rounding error larger than the
+    sine itself there, which cost every digit -- 71% relative error at
+    ``n = -102 + 4e-15``. SciPy has the same defect, so this compares against
+    mpmath rather than against SciPy.
+    """
+    n = -2.0 * k + sign * 10.0**-j
+    with mp.workdps(40):
+        expected = float(mp.zeta(n))
+    np.testing.assert_allclose(sp.zeta(n), expected, rtol=1e-11)
+
+
+@pytest.mark.parametrize("n", [-0.25, -1.5, -3.5, -20.5, 0.5, 2.5])
+def test_grad_matches_mpmath_off_the_integers(n):
+    """Away from the negative integers the gradient is genuine.
+
+    The functional equation differentiates, where the Bernoulli table cannot;
+    only the tabulated integers keep the artefact documented above.
+    """
+    with mp.workdps(30):
+        expected = float(mp.diff(mp.zeta, n))
+    np.testing.assert_allclose(jax.grad(sp.zeta)(n), expected, rtol=1e-8)

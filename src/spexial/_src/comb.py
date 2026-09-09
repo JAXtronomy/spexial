@@ -2,10 +2,22 @@
 
 __all__ = ["comb"]
 
+from typing import Final
+
 import jax.numpy as jnp
 from jax.scipy.special import betaln, gammaln
 
 from .custom_types import AnyArray, AnyArrayLike
+
+_BETA_FROM: Final = 1000.0
+"""Above this ``N``, the Beta form replaces the log-gamma difference.
+
+Measured against `mpmath.binomial` over a grid of ``k`` at each ``N``: the
+log-gamma difference is worst 1.3e-13 at ``N = 170``, 6.6e-13 at 600 and
+1.6e-12 at 1000, while the Beta form improves the other way -- 1.6e-9 at 100,
+7.3e-12 at 600, 1.7e-12 at 1000, and ~1e-14 from there up. They cross here, so
+the step in value across the crossover is a few times 1e-13.
+"""
 
 
 def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
@@ -60,21 +72,24 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # +inf, and inf - inf would give nan rather than the 0 scipy returns.
     n_safe = jnp.where(in_domain, n_arr, 0.0)
     k_safe = jnp.where(in_domain, k_arr, 0.0)
-    # Two forms, because neither is best everywhere.
+    # Two forms, because neither is best everywhere, and the crossover is where
+    # they measure equal rather than at any round number.
     #
-    # The log-gamma difference is the more accurate of the two on the supported
-    # `N <= 170` domain (worst 3.2e-13 against 1.9e-11), but it cancels
-    # catastrophically beyond it: the two log-gammas converge as N grows and by
-    # N = 1e18 their difference is exactly 0, so the result collapsed to `1.0` --
-    # a plausible number where the truth is 5e35.
+    # The log-gamma difference wins below N of about 1000 -- 1.6e-12 at worst
+    # there against the Beta form's 1.6e-9 at N = 100 -- but it cancels
+    # catastrophically above it: the two log-gammas converge as N grows, their
+    # difference is 2.8e-7 relative by N = 1e8 and exactly 0 by N = 1e16, where
+    # the result collapses to a plausible-looking `1.0`.
     #
-    # `comb(N, k) = 1 / ((N + 1) B(N - k + 1, k + 1))` has no such subtraction
-    # and holds to ~1e-14 all the way to `DBL_MAX`. Used above the documented
-    # domain, it turns a silent wrong answer into a correct one.
+    # `comb(N, k) = 1 / ((N + 1) B(N - k + 1, k + 1))` has no such subtraction.
+    # It is the weaker of the two on small N, where the Beta function's own
+    # argument reduction costs digits, and holds at ~1e-14 from N = 1000 up to
+    # `DBL_MAX / 2` -- see the docs for the ceiling there, which belongs to
+    # `jax.scipy.special.betaln` rather than to this formula.
     log_comb = gammaln(n_safe + 1) - gammaln(k_safe + 1) - gammaln(n_safe - k_safe + 1)
     from_beta = -betaln(n_safe - k_safe + 1, k_safe + 1) - jnp.log(n_safe + 1)
     out = jnp.where(
-        in_domain, jnp.exp(jnp.where(n_arr > 170, from_beta, log_comb)), 0.0
+        in_domain, jnp.exp(jnp.where(n_arr > _BETA_FROM, from_beta, log_comb)), 0.0
     )
     # `gammaln(inf) - gammaln(inf) - ...` is `inf - inf == nan`; the limit is
     # plainly +inf and scipy returns that -- except at k = 0, where C(N, 0) = 1
