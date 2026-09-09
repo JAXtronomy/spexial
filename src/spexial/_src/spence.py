@@ -30,7 +30,7 @@ def _series_about_zero(z: AnyArray) -> AnyArray:
     The third term diverges for :math:`|z| \rightarrow 0` so we special case
     it.
     """
-    nn = jnp.arange(1, _MAXITER)
+    nn = jnp.arange(1.0, _MAXITER)
     temp = z**nn / nn
     sum1 = jnp.sum(temp / nn)
     sum2 = jnp.sum(temp)
@@ -45,7 +45,12 @@ def _series_about_one(z: AnyArray) -> AnyArray:
     Used for :math:`|z| > 1/2` where the reflected form does not apply.
     """
     z = 1 - z
-    nn = jnp.arange(1, _MAXITER)
+    # Float, not `arange(1, ...)`: the denominator is a degree-6 integer
+    # polynomial that overflows int32 from n = 35, and JAX is int32 unless x64
+    # is on. Under float32 that silently corrupted 235 of the 499 terms (many
+    # going negative) for a 3.8e-5 error at z = 2 -- 300x worse than float32
+    # rounding alone. Compare `polylog.py`, which guards the same hazard.
+    nn = jnp.arange(1.0, _MAXITER)
     res = jnp.sum(z**nn / (nn * (nn + 1) * (nn + 2)) ** 2)
 
     res *= 4 * z**2
@@ -105,13 +110,17 @@ def _spence_gradient(z: AnyArrayLike) -> AnyArray:
 
         \frac{\log(z)}{1 - z}
 
-    We call out special cases where one of the two terms will diverge.
+    The derivative is `-1` at ``z = 1`` (a removable singularity) and `-inf` at
+    ``z = 0``, both of which are the true limits.
     """
-    return jnp.where(
-        (z == 0) | (z == 1),
-        0.0,
-        jnp.log(z) / (1 - z),
-    )
+    # `z = 1` is a *removable* singularity, not a zero: log(z)/(1-z) is 0/0
+    # there and the limit is -1, since spence(1 + h) = -h + O(h^2). Returning 0
+    # would be a plausible-looking wrong answer at exactly one point, and the
+    # one place a user is most likely to evaluate. `z = 0` needs no special
+    # case: log(0)/(1-0) is -inf, which is the true derivative.
+    at_one = z == 1
+    z_safe = jnp.where(at_one, 2.0, z)
+    return jnp.where(at_one, -1.0, jnp.log(z_safe) / (1 - z_safe))
 
 
 def _spence_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:

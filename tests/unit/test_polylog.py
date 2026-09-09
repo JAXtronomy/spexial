@@ -163,3 +163,32 @@ def test_order_one_derivative_is_the_special_case():
     np.testing.assert_allclose(
         jax.grad(lambda a: sp.Li(1, a))(z), 1 / (1 - z), rtol=1e-12
     )
+
+
+@pytest.mark.parametrize("n", [2.0, 1.0, 2.5, -0.5, "2"])
+def test_non_integer_order_is_rejected(n):
+    """A non-integer order is a `TypeError`, and says so clearly.
+
+    The docs promised a `ValueError` here, which was wrong twice over: the body
+    only validates `n < 1`, and the `n: int` annotation gets there first under
+    the runtime type checker. What a caller actually sees is a
+    `jaxtyping.TypeCheckError` -- a `TypeError` subclass -- naming the parameter
+    and the expected type, which is the right error for the wrong type. Pinned
+    so the documented exception cannot drift from the real one again.
+    """
+    with pytest.raises(TypeError, match="n"):
+        sp.Li(n, 0.3)
+
+
+@pytest.mark.parametrize("z", [0.3 + 0.1j, 3.0 + 1.0j])
+def test_complex_argument_is_rejected(z):
+    """REGRESSION: complex `z` silently lost its imaginary part in two branches.
+
+    The `|z| <= 1/2` series returned the true complex value, while `expansion`
+    and `inversion` take `jnp.real` of a complex intermediate -- exact for real
+    `z`, where the imaginary parts cancel, but for complex `z` it returned a
+    plausible number with the imaginary part discarded (`Li(2, 3+1j)` gave
+    1.3459 + 0j against mpmath's 1.3459 + 3.3651j).
+    """
+    with pytest.raises(ValueError, match="real z"):
+        sp.Li(2, z)

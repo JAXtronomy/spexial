@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import jax.scipy.special as jss
 import numpy as np
 import pytest
-from scipy.special import digamma, gamma as scipy_gamma
+from scipy.special import digamma, gamma as scipy_gamma, polygamma
 
 import spexial as sp
 
@@ -122,3 +122,29 @@ def test_negative_infinity_is_nan():
     return. Documented in `docs/reference/accuracy-and-domains.md`.
     """
     assert jnp.isnan(sp.gamma(-jnp.inf))
+
+
+@pytest.mark.parametrize("x", [0.5, 2.5, 5.0])
+def test_second_derivative_is_correct_on_the_positive_axis(x):
+    """Gamma''(x) = Gamma(x) * (digamma(x)**2 + polygamma(1, x))."""
+    got = float(jax.grad(jax.grad(sp.gamma))(x))
+    expected = scipy_gamma(x) * (digamma(x) ** 2 + polygamma(1, x))
+    np.testing.assert_allclose(got, expected, rtol=1e-11)
+
+
+@pytest.mark.parametrize("x", [-10.5, -20.5])
+def test_second_derivative_is_broken_on_the_negative_axis_like_jax(x):
+    """The second derivative is unusable for x < ~-7.5, and that is upstream.
+
+    `gamma`'s JVP is `g * digamma(x)`, so differentiating twice goes through
+    `jax.scipy.special.digamma`'s own derivative -- and JAX's trigamma diverges
+    from `scipy.special.polygamma(1, .)` on the negative axis, wrongly by 1e11
+    at -10.5 and with the wrong *sign* at -20.5. `spexial` is no worse than
+    JAX here, which is what this pins: if JAX fixes it, this test fails and the
+    docs get corrected rather than quietly staying pessimistic.
+    """
+    ours = float(jax.grad(jax.grad(sp.gamma))(x))
+    theirs = float(jax.grad(jax.grad(jss.gamma))(x))
+    truth = scipy_gamma(x) * (digamma(x) ** 2 + polygamma(1, x))
+    np.testing.assert_allclose(ours, theirs, rtol=1e-12)
+    assert abs(ours / truth - 1) > 0.1, "JAX's trigamma looks fixed; update the docs"

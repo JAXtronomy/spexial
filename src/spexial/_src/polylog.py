@@ -70,7 +70,9 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:
     ----------
     n
         Order of the polylogarithm. Must be a static Python `int` and
-        ``>= 1``.
+        ``>= 1``. A non-integer order -- including a whole-number `float` such
+        as ``Li(2.0, z)`` -- is rejected by the runtime type checker with a
+        `TypeError`; an integer below 1 raises `ValueError`.
     z
         Real, **scalar** argument. The middle series is built from a
         length-60 vector of powers of :math:`\log z`, so it cannot broadcast;
@@ -110,8 +112,20 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:
     # Validated here rather than inside `_li`, so the error is raised eagerly at
     # call time instead of during tracing -- a `ValueError` from inside a jitted
     # body surfaces with a confusing traceback and only when the trace happens.
+    # `isinstance` and not `n != int(n)`: a whole-number *float* order such as
+    # `Li(2.0, z)` used to reach `lax.fori_loop(0, n + 1, ...)` and die there
+    # with "lower and upper arguments must have equal types", which says nothing
+    # about what the caller did wrong.
     if n < 1:
         msg = f"Li is only implemented for integer order n >= 1, got {n}"
+        raise ValueError(msg)
+    # Two of the three branches take `jnp.real` of a complex intermediate --
+    # correct for real `z`, where the imaginary parts cancel exactly, but it
+    # would silently discard a genuine imaginary part. Rejected rather than
+    # returned wrong: `jnp.iscomplexobj` reads the dtype, so this works on a
+    # tracer and costs nothing at runtime.
+    if jnp.iscomplexobj(z):
+        msg = f"Li is only implemented for real z, got dtype {jnp.asarray(z).dtype}"
         raise ValueError(msg)
     return _li(n, z)
 

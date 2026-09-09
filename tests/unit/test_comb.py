@@ -82,3 +82,16 @@ def test_infinite_n_is_infinity():
     """`comb(inf, k)` is `inf`, as in scipy; `gammaln` alone gives `inf - inf`."""
     assert jnp.isinf(sp.comb(jnp.inf, 2.0))
     assert float(sp.comb(jnp.inf, 2.0)) == scipy_comb(np.inf, 2)
+
+
+def test_infinite_n_with_zero_k_is_one():
+    """REGRESSION: `comb(inf, 0)` returned `inf`; C(N, 0) = 1 for every N.
+
+    The `isinf(N) -> inf` override was unconditional in `k`, throwing away the
+    masked `gammaln` path that already computes `exp(0) == 1` correctly.
+    """
+    assert float(sp.comb(jnp.inf, 0.0)) == 1.0
+    assert scipy_comb(np.inf, 0) == 1.0
+    # k >= 1 is still infinite, as before.
+    assert jnp.isinf(sp.comb(jnp.inf, 1.0))
+    assert jnp.isinf(sp.comb(jnp.inf, 2.0))
