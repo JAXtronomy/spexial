@@ -82,16 +82,6 @@ def _K0e_large(z: AnyArray) -> AnyArray:
     return jnp.where(at_inf, 0.0, series / (2.0 * (z * i0e(z))))
 
 
-def _crossover(dtype: Any) -> float:
-    """Where the two series hand off, which depends on how much precision there is.
-
-    Keyed on `eps` rather than on the dtype name so that any low-precision type
-    (float16, bfloat16) gets the conservative cross-over rather than silently
-    inheriting a constant chosen for float64.
-    """
-    return _SMALL_Z if jnp.finfo(dtype).eps < 1e-10 else _SMALL_Z_LOW_PRECISION
-
-
 def _two_over(z: AnyArray) -> AnyArray:
     """``2 / z``, with `-0.0` treated as the same pole as `+0.0`.
 
@@ -147,7 +137,10 @@ def _as_float(z: RealArrayLike) -> AnyArray:
 def _split(z: RealArrayLike) -> tuple[AnyArray, AnyArray, AnyArray, AnyArray]:
     """Both branch arguments, each already made safe for the other's domain."""
     z_arr = _as_float(z)
-    cut = _crossover(z_arr.dtype)
+    # Keyed on `eps`, not on the dtype name, so any low-precision type gets the
+    # conservative cross-over rather than inheriting one chosen for float64.
+    eps = jnp.finfo(z_arr.dtype).eps
+    cut = _SMALL_Z if eps < 1e-10 else _SMALL_Z_LOW_PRECISION
     small = z_arr < cut
     return z_arr, small, jnp.where(small, z_arr, 1.0), jnp.where(small, cut, z_arr)
 
@@ -499,32 +492,16 @@ def _dK2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyAr
 
 @K1.defjvp
 def _K1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """K1'(z) = -K0(z) - K1(z) / z, summed scaled for the same reason as `K2`.
-
-    Formed directly, the `K1(z) / z` term is subnormal from z = 700 and XLA
-    flushes it, dropping 0.2% of the derivative.
-    """
+    """K1'(z) = -K0(z) - K1(z) / z, summed scaled in `_dK1`."""
     (z,), (dz,) = primals, tangents
-    z_arr = _as_float(z)
-    return _cast_like(K1e(z_arr) * jnp.exp(-z_arr), z), _cast_like(_dK1(z_arr), z) * dz
+    return K1(z), _cast_like(_dK1(_as_float(z)), z) * dz
 
 
 @K2.defjvp
 def _K2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """K2'(z) = -K1(z) - (2/z) K2(z), summed scaled as in `K2` itself.
-
-    `K0e` and `K1e` are hoisted rather than reached through `K2` and `K2e`,
-    which would evaluate the 30-term series twice over -- once for the primal
-    and once for the derivative. Measured 1.31x faster for `grad` over 1000
-    points, with the tail values unchanged.
-    """
+    """K2'(z) = -K1(z) - (2/z) K2(z), summed scaled in `_dK2`."""
     (z,), (dz,) = primals, tangents
-    z_arr = _as_float(z)
-    k0e, k1e = K0e(z_arr), K1e(z_arr)
-    two_over_z = _two_over(z_arr)
-    k2e = k0e + two_over_z * k1e
-    scale = jnp.exp(-z_arr)
-    return _cast_like(k2e * scale, z), _cast_like(_dK2(z_arr), z) * dz
+    return K2(z), _cast_like(_dK2(_as_float(z)), z) * dz
 
 
 # At z = 0 each of these is a difference of two infinities, so the closed form
@@ -533,8 +510,8 @@ def _K2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArr
 # divergent term. Substituted so the two families agree at the pole.
 
 
-def _at_pole(z: AnyArray, deriv: AnyArray) -> AnyArray:
-    """`-inf` wherever the closed form degenerates on the non-negative axis.
+def _at_pole(z: AnyArray, deriv: AnyArray, limit: float = -jnp.inf) -> AnyArray:
+    """`limit` wherever the closed form degenerates on the non-negative axis.
 
     At ``z = 0`` each of these rules is a difference of two infinities. So is
     the whole band ``0 < z <~ 6.7e-155``, where the scaled values themselves
@@ -543,19 +520,12 @@ def _at_pole(z: AnyArray, deriv: AnyArray) -> AnyArray:
     `grad(K2)` and `grad(K1e)` both returned the true limit. Keyed on the
     result being `nan` rather than on a magnitude threshold, so it cannot go
     stale. Negative `z` keeps its `nan`: that is outside the domain, not a pole.
+
+    First derivatives tend to `-inf` there and second derivatives to `+inf`, the
+    `1/z^2` term dominating, so the three second-derivative rules pass
+    ``limit=jnp.inf``.
     """
-    return jnp.where((z >= 0.0) & jnp.isnan(deriv), -jnp.inf, deriv)
-
-
-def _at_second_pole(z: AnyArray, second: AnyArray) -> AnyArray:
-    """`+inf` where a second-derivative rule degenerates on the non-negative axis.
-
-    Every K_n'' diverges to `+inf` at the pole (the `1/z^2` term dominates), but
-    the closed forms are `inf - inf` there. Guarded the same way as `_at_pole`,
-    on the result rather than on a magnitude, and to `+inf` rather than `-inf`
-    because the second derivative approaches from the other side.
-    """
-    return jnp.where((z >= 0.0) & jnp.isnan(second), jnp.inf, second)
+    return jnp.where((z >= 0.0) & jnp.isnan(deriv), limit, deriv)
 
 
 @jax.custom_jvp
@@ -570,7 +540,7 @@ def _dK0e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyA
     (z,), (dz,) = primals, tangents
     k0e, k1e = K0e(z), K1e(z)
     second = 2.0 * k0e - 2.0 * k1e + 0.5 * _two_over(z) * k1e
-    return _dK0e(z), _at_second_pole(z, second) * dz
+    return _dK0e(z), _at_pole(z, second, jnp.inf) * dz
 
 
 @jax.custom_jvp
@@ -585,7 +555,7 @@ def _dK1e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyA
     (z,), (dz,) = primals, tangents
     k0e, k1e, half = K0e(z), K1e(z), 0.5 * _two_over(z)
     second = 2.0 * k1e - 2.0 * k0e - 2.0 * half * k1e + half * k0e + 2.0 * half**2 * k1e
-    return _dK1e(z), _at_second_pole(z, second) * dz
+    return _dK1e(z), _at_pole(z, second, jnp.inf) * dz
 
 
 @jax.custom_jvp
@@ -607,7 +577,7 @@ def _dK2e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyA
         - 4.0 * half * k2e
         + 6.0 * half**2 * k2e
     )
-    return _dK2e(z), _at_second_pole(z, second) * dz
+    return _dK2e(z), _at_pole(z, second, jnp.inf) * dz
 
 
 @K0e.defjvp

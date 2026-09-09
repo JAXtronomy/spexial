@@ -87,10 +87,9 @@ def _seed(alpha: AnyArrayLike, x: AnyArrayLike, /) -> tuple[AnyArray, AnyArray]:
         dtype = jnp.result_type(alpha_arr, x_arr)
         alpha_arr = alpha_arr.astype(dtype)
         x_arr = x_arr.astype(dtype)
-    # Unpacked into a real tuple: `jnp.broadcast_arrays` returns a list, which
-    # the runtime type checker rejects against the annotation.
-    alpha_arr, x_arr = jnp.broadcast_arrays(alpha_arr, x_arr)
-    return alpha_arr, x_arr
+    # `tuple(...)`: `jnp.broadcast_arrays` returns a list, which the runtime type
+    # checker rejects against the annotation.
+    return tuple(jnp.broadcast_arrays(alpha_arr, x_arr))
 
 
 def _C_n_plus_1(carry: _Carry, n: AnyArray) -> tuple[_Carry, AnyArray]:
