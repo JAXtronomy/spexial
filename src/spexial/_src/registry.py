@@ -400,12 +400,14 @@ _ROWS: Final = (
         status=Status.DELEGATES,
         custom_jvp=True,
         derivative="gamma(x) psi(x)",
-        cost=Cost(speed=1 / 4.26, memory=1 / 3.0, against="jax.scipy.special.gamma"),
+        cost=Cost(speed=1.03, memory=1 / 3.0, against="jax.scipy.special.gamma"),
         notes=(
             "The value is `jax.scipy.special.gamma`, called directly, so it "
             "cannot drift. What `spexial` adds is the derivative: "
-            "Gamma'(x) = Gamma(x) psi(x) is 4.3x faster than differentiating "
-            "JAX's implementation and keeps 3x less residual. Complex input "
+            "Gamma'(x) = Gamma(x) psi(x) keeps 3x less residual than "
+            "differentiating JAX's implementation, at neutral wall-clock (1.03x, "
+            "i.e. no measurable saving -- the row earns its place on memory "
+            "alone). Complex input "
             "works from jax 0.10.2 -- the same release that added `comb`, and "
             "below it `jax.scipy.special.gamma` branches on `floor(x)` and "
             "raises. Delegating means inheriting that limit rather than "

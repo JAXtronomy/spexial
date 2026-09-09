@@ -28,7 +28,7 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 | `spence` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.278x (3.6x better) | 0.0259x (38.6x better) | extends upstream |
 | `zeta` | yes (all >= 0.7.2) | value + autodiff | -- | -- | 1.15x (1.1x worse) | -- | extends upstream |
 | `comb` | yes (>= 0.10.2) | value + autodiff | -- | -- | 0.97x (1.0x better) | -- | redundant above floor |
-| `gamma` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.235x (4.3x better) | 0.333x (3.0x better) | delegates + our JVP |
+| `gamma` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 1.03x (1.0x worse) | 0.333x (3.0x better) | delegates + our JVP |
 
 ## Per-function detail
 
@@ -107,11 +107,11 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
     Gradient cost vs jax.scipy.special.comb: speed 0.97x (1.0x better), memory --.
 
 `gamma`
-:   The value is `jax.scipy.special.gamma`, called directly, so it cannot drift. What `spexial` adds is the derivative: Gamma'(x) = Gamma(x) psi(x) is 4.3x faster than differentiating JAX's implementation and keeps 3x less residual. Complex input works from jax 0.10.2 -- the same release that added `comb`, and below it `jax.scipy.special.gamma` branches on `floor(x)` and raises. Delegating means inheriting that limit rather than papering over it; the test probes the capability instead of comparing versions.
+:   The value is `jax.scipy.special.gamma`, called directly, so it cannot drift. What `spexial` adds is the derivative: Gamma'(x) = Gamma(x) psi(x) keeps 3x less residual than differentiating JAX's implementation, at neutral wall-clock (1.03x, i.e. no measurable saving -- the row earns its place on memory alone). Complex input works from jax 0.10.2 -- the same release that added `comb`, and below it `jax.scipy.special.gamma` branches on `floor(x)` and raises. Delegating means inheriting that limit rather than papering over it; the test probes the capability instead of comparing versions.
 
     Derivative: `gamma(x) psi(x)`.
 
-    Gradient cost vs jax.scipy.special.gamma: speed 0.235x (4.3x better), memory 0.333x (3.0x better).
+    Gradient cost vs jax.scipy.special.gamma: speed 1.03x (1.0x worse), memory 0.333x (3.0x better).
 
 <!-- END GENERATED TABLE -->
 

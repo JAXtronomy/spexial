@@ -69,9 +69,7 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
 
     Examples
     --------
-    >>> from typing import Final
-
-    import jax.numpy as jnp
+    >>> import jax.numpy as jnp
     >>> import spexial as sp
 
     >>> round(float(sp.zeta(2.0)), 10)

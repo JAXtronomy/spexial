@@ -65,8 +65,8 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # `gammaln(inf) - gammaln(inf) - ...` is `inf - inf == nan`; the limit is
     # plainly +inf and scipy returns that -- except at k = 0, where C(N, 0) = 1
     # for every N including infinity, as scipy also returns.
-    return jnp.where(
-        in_domain & jnp.isinf(n_arr),
-        jnp.where(k_arr == 0, 1.0, jnp.inf),
-        out,
+    # C(inf, inf) is indeterminate, and `nan` is what scipy returns for it.
+    at_infinity = jnp.where(
+        k_arr == 0, 1.0, jnp.where(jnp.isinf(k_arr), jnp.nan, jnp.inf)
     )
+    return jnp.where(in_domain & jnp.isinf(n_arr), at_infinity, out)

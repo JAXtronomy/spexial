@@ -128,15 +128,20 @@ def test_k2_keeps_its_recurrence_term_in_the_subnormal_tail(z):
     `K2 = K0 + (2/z) K1` computed directly puts that second term into the
     subnormal range around z = 699, and XLA on CPU flushes subnormal results to
     zero -- so `K2` returned exactly `K0` while still looking plausible, a 2.85e-3
-    relative error against a documented 1e-6. Evaluating as
-    `K0 * (1 + (2/z)(K1/K0))` keeps every intermediate normal.
+    relative error against a documented 1e-6. `K2` is now `K2e(z) * exp(-z)`:
+    the recurrence is summed where both terms are order 1e-2 and scaled down
+    once, so no intermediate is ever subnormal.
+
+    `rtol` is 1e-14 for the same reason as the derivative test below: the value
+    is exact here (measured 1.8e-16), so the documented 1e-6 would not notice a
+    four-order regression of the very mechanism this test exists to guard.
     """
     # mpmath, not `scipy.kn`: the reference itself underflows to 0 at z ~ 698,
     # which is exactly the region under test.
     with mp.workdps(40):
         expected = float(mp.besselk(2, z))
     assert float(sp.K2(z)) > float(sp.K0(z))
-    np.testing.assert_allclose(sp.K2(z), expected, rtol=1e-6)
+    np.testing.assert_allclose(sp.K2(z), expected, rtol=1e-14)
 
 
 @pytest.mark.parametrize("z", [0.5, 2.0, 8.5, 9.5, 20.0])
@@ -214,7 +219,7 @@ def test_scaled_is_exact_in_the_tail(order, func, z):
     """Against mpmath, the scaled forms are at machine precision past z = 705."""
     with mp.workdps(40):
         expected = float(mp.exp(z) * mp.besselk(order, z))
-    np.testing.assert_allclose(func(z), expected, rtol=1e-13)
+    np.testing.assert_allclose(func(z), expected, rtol=1e-15)
 
 
 @pytest.mark.parametrize(("order", "func"), [(1, sp.K1), (2, sp.K2)])
@@ -228,21 +233,26 @@ def test_grad_keeps_its_recurrence_term_in_the_subnormal_tail(order, func, z):
     returning a plausible number. Exactly the bug that `K2`'s *value* had, left
     behind in its *derivative*. Both are now summed in the scaled variables and
     scaled down once.
+
+    `rtol` is 1e-14, not the 1e-6 these functions are documented to: the scaled
+    sum is exact here (measured 3.1e-16), so a 1e-6 gate would still pass if the
+    same mechanism regressed by four orders of magnitude.
     """
     with mp.workdps(40):
         expected = float(mp.diff(lambda t: mp.besselk(order, t), z))
-    np.testing.assert_allclose(jax.grad(func)(z), expected, rtol=1e-6)
+    np.testing.assert_allclose(jax.grad(func)(z), expected, rtol=1e-14)
 
 
 @pytest.mark.parametrize(("order", "func"), [(0, sp.K0e), (1, sp.K1e), (2, sp.K2e)])
-@pytest.mark.parametrize("z", [0.5, 8.5, 9.5, 50.0, 800.0])
+@pytest.mark.parametrize("z", [0.5, 8.5, 8.999, 9.5, 50.0, 800.0])
 def test_scaled_grad_matches_mpmath(order, func, z):
     """The scaled custom JVPs, against mpmath's derivative of `e^z K_n(z)`.
 
     `rtol` is 1e-5, not the 1e-6 the values hold to: `(e^z K_n)' = e^z(K_n -
     K_{n+1})` subtracts two nearly equal numbers, and the cancellation costs
     about a decade of relative accuracy near the z = 9 cross-over (measured
-    worst 1.7e-6). Away from it the derivative is good to 5e-13.
+    worst 2.3e-6, at z = 8.999, which is one of the points below). Away from
+    the cross-over the derivative is good to 5e-13.
     """
     with mp.workdps(40):
         expected = float(mp.diff(lambda t: mp.exp(t) * mp.besselk(order, t), z))
@@ -304,3 +314,56 @@ def test_positive_infinity_is_zero(func, reference):
 def test_negative_infinity_is_nan(func):
     """`-inf` is outside the domain, like any negative argument."""
     assert jnp.isnan(func(-jnp.inf))
+
+
+@pytest.mark.parametrize("func", ALL_FUNCS)
+def test_negative_zero_is_the_same_pole_as_positive_zero(func):
+    """REGRESSION: `K2(-0.0)` and `K2e(-0.0)` were `nan`; scipy gives `inf`.
+
+    `K1e`'s pole guard is `z == 0.0`, which is `True` for `-0.0`, so it returned
+    `+inf` -- but `2.0 / -0.0` is `-inf`, and `K2e = K0e + (2/z) K1e` became
+    `inf - inf == nan`. `K0`, `K1`, `K0e` and `K1e` were all correct at `-0.0`,
+    so the library was inconsistent at a single point that ordinary arithmetic
+    reaches: `jnp.asarray(0.0) * -1` is `-0.0`.
+    """
+    assert jnp.isinf(func(-0.0))
+    assert jnp.isinf(func(jnp.asarray(0.0) * -1))
+
+
+@pytest.mark.parametrize("func", ALL_FUNCS)
+def test_derivative_at_the_pole_is_minus_infinity(func):
+    """REGRESSION: the scaled rules gave `nan` where the unscaled gave `-inf`.
+
+    `(e^z K_0)' = e^z (K_0 - K_1)` is `inf - inf` at 0. The true one-sided limit
+    is `-inf`, which the unscaled rules already returned because each has a
+    single divergent term -- so the two families disagreed at the pole.
+    """
+    assert float(jax.grad(func)(0.0)) == -np.inf
+    assert float(jax.grad(func)(-0.0)) == -np.inf
+
+
+@pytest.mark.parametrize(
+    ("func", "reference"),
+    [
+        (sp.K0e, scipy_k0e),
+        (sp.K1e, scipy_k1e),
+        # `scipy.kve(2, z)` is `nan` this far out. `K2e = K0e + (2/z) K1e`, and that
+        # second term is ~1e-462 here -- genuinely below the float64 range, not lost
+        # information -- so `K0e` is the correct reference to a full 16 digits.
+        (sp.K2e, scipy_k0e),
+    ],
+)
+@pytest.mark.parametrize("z", [8.99e307, 1.0e308, 1.7e308])
+def test_scaled_has_no_practical_ceiling(func, reference, z):
+    """REGRESSION: the scaled forms returned 0 above z = 8.99e307.
+
+    `_K0e_large` divided by `2.0 * z * i0e(z)`, which forms `2 * z` first --
+    overflowing to `inf` above DBL_MAX/2 and sending the quotient to 0. Grouped
+    as `2 * (z * i0e(z))` nothing overflows, because `z * i0e(z)` is
+    ~sqrt(z / 2pi). `K1e` had a second instance of the same fault: the
+    Wronskian's `1/z` term is itself subnormal above z = 4.5e307, so it returned
+    exactly 0; multiplying numerator and denominator through by `z` keeps every
+    term normal.
+    """
+    assert float(func(z)) > 0.0
+    np.testing.assert_allclose(func(z), reference(z), rtol=1e-13)

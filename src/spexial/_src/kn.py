@@ -14,7 +14,18 @@ _EULER_GAMMA: Final = 0.57721566490153286061
 """The Euler-Mascheroni constant."""
 
 _SMALL_Z: Final = 9.0
-"""Cross-over between the ascending series and the asymptotic expansion."""
+"""Cross-over between the ascending series and the asymptotic expansion, in
+float64. See `_crossover`; float32 has to hand off far earlier."""
+
+_SMALL_Z_LOW_PRECISION: Final = 4.65
+"""Cross-over in float32, chosen by measurement rather than scaled from 9.
+
+The ascending series evaluates `-(log(z/2) + gamma) I0(z) + sum(...)`, whose two
+terms are both ~e^z/sqrt(z) and cancel down to a result of ~e^-z -- a loss of
+roughly `2z/ln(10)` decimal digits. float64 has 16 to spend, so it still has 8
+left at z = 9. float32 has 7, and at z = 9 it has *none*: the result came out
+**negative**. 4.65 is where the two branches' float32 errors cross, capping the
+worst at 4.5e-3 over the whole domain."""
 
 _N_SMALL: Final = 30
 """Terms in the ascending series; enough for ~1e-8 relative accuracy at z < 9."""
@@ -52,14 +63,41 @@ def _K0e_large(z: AnyArray) -> AnyArray:
     series = 1.0 + jnp.sum(
         (-1.0) ** k * prod / (2.0 * z[..., None]) ** (2.0 * k), axis=-1
     )
-    return jnp.where(at_inf, 0.0, series / (2.0 * z * i0e(z)))
+    # Grouped as `2 * (z * i0e(z))`, not `2 * z * i0e(z)`: the latter forms
+    # `2 * z` first, which overflows to `inf` above z = DBL_MAX/2 and sent the
+    # whole quotient to 0 from z = 8.99e307. `z * i0e(z)` is ~sqrt(z / 2pi) and
+    # overflows nowhere.
+    return jnp.where(at_inf, 0.0, series / (2.0 * (z * i0e(z))))
+
+
+def _crossover(dtype: Any) -> float:
+    """Where the two series hand off, which depends on how much precision there is.
+
+    Keyed on `eps` rather than on the dtype name so that any low-precision type
+    (float16, bfloat16) gets the conservative cross-over rather than silently
+    inheriting a constant chosen for float64.
+    """
+    return _SMALL_Z if jnp.finfo(dtype).eps < 1e-10 else _SMALL_Z_LOW_PRECISION
+
+
+def _as_float(z: RealArrayLike) -> AnyArray:
+    """Promote to float, and normalise the sign of zero.
+
+    `-0.0` is the same pole as `+0.0` and every K_n is `inf` at it, but `2 / -0.0`
+    is `-inf`, which turns `K2`'s `K0e + (2/z) K1e` into `inf - inf == nan`. It
+    is reachable from ordinary arithmetic (`jnp.asarray(0.0) * -1`), so it is
+    normalised once here rather than guarded at each use.
+    """
+    z_arr = jnp.asarray(z) * 1.0
+    return jnp.where(z_arr == 0.0, 0.0, z_arr)
 
 
 def _split(z: RealArrayLike) -> tuple[AnyArray, AnyArray, AnyArray, AnyArray]:
     """Both branch arguments, each already made safe for the other's domain."""
-    z_arr = jnp.asarray(z) * 1.0
-    small = z_arr < _SMALL_Z
-    return z_arr, small, jnp.where(small, z_arr, 1.0), jnp.where(small, _SMALL_Z, z_arr)
+    z_arr = _as_float(z)
+    cut = _crossover(z_arr.dtype)
+    small = z_arr < cut
+    return z_arr, small, jnp.where(small, z_arr, 1.0), jnp.where(small, cut, z_arr)
 
 
 @jax.custom_jvp
@@ -136,14 +174,20 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
     0.0443321091
 
     """
-    z_arr = jnp.asarray(z) * 1.0
+    z_arr = _as_float(z)
     # K1 diverges at 0, but the closed form evaluates to
     # `1/0 - i1e(0) * K0e(0) == inf - 0 * inf == nan` there. At +inf it is
     # `(0 - 0 * 0) / 0 == nan` for the same reason `K0e` needs a guard.
     # Substitute both limits.
     at_zero, at_inf = z_arr == 0.0, z_arr == jnp.inf
     z_safe = jnp.where(at_zero | at_inf, 1.0, z_arr)
-    k1e = (1.0 / z_safe - i1e(z_safe) * K0e(z_safe)) / i0e(z_safe)
+    # The Wronskian gives `(1/z - i1e K0e) / i0e`; this is that identity with
+    # numerator and denominator both multiplied by z. Algebraically the same,
+    # but every term stays normal: `1/z` alone goes subnormal above z = 4.5e307
+    # (as does `i1e * K0e`, which is also ~1/2z), and both flushed to zero, so
+    # the unmultiplied form returned exactly 0 from there up. Multiplied
+    # through, the numerator tends to 1/2 and the denominator to sqrt(z/2pi).
+    k1e = (1.0 - z_safe * i1e(z_safe) * K0e(z_safe)) / (z_safe * i0e(z_safe))
     return jnp.where(at_zero, jnp.inf, jnp.where(at_inf, 0.0, k1e))
 
 
@@ -179,7 +223,7 @@ def K2e(z: RealArrayLike, /) -> AnyArray:
     0.0444152578
 
     """
-    z_arr = jnp.asarray(z) * 1.0
+    z_arr = _as_float(z)
     return K0e(z_arr) + 2.0 / z_arr * K1e(z_arr)
 
 
@@ -258,7 +302,7 @@ def K1(z: RealArrayLike, /) -> AnyArray:
     [1.65644112, 0.00404461, 0.0]
 
     """
-    z_arr = jnp.asarray(z) * 1.0
+    z_arr = _as_float(z)
     return K1e(z_arr) * jnp.exp(-z_arr)
 
 
@@ -301,7 +345,7 @@ def K2(z: RealArrayLike, /) -> AnyArray:
     # 0.3% contribution (2850x the documented tolerance) while still returning a
     # plausible number. `K0e` and `K1e` are order 1e-2 there, so the sum is
     # formed entirely in normal arithmetic and only the result is scaled down.
-    z_arr = jnp.asarray(z) * 1.0
+    z_arr = _as_float(z)
     return K2e(z_arr) * jnp.exp(-z_arr)
 
 
@@ -331,7 +375,7 @@ def _K1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArr
     flushes it, dropping 0.2% of the derivative.
     """
     (z,), (dz,) = primals, tangents
-    z_arr = jnp.asarray(z) * 1.0
+    z_arr = _as_float(z)
     deriv = -(K0e(z_arr) + K1e(z_arr) / z_arr) * jnp.exp(-z_arr)
     return K1(z_arr), deriv * dz
 
@@ -340,29 +384,43 @@ def _K1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArr
 def _K2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
     """K2'(z) = -K1(z) - (2/z) K2(z), summed scaled as in `K2` itself."""
     (z,), (dz,) = primals, tangents
-    z_arr = jnp.asarray(z) * 1.0
+    z_arr = _as_float(z)
     deriv = -(K1e(z_arr) + 2.0 / z_arr * K2e(z_arr)) * jnp.exp(-z_arr)
     return K2(z_arr), deriv * dz
+
+
+# At z = 0 each of these is a difference of two infinities, so the closed form
+# gives `nan` where the true one-sided limit is `-inf` -- which is what the
+# unscaled `K0`/`K1`/`K2` rules already return, since theirs have a single
+# divergent term. Substituted so the two families agree at the pole.
+
+
+def _at_pole(z: AnyArray, deriv: AnyArray) -> AnyArray:
+    """`-inf` at the pole, `deriv` everywhere else."""
+    return jnp.where(z == 0.0, -jnp.inf, deriv)
 
 
 @K0e.defjvp
 def _K0e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
     """(e^z K0)' = e^z (K0 - K1)."""
     (z,), (dz,) = primals, tangents
-    return K0e(z), (K0e(z) - K1e(z)) * dz
+    z_arr = _as_float(z)
+    return K0e(z_arr), _at_pole(z_arr, K0e(z_arr) - K1e(z_arr)) * dz
 
 
 @K1e.defjvp
 def _K1e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
     """(e^z K1)' = e^z K1 - e^z K0 - e^z K1 / z."""
     (z,), (dz,) = primals, tangents
-    z_arr = jnp.asarray(z) * 1.0
-    return K1e(z_arr), (K1e(z_arr) - K0e(z_arr) - K1e(z_arr) / z_arr) * dz
+    z_arr = _as_float(z)
+    deriv = K1e(z_arr) - K0e(z_arr) - K1e(z_arr) / z_arr
+    return K1e(z_arr), _at_pole(z_arr, deriv) * dz
 
 
 @K2e.defjvp
 def _K2e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
     """(e^z K2)' = e^z K2 - e^z K1 - (2/z) e^z K2."""
     (z,), (dz,) = primals, tangents
-    z_arr = jnp.asarray(z) * 1.0
-    return K2e(z_arr), (K2e(z_arr) - K1e(z_arr) - 2.0 / z_arr * K2e(z_arr)) * dz
+    z_arr = _as_float(z)
+    deriv = K2e(z_arr) - K1e(z_arr) - 2.0 / z_arr * K2e(z_arr)
+    return K2e(z_arr), _at_pole(z_arr, deriv) * dz

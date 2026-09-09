@@ -23,9 +23,14 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
     The value is `jax.scipy.special.gamma`, called directly, so it cannot drift
     from upstream. What this adds is the derivative: JAX differentiates its own
     implementation term by term, while :math:`\Gamma'(x) = \Gamma(x)\,\psi(x)`
-    is one extra call. Measured over 10,000 points, `jax.grad` costs 242 µs and
-    keeps 234 kB of residuals through the backward pass; this costs 57 µs and
-    keeps 78 kB.
+    is one extra call. The saving is in **memory, not time**: measured over
+    10,000 points, `jax.grad` keeps 240 kB of residuals through the backward
+    pass against this rule's 80 kB, while wall-clock is a wash (171 µs against
+    166 µs, i.e. 1.03x -- neutral within noise, reproduced across `grad`,
+    `vmap(grad)` and `jvp` harnesses). An earlier revision of this docstring
+    claimed 4.3x faster; that was a measurement error, and it is not plausible
+    either -- JAX's `gamma` is `sign * exp(gammaln(x))`, whose autodiff already
+    *is* the same product, so there is no arithmetic to save.
 
     Reference:
     https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.gamma.html
