@@ -2,11 +2,22 @@
 
 __all__ = ["zeta"]
 
+from typing import Final
+
 import jax.numpy as jnp
 from jax.scipy.special import zeta as _hurwitz_zeta
 
 from .bernoulli import ORDER, bernoulli_numbers
 from .custom_types import AnyArray, RealArrayLike
+
+_UNIT: Final = 54.0
+"""Above this, :math:`\\zeta(n)` is exactly 1 in float64.
+
+:math:`\\zeta(n) - 1 \\approx 2^{-n}`, which falls below half an eps of 1 once
+``n > 53``, so every double-precision value from here up is ``1.0``. Returning
+the constant is not an approximation, and it sidesteps
+`jax.scipy.special.zeta`, which gives `nan` above ``n`` of about ``1e15``.
+"""
 
 
 def zeta(n: RealArrayLike, /) -> AnyArray:
@@ -35,7 +46,10 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     The negative half-line is only supported where the functional equation can
     be evaluated from the tabulated Bernoulli numbers:
 
-    * ``n > 1`` -- delegated to `jax.scipy.special.zeta`.
+    * ``n > 1`` -- delegated to `jax.scipy.special.zeta`, except above
+      ``n = 54`` where the exact double-precision value is ``1.0``. Taking that
+      constant also avoids `jax.scipy.special.zeta` returning `nan` for ``n``
+      above roughly ``1e15``.
     * ``0 < n <= 1`` -- `nan`. `jax.scipy.special.zeta` does not implement the
       critical strip, and this function does not paper over that; use
       `scipy.special.zeta` on the host if you need it.
@@ -55,7 +69,9 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
 
     Examples
     --------
-    >>> import jax.numpy as jnp
+    >>> from typing import Final
+
+    import jax.numpy as jnp
     >>> import spexial as sp
 
     >>> round(float(sp.zeta(2.0)), 10)
@@ -70,6 +86,11 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
 
     >>> float(1 / 120)
     0.008333333333333333
+
+    Large arguments are exactly 1, where `jax.scipy.special.zeta` gives `nan`:
+
+    >>> float(sp.zeta(1e16))
+    1.0
 
     """
     n_arr = jnp.asarray(n) * 1.0
@@ -98,9 +119,14 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
         sign * bernoulli_numbers()[index] / denom,
     )
 
+    # `_hurwitz_zeta` is `nan` for n above ~1e15, and is exactly 1.0 for every n
+    # past `_UNIT` anyway, so it is only ever called on the range it handles.
+    unit = n_arr > _UNIT
     return jnp.where(
         positive,
-        _hurwitz_zeta(jnp.where(positive, n_arr, 2.0), 1.0),
+        jnp.where(
+            unit, 1.0, _hurwitz_zeta(jnp.where(positive & ~unit, n_arr, 2.0), 1.0)
+        ),
         jnp.where(
             (n_arr < 0) & is_integer & (jnp.mod(k_round, 2.0) == 0.0), 0.0, reflected
         ),

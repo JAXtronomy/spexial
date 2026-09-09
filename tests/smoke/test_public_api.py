@@ -9,8 +9,11 @@ import spexial as sp
 # name -> the private module it is defined in
 _ORIGINS = {
     "K0": "spexial._src.kn",
+    "K0e": "spexial._src.kn",
     "K1": "spexial._src.kn",
+    "K1e": "spexial._src.kn",
     "K2": "spexial._src.kn",
+    "K2e": "spexial._src.kn",
     "Li": "spexial._src.polylog",
     "comb": "spexial._src.comb",
     "eval_gegenbauer": "spexial._src.gegenbauer",
@@ -21,9 +24,14 @@ _ORIGINS = {
 }
 
 
-def test_all_is_sorted_and_unique():
-    """`__all__` is sorted and free of duplicates."""
-    assert list(sp.__all__) == sorted(sp.__all__)
+def test_all_is_unique():
+    """`__all__` is free of duplicates.
+
+    Ordering is not asserted here: ruff's `RUF022` already enforces it, and it
+    uses a natural sort (``K0, K1, K2, K0e``) that deliberately differs from
+    `sorted` (``K0, K0e, K1``). Two rules disagreeing about the same list is
+    worse than one.
+    """
     assert len(set(sp.__all__)) == len(sp.__all__)
 
 

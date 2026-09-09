@@ -27,6 +27,9 @@ __all__ = [
     "K0",
     "K1",
     "K2",
+    "K0e",
+    "K1e",
+    "K2e",
     "Li",
     "__version__",
     "comb",
@@ -43,7 +46,7 @@ with install_import_hook("spexial"):
     from ._src.comb import comb
     from ._src.gamma import gamma
     from ._src.gegenbauer import eval_gegenbauer, eval_gegenbauers
-    from ._src.kn import K0, K1, K2
+    from ._src.kn import K0, K1, K2, K0e, K1e, K2e
     from ._src.polylog import Li
     from ._src.spence import spence
     from ._src.zeta import zeta

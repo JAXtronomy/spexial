@@ -8,7 +8,7 @@ Examples
 --------
 >>> from spexial.registry import REGISTRY, Status
 >>> sorted(k for k, v in REGISTRY.items() if v.status is Status.UNIQUE)
-['K0', 'K1', 'K2', 'Li', 'eval_gegenbauer', 'eval_gegenbauers']
+['K0', 'K0e', 'K1', 'K1e', 'K2', 'K2e', 'Li', 'eval_gegenbauer', 'eval_gegenbauers']
 
 """
 

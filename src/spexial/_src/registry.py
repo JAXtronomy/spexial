@@ -176,13 +176,13 @@ _ROWS: Final = (
         custom_jvp=True,
         derivative="-K1(z)",
         cost=Cost(
-            speed=1 / 2.07, memory=1 / 67.4, against="differentiating our own series"
+            speed=1 / 2.04, memory=1 / 67.3, against="differentiating our own series"
         ),
         notes=(
             "JAX has no modified Bessel function of the second kind at any "
             "version. scipy's `k0` returns a value under `jit` but raises under "
-            "`grad`. `spexial` defines the analytic derivative, which measured 2.07x "
-            "faster than differentiating the 30-term series (637us -> 307us "
+            "`grad`. `spexial` defines the analytic derivative, which measured 2.04x "
+            "faster than differentiating the 30-term series (579us -> 285us "
             "for `grad` over 1000 points)."
         ),
     ),
@@ -194,11 +194,14 @@ _ROWS: Final = (
         scipy_array_api=Support.VALUE,
         status=Status.UNIQUE,
         custom_jvp=True,
-        derivative="-(K0(z) + K2(z)) / 2",
-        cost=Cost(
-            speed=None, memory=1 / 16.6, against="differentiating our own series"
+        derivative="-K0(z) - K1(z) / z",
+        cost=Cost(speed=1.11, memory=1 / 3.0, against="differentiating our own series"),
+        notes=(
+            "As `K0`, but the trade is now the other way round: `K1` is a thin "
+            "wrapper over `K1e`, whose own rule autodiff already picks up, so "
+            "the hand-written rule buys 3x less residual for 11% more "
+            "wall-clock. Kept for the memory column. K1'(z) = -K0(z) - K1(z)/z."
         ),
-        notes="As `K0`. K1'(z) = -(K0(z) + K2(z)) / 2.",
     ),
     Coverage(
         name="K2",
@@ -209,13 +212,61 @@ _ROWS: Final = (
         status=Status.UNIQUE,
         custom_jvp=True,
         derivative="-K1(z) - (2/z) K2(z)",
-        cost=Cost(
-            speed=None, memory=1 / 12.1, against="differentiating our own series"
-        ),
+        cost=Cost(speed=1.06, memory=1 / 3.0, against="differentiating our own series"),
         notes=(
             "`scipy.special.kn` does not dispatch on JAX arrays at all, even "
-            "with the array API enabled. K2'(z) = -K1(z) - (2/z) K2(z)."
+            "with the array API enabled. As `K1`, kept for the memory column. "
+            "K2'(z) = -K1(z) - (2/z) K2(z), summed in the scaled variables: "
+            "formed directly the `(2/z) K2` term is subnormal from z = 699 and "
+            "XLA flushes it, which cost the derivative 0.29%."
         ),
+    ),
+    Coverage(
+        name="K0e",
+        jax_name=None,
+        jax_since=None,
+        jax_support=Support.NONE,
+        scipy_array_api=Support.NONE,
+        status=Status.UNIQUE,
+        custom_jvp=True,
+        derivative="K0e(z) - K1e(z)",
+        cost=Cost(
+            speed=1 / 1.38, memory=1 / 67.3, against="differentiating our own series"
+        ),
+        notes=(
+            "Exponentially scaled e^z K0(z), matching `scipy.special.k0e`. JAX "
+            "has no scaled Bessel K at any version, and scipy's does not "
+            "dispatch on JAX arrays. This is the only form that survives past "
+            "z = 705.5, where K0 itself is subnormal and XLA flushes it to 0."
+        ),
+    ),
+    Coverage(
+        name="K1e",
+        jax_name=None,
+        jax_since=None,
+        jax_support=Support.NONE,
+        scipy_array_api=Support.NONE,
+        status=Status.UNIQUE,
+        custom_jvp=True,
+        derivative="K1e(z) - K0e(z) - K1e(z) / z",
+        cost=Cost(
+            speed=1 / 1.09, memory=1 / 11.1, against="differentiating our own series"
+        ),
+        notes="As `K0e`; matches `scipy.special.k1e`.",
+    ),
+    Coverage(
+        name="K2e",
+        jax_name=None,
+        jax_since=None,
+        jax_support=Support.NONE,
+        scipy_array_api=Support.NONE,
+        status=Status.UNIQUE,
+        custom_jvp=True,
+        derivative="K2e(z) - K1e(z) - (2/z) K2e(z)",
+        cost=Cost(
+            speed=1 / 1.01, memory=1 / 5.0, against="differentiating our own series"
+        ),
+        notes="As `K0e`; matches `scipy.special.kve(2, z)`.",
     ),
     Coverage(
         name="Li",

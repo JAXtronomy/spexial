@@ -106,3 +106,30 @@ def test_grad_is_finite_but_meaningless_on_the_negative_line(n):
 def test_dtype_is_float_for_integer_input():
     """Integer input is promoted to float."""
     assert jnp.issubdtype(sp.zeta(jnp.asarray([2, 3])).dtype, jnp.floating)
+
+
+@pytest.mark.parametrize("n", [54.0, 55.0, 100.0, 1e3, 1e15, 1e16, 1e300, np.inf])
+def test_large_argument_is_exactly_one(n):
+    """REGRESSION: `zeta(1e16)` was `nan`, inherited from JAX.
+
+    `zeta(n) - 1 ~ 2**-n` drops below half an eps of 1 once `n > 53`, so every
+    double-precision value from there up *is* `1.0` -- returning the constant is
+    exact, not an approximation, and it steps around `jax.scipy.special.zeta`
+    giving `nan` above n ~ 1e15. The docs previously recorded that `nan` as a
+    permanent limitation; nothing tested it, which is how the claim went stale.
+    """
+    assert float(sp.zeta(n)) == 1.0
+    if np.isfinite(n):
+        assert scipy_zeta(n) == 1.0
+
+
+def test_the_constant_branch_starts_where_it_is_exact():
+    """Just below the cut-off the value is still computed, and still right."""
+    # 1 + 2**-53 is representable, so zeta(53) must not be clamped to 1.0.
+    assert float(sp.zeta(53.0)) == pytest.approx(float(scipy_zeta(53.0)), rel=1e-15)
+    assert float(sp.zeta(20.0)) == pytest.approx(1.0000009539620338, rel=1e-15)
+
+
+def test_large_argument_has_zero_derivative():
+    """`zeta'(n) ~ -2**-n log 2`, which is 0 in float64 past the cut-off."""
+    assert float(jax.grad(sp.zeta)(1e16)) == 0.0
