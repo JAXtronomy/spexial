@@ -22,9 +22,12 @@ _SMALL_Z: Final = 9.0
 _MAX_Z: Final = 709.0
 """Above this `jax.scipy.special.i0` overflows, so `K1` is taken to underflow.
 
-`K0` underflows near z = 706 regardless, which is the real ceiling. SciPy is not
+`K0` underflows near z = 705.5 regardless, which is the real ceiling: that is
+where the true value drops below the smallest *normal* double and XLA on CPU
+flushes it to zero -- the same limit `gamma` meets below x = -170.6, not an
+error in the series, which tracks `k0` bit-for-bit right up to it. SciPy is not
 uniform here: `kn` underflows at ~698 while `k0`/`k1` return denormals out to
-~745, so beyond ~706 this package returns 0 where `k0`/`k1` still have a value.
+~745, so beyond ~705.5 this package returns 0 where `k0`/`k1` still have a value.
 """
 
 _N_SMALL: Final = 30
