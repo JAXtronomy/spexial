@@ -236,3 +236,33 @@ def test_derivatives_at_the_removable_point_to_every_order(order):
     with mp.workdps(40):
         expected = float(mp.re(mp.diff(lambda t: mp.polylog(2, 1 - t), 1, order)))
     np.testing.assert_allclose(f(1.0), expected, rtol=1e-9, atol=1e-12)
+
+
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16", "float32", "float64"])
+def test_narrow_dtypes_are_supported(dtype):
+    """`jax.scipy.special.spence` rejects float16 and bfloat16 outright.
+
+    They are computed one width up and rounded back, which is what `kn` and
+    `comb` do. Before this, `spence` raised `TypeError` for both.
+    """
+    dt = jnp.dtype(dtype)
+    got = spence(jnp.asarray(0.3, dt))
+    assert got.dtype == dt
+    with mp.workdps(30):
+        expected = float(mp.polylog(2, 1 - 0.3))
+    np.testing.assert_allclose(float(got), expected, rtol=8 * float(jnp.finfo(dt).eps))
+
+
+def test_third_derivative_at_zero_is_a_documented_pole():
+    """`z = 0` is a genuine pole, so higher orders are a substituted constant.
+
+    Orders one and two are the true limits, `-inf` and `+inf`. Order three
+    reports `0` where the limit is `-inf`, and chasing it would only move the
+    problem to order four -- the neighbourhood is right, which is what makes
+    this a ceiling rather than a bug. Pinned so the docs cannot drift from it.
+    """
+    third = jax.grad(jax.grad(jax.grad(spence)))
+    assert float(third(jnp.asarray(0.0))) == 0.0
+    with mp.workdps(30):
+        expected = float(mp.diff(lambda q: mp.polylog(2, 1 - q), mp.mpf("1e-4"), 3))
+    np.testing.assert_allclose(float(third(jnp.asarray(1e-4))), expected, rtol=1e-7)

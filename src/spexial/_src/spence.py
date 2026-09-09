@@ -19,6 +19,7 @@ import numpy as np
 from jax.scipy.special import spence as _jax_spence
 
 from .custom_types import AnyArray, AnyArrayLike
+from .dtype import as_float, cast_like
 
 _MAXITER: Final = 500
 """Terms taken in each series branch."""
@@ -169,7 +170,12 @@ def spence(z: AnyArrayLike, /) -> AnyArray:
     # rejects outright, and `spexial` supplies the derivative in both cases --
     # JAX's own gradient is `nan` across roughly 1 < z < 2.
     if not jnp.issubdtype(z.dtype, jnp.complexfloating):
-        return _jax_spence(z)
+        # `jax.scipy.special.spence` supports float32 and float64 only, and
+        # raised on the two narrow types rather than returning anything. They
+        # are computed one width up and rounded back, which is what `kn` and
+        # `comb` do -- `keep_weak` so that an already-wide argument is handed
+        # over untouched and keeps its weak typing.
+        return cast_like(_jax_spence(as_float(z, keep_weak=True)), z)
     return jax.lax.select(
         abs(z) < 0.5,
         _series_about_zero(z),
