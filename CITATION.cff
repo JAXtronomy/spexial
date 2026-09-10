@@ -1,9 +1,17 @@
-# This CITATION.cff file was generated with cffinit.
-# Visit https://bit.ly/cffinit to generate yours today!
+# Citation metadata, in the Citation File Format (https://citation-file-format.org).
+# GitHub's "Cite this repository" button reads this file, as does Zenodo.
 #
-# TODO: before the first tagged release, add ORCIDs and affiliations for Cara
-# Giovanetti and Colm Talbot. Neither could be verified from repository
-# metadata, and the fields are omitted rather than guessed.
+# Validated in CI by the Citation File Format project's own tool, against its
+# own schema -- see the `Validate CITATION.cff` step in ci.yml. Separately,
+# `tests/unit/test_citation.py` checks it against `pyproject.toml`: the title,
+# licence and URLs are stated in both files, and two copies of a fact drift.
+#
+# Two authors have no `orcid` -- neither could be verified, and a guessed
+# identifier is worse than an absent one, since it names a different real
+# person. Tracked in https://github.com/JAXtronomy/spexial/issues/32.
+#
+# `version` and `date-released` are deliberately absent between releases and
+# set at release time; the test asserts they match the package when present.
 
 cff-version: 1.2.0
 title: spexial
