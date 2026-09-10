@@ -110,3 +110,56 @@ def test_log_no_flush_complex_is_holomorphic(dtype):
         d_imaginary = jax.jvp(log_no_flush, (argument,), (along_imaginary,))[1]
         assert complex(d_real) == pytest.approx(1 / value, rel=1e-6), value
         assert complex(d_imaginary) == pytest.approx(1j / value, rel=1e-6), value
+
+
+@pytest.mark.parametrize("dtype", [jnp.complex64, jnp.complex128])
+def test_log_no_flush_complex_at_the_reconstruction_boundary(dtype):
+    """The band's upper bound is `tiny / eps`, and nothing steps across it.
+
+    Round 15 set no upper bound and swallowed the ordinary plane; round 16 put
+    one in. Neither round tested the boundary itself, which is where a bound is
+    wrong if it is wrong at all.
+    """
+    real_dtype = jnp.zeros((), dtype).real.dtype
+    info = jnp.finfo(real_dtype)
+    reachable = float(info.tiny) * float(2.0**info.nmant)
+    # `tiny * 2**nmant` is `tiny / eps` bit for bit; the code relies on it.
+    assert reachable == float(info.tiny) / float(info.eps)
+    below = float(np.nextafter(np.asarray(reachable, real_dtype), 0.0))
+    above = float(np.nextafter(np.asarray(reachable, real_dtype), np.inf))
+    subnormal = float(np.nextafter(np.asarray(info.tiny, real_dtype), 0.0))
+    previous = None
+    for magnitude in (below, reachable, above):
+        argument = jnp.asarray(complex(magnitude, subnormal), dtype=dtype)
+        got = complex(log_no_flush(argument))
+        assert got == complex(jax.jit(log_no_flush)(argument))
+        # No step in the real part across the boundary: one ulp at most.
+        if previous is not None:
+            assert abs(got.real - previous) <= 2 * abs(got.real) * float(info.eps)
+        previous = got.real
+
+
+@pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+def test_log_no_flush_real_path_has_no_derivative_in_the_band(dtype):
+    """A documented limitation, pinned so it stays visible.
+
+    The *real* reconstruction reads the mantissa with
+    `lax.bitcast_convert_type`, whose tangent is identically zero, so
+    differentiating it across the subnormal band gives `0` against a true
+    ``1/z`` that is often representable. That is safe only because every caller
+    -- `gamma`, all six `kn` functions, `spence` -- sits behind a
+    `jax.custom_jvp` whose rule supplies the tangent instead, and none of those
+    rule bodies reaches this branch. That contract lives in four other modules'
+    decorators and nowhere else; this test is where it is written down. Calling
+    `log_no_flush` from a new rule body without excluding the band would make
+    the zero real.
+    """
+    subnormal = jnp.asarray(
+        float(np.nextafter(np.asarray(jnp.finfo(dtype).tiny, dtype), 0.0)), dtype=dtype
+    )
+    assert float(jax.grad(log_no_flush)(subnormal)) == 0.0
+    # Immediately above the band the ordinary path gives the true derivative.
+    normal = jnp.asarray(float(jnp.finfo(dtype).tiny) * 2, dtype=dtype)
+    assert float(jax.grad(log_no_flush)(normal)) == pytest.approx(
+        1.0 / float(normal), rel=1e-6
+    )

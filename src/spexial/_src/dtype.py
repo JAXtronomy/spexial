@@ -216,9 +216,12 @@ def _log_complex_no_flush(z: AnyArray, /) -> AnyArray:
     The bound is the magnitude below which a subnormal component can still
     change the answer at all. A component ``s`` moves ``hypot`` or ``atan2``
     only when ``s / magnitude`` exceeds an eps, so ``magnitude < tiny / eps``,
-    i.e. ``tiny * 2**nmant``. Below that the two terms of the subtraction have
-    the same sign and nothing cancels; above it the subnormal is beneath the
-    result's own last bit and `jnp.log` is already right. It doubles as the
+    i.e. ``tiny * 2**nmant`` -- which is `tiny / eps` bit for bit, since
+    ``eps == 2**-nmant`` at both widths. Below that bound the subtraction
+    cannot cancel: ``log(z * 2**k)`` is negative there and ``k * log2`` is
+    positive, so the two magnitudes add rather than destroy each other. Above
+    it the subnormal component is beneath the result's own last bit and
+    `jnp.log` is already right. It doubles as the
     overflow guard the previous revision used, since scaling a number that
     small can never reach the dtype's maximum.
     """

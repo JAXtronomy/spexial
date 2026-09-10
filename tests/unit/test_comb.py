@@ -1,6 +1,9 @@
 """Unit tests for `spexial.comb`."""
 
 import math
+import os
+import subprocess
+import sys
 
 import jax
 import jax.numpy as jnp
@@ -407,3 +410,44 @@ def test_infinite_n_with_subnormal_k_is_inf_in_float16(wrap):
     subnormal = jnp.asarray(3.0517578125e-05, dtype=jnp.float16)
     got = wrap(sp.comb)(jnp.asarray(jnp.inf, dtype=jnp.float16), subnormal)
     assert float(got) == np.inf
+
+
+def test_comb_n_choose_zero_error_structure_in_float32():
+    """`comb(N, 0)` falls at most 8 ulps short of 1 without x64, at every `N`.
+
+    `jax.scipy.special.gammaln(float32(1.0))` is ``2**-21`` rather than 0, and
+    ``comb(N, 0)`` reduces to ``exp(-gammaln(1))``, so the whole shortfall is
+    upstream's. Pinned as a *bound* rather than as a list of exceptional `N`:
+    the shortfall is 0, 4, 6 or 8 ulps depending where the two branch
+    cross-overs and `gammaln`'s rounding fall, and an earlier attempt to name
+    the individual cases got three of five wrong. Runs in a subprocess, because
+    the suite pins `JAX_ENABLE_X64` and this is a float32-only defect.
+    """
+    script = (
+        "import jax.numpy as jnp, numpy as np, spexial as sp\n"
+        "sp1 = np.spacing(np.float32(1.0), dtype=np.float32)\n"
+        "rng = np.random.default_rng(0)\n"
+        "xs = np.concatenate([np.arange(0, 200, dtype=float),\n"
+        "                     np.exp(rng.uniform(np.log(200), np.log(3e38), 2000))])\n"
+        "worst = 0\n"
+        "for x in xs:\n"
+        "    for k in (0.0, float(x)):\n"
+        "        v = float(sp.comb(jnp.asarray(x, jnp.float32),\n"
+        "                          jnp.asarray(k, jnp.float32)))\n"
+        "        worst = min(worst, round((v - 1.0) / sp1))\n"
+        "print('WORST', worst)\n"
+        "print('BIG', float(sp.comb(jnp.asarray(1e8, jnp.float32),\n"
+        "                           jnp.asarray(0.0, jnp.float32))))\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "JAX_ENABLE_X64"}
+    out = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    worst = int(out.stdout.split("WORST")[1].split()[0])
+    assert -8 <= worst <= 0, out.stdout
+    # Above the asymptotic cross-over the shortfall is gone entirely.
+    assert float(out.stdout.split("BIG")[1].strip()) == 1.0
