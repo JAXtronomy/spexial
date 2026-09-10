@@ -25,6 +25,10 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 | `Li` | -- | -- | -- | yes | 1.29x (1.3x worse) | 0.00373x (268.0x better) | only here |
 | `eval_gegenbauer` | -- | -- | -- | available | -- | -- | only here |
 | `eval_gegenbauers` | -- | -- | -- | -- | -- | -- | only here |
+| `sph_legendre_p` | -- | -- | -- | -- | -- | -- | only here |
+| `sph_harm_y` | yes (all >= 0.7.2) | value + autodiff | -- | -- | -- | -- | extends upstream |
+| `sph_harm_y_cart` | -- | -- | -- | -- | -- | -- | only here |
+| `sph_harm_y_cart_all` | -- | -- | -- | -- | -- | -- | only here |
 | `spence` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.2x (5.0x better) | 0.026x (38.5x better) | extends upstream |
 | `zeta` | yes (all >= 0.7.2) | value + autodiff | -- | -- | 1.08x (1.1x worse) | -- | extends upstream |
 | `comb` | yes (>= 0.10.2) | value + autodiff | -- | -- | 1.07x (1.1x worse) | -- | redundant above floor |
@@ -88,6 +92,18 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 
 `eval_gegenbauers`
 :   No counterpart anywhere: returns every order up to n in one pass, which is the point of it.
+
+`sph_legendre_p`
+:   Absent from JAX at any version -- the normalized Legendre function is reachable only through `jax.scipy.special.sph_harm_y`, and then only wrapped in a complex harmonic. scipy has had it since 1.15 but converts JAX arrays to NumPy, so it dies under `jit`. Computed from the *reduced* function P_l^m/(1-u^2)^(m/2), which is a polynomial, times an integer power of sin(theta); that is what makes the derivative finite at the poles, where upstream's sqrt(1 - cos^2) is not. The normalization is folded into the recurrence seed in log space, because p_m^m = (2m-1)!! overflows float64 near m = 90 and multiplying by a tiny N_lm afterwards is inf * 0. No custom JVP: the derivative identity in theta needs P_l^{m+1} as well, so it would buy a second recurrence, not save one.
+
+`sph_harm_y`
+:   The one row where upstream exists and returns *incorrect values* rather than merely covering less. `jax.scipy.special.sph_harm_y` indexes its Legendre table with `arange(len(n))`, so it pairs n[i] with theta[i] instead of broadcasting: a length-1 degree against a batch of angles is right at index 0 and wrong everywhere else, by up to 1.18 absolute for n <= 3, and 0-d input raises from `len()`. Its derivatives are also `nan` at both poles for every n >= 1. Here n and m are static Python ints, as for `eval_gegenbauer`, so there is no pairing to get wrong. `tests/unit/test_sph_harm.py` asserts both defects against upstream directly, so the row cannot rot: the day JAX fixes either, those tests fail and say so.
+
+`sph_harm_y_cart`
+:   No counterpart anywhere. Evaluates Y_n^m from a Cartesian unit direction as q_n^m(z) ((x + iy))^m, which is polynomial in x and y and therefore smooth on the z-axis -- where theta and phi are singular and the chain rule sends the Cartesian gradient of every m >= 1 term to exactly 0.0 against a non-zero true limit. That is a property of the coordinates, so it cannot be fixed in the (theta, phi) form at all, by us or by upstream. Deliberately does not normalize its argument: a zero vector is then finite and twice differentiable, which callers that floor the radius themselves depend on.
+
+`sph_harm_y_cart_all`
+:   Stands to `sph_harm_y_cart` as `eval_gegenbauers` does to `eval_gegenbauer`: the whole (l, m) table is a by-product of the recurrences any single entry already runs. Shape and index layout follow `scipy.special.sph_harm_y_all`, negative orders at the far end of the second axis included. Since l and m are static the saving is in *traced* operations -- a smaller HLO, so faster tracing and compiling, not faster execution, which XLA's fusion had already recovered. Measured on the equivalent code in `galax`: tracing 3-4.6x faster up to n = 20, run time flat.
 
 `spence`
 :   JAX has had `spence` since before our floor, but it is real-only and raises on complex input; this accepts both, which is the reason the row exists. It also wins on both cost columns -- 5.0x faster on 38.5x less residual -- because the analytic derivative log(z)/(1-z) is simply the integrand of the definition. The custom JVP is not merely an optimisation here: `lax.select` evaluates every branch, so differentiating the implementation yields `nan` -- and JAX's own `spence` differentiates to `nan` across roughly 1 < x < 2, where ours is exact. Contributed by Colm Talbot, translated from scipy's Cython implementation.

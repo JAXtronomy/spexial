@@ -45,12 +45,37 @@ Two functions here are not waiting for anything, because they do something upstr
 
 `gamma` is the interesting middle case. The value is JAX's, called directly, so it cannot drift. What `spexial` adds is an analytic derivative that keeps 3× less residual memory through the backward pass at parity on time. That is a real benefit and a narrow one, and the registry records it as `DELEGATES` — a row that earns its place on the cost columns alone, and becomes redundant the moment upstream's own gradient matches on both.
 
+## The case that is none of the above: upstream is wrong
+
+`sph_harm_y` is the one row where `jax.scipy.special` has the function, at every version this package supports, and returns **incorrect values**.
+
+It indexes its internal Legendre table with `arange(len(n))`, which pairs `n[i]` with `theta[i]` positionally instead of broadcasting the four arguments against each other. A length-1 degree against a batch of angles is therefore correct at index 0 and silently wrong at every other index — measured against `scipy.special.lpmv` over four positions, up to **1.18 absolute** for $l \le 3$. Rank-0 input is rejected outright, because `len()` has nothing to measure.
+
+This is not a narrower domain or a missing derivative. It is a wrong answer returned confidently for input its own signature accepts, and it had already reached at least one downstream package's released code, where no test caught it because every fixture evaluated a single position — the one index that is right.
+
+`spexial`'s takes the degree and order as static Python `int`s, as `eval_gegenbauer` does, so there is nothing to mispair and `theta`/`phi` broadcast at any rank.
+
+The part worth more than the implementation is `tests/unit/test_sph_harm.py`, which asserts the **defect** against upstream directly rather than only asserting our own correctness. Such a test cannot rot: the day JAX fixes the broadcasting, or the `nan` pole derivatives that go with it, that test fails and says exactly which claim in the [registry](../reference/coverage.md) needs revisiting.
+
+## The case upstream cannot fix at all
+
+`sph_harm_y_cart` is here for a reason no upstream change would remove.
+
+On the z-axis, $\theta$ and $\phi$ have no directional derivative. Any spherical harmonic evaluated through them therefore has a *Cartesian* gradient of exactly `0.0` there for every $m \ge 1$ term, against a non-zero true limit — not because of how the function is implemented, but because of the coordinates it is written in. SciPy has the same limitation, as does every implementation that takes angles as its arguments.
+
+Evaluating from a Cartesian unit direction instead,
+
+$$Y_l^m = q_l^m(\hat{z})\,(\hat{x} + i\hat{y})^m,$$
+
+is polynomial in $\hat{x}$ and $\hat{y}$ and so smooth on the axis. That is new capability rather than a repair, which is why it is a separate function under a separate name rather than a flag on `sph_harm_y`.
+
 ## The honest summary
 
 This library is three things at once, and it is worth being clear about which part is which:
 
 1. **A staging area** for functions that belong upstream but are not there yet, or are there only above a floor real users have not reached. `comb` today; more of the Bessel functions eventually.
-2. **A home for things that do not fit the `scipy.special` mirror** — `Li` and `eval_gegenbauers`.
+2. **A home for things that do not fit the `scipy.special` mirror** — `Li`, `eval_gegenbauers`, and the Cartesian harmonics.
 3. **A small set of genuine improvements** — complex `spence`, negative `zeta`, cheaper gradients — that exist because a focused package can make choices a general one cannot.
+4. **A place to record, in executable form, where upstream is wrong** — `sph_harm_y`.
 
-Only the second category is permanent. The first is designed to shrink, and the registry exists to make sure someone notices when it should.
+The second category is permanent, and so, unhappily, is the fourth until upstream moves. The first is designed to shrink, and the registry exists to make sure someone notices when it should.

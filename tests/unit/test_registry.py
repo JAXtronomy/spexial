@@ -127,9 +127,25 @@ def test_jax_autodiff_claim_is_true(name):
             f"(arrives in {row.jax_since}) -- which is why spexial still has it"
         )
     fn = getattr(jss, row.jax_name)
-    call = {"zeta": lambda a: fn(a, 1.0), "comb": lambda a: fn(a, 2.0)}.get(
-        row.jax_name, fn
-    )
+    call = {
+        "zeta": lambda a: fn(a, 1.0),
+        "comb": lambda a: fn(a, 2.0),
+        # Four arguments, and `n`/`m` must be *arrays* of the same length as
+        # `theta`: upstream pairs them positionally rather than broadcasting,
+        # which is the defect `spexial.sph_harm_y` exists to avoid. Probing it
+        # here only asks whether it differentiates at all, which it does --
+        # away from the poles, where it is `nan`.
+        # `.real[0]` because the harmonic is complex and shape (1,), while
+        # the generic probe below pulls back a real *scalar* cotangent. The
+        # question here is only whether upstream differentiates at all.
+        "sph_harm_y": lambda a: fn(
+            jnp.asarray([1]),
+            jnp.asarray([0]),
+            jnp.atleast_1d(a),
+            jnp.zeros(1),
+            n_max=1,
+        ).real[0],
+    }.get(row.jax_name, fn)
     x = jnp.asarray(2.5)
     jax.jvp(call, (x,), (jnp.asarray(1.0),))
     _, pullback = jax.vjp(call, x)

@@ -78,6 +78,33 @@ def test_gegenbauer_signatures() -> None:
     single: Out = sp.eval_gegenbauer(order, 1.0, 0.5)
     batched: Out = sp.eval_gegenbauer(order, 1.0, jnp.asarray([0.1, 0.2]))
     ladder: Out = sp.eval_gegenbauers(order, 1.0, 0.5)
+    table: Out = sp.eval_gegenbauers(
+        order, jnp.asarray([1.0, 2.0])[:, None], jnp.asarray([0.1, 0.2, 0.3])
+    )
     assert single.shape == ()
     assert batched.shape == (2,)
     assert ladder.shape == (order + 1,)
+    assert table.shape == (order + 1, 2, 3)
+
+
+def test_sph_legendre_p_signature() -> None:
+    """`sph_legendre_p(n, m, theta, /)` takes static `int`s and returns an Array."""
+    degree: int = 2
+    order: int = 1
+    from_scalar: Out = sp.sph_legendre_p(degree, order, 0.5)
+    from_array: Out = sp.sph_legendre_p(degree, order, jnp.asarray([0.5, 1.0]))
+    assert from_scalar.shape == ()
+    assert from_array.shape == (2,)
+
+
+def test_sph_harm_y_signatures() -> None:
+    """The three harmonic entry points, each returning a complex Array."""
+    degree: int = 3
+    order: int = 2
+    spherical: Out = sp.sph_harm_y(degree, order, jnp.asarray([0.5, 1.0]), 0.25)
+    uvec = jnp.asarray([0.0, 0.6, 0.8])
+    cartesian: Out = sp.sph_harm_y_cart(degree, order, uvec)
+    table: Out = sp.sph_harm_y_cart_all(degree, order, uvec)
+    assert spherical.shape == (2,)
+    assert cartesian.shape == ()
+    assert table.shape == (degree + 1, 2 * order + 1)
