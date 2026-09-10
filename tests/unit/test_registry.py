@@ -34,9 +34,16 @@ _JVP_OBJECT = {
     "k1e": sp.k1e,
     "k2e": sp.k2e,
     "gamma": sp.gamma,
+    "incomplete_beta": sp.incomplete_beta,
     "polylog": _li_core,
     "spence": sp.spence,
 }
+
+# Functions whose domain is not the positive reals, so the shared probes below
+# have to sample somewhere they are actually defined: `polylog` and `spence`
+# converge on their series branch only for |z| < 1, and `incomplete_beta`
+# integrates over [0, 1] and is `nan` outside it.
+_UNIT_INTERVAL = frozenset({"polylog", "spence", "incomplete_beta"})
 
 _PROBES = {
     "k0": (sp.k0, sp.k0.fun),
@@ -46,6 +53,12 @@ _PROBES = {
     "k1e": (sp.k1e, sp.k1e.fun),
     "k2e": (sp.k2e, sp.k2e.fun),
     "gamma": (sp.gamma, sp.gamma.fun),
+    # Three arguments, only the last of which is differentiated here; `a` and
+    # `b` are bound so the shared probe below can call it with one array.
+    "incomplete_beta": (
+        lambda z: sp.incomplete_beta(2.0, 1.5, z),
+        lambda z: sp.incomplete_beta.fun(2.0, 1.5, z),
+    ),
     "polylog": (
         lambda z: jax.vmap(lambda t: _li_core(3, t))(z),
         lambda z: jax.vmap(lambda t: _li_core.fun(3, t))(z),
@@ -248,7 +261,7 @@ def test_custom_jvp_really_saves_the_claimed_memory(name):
     # anywhere positive.
     x = (
         jnp.linspace(0.05, 0.45, 2_000)
-        if name in {"polylog", "spence"}
+        if name in _UNIT_INTERVAL
         else jnp.linspace(0.6, 20.0, 10_000)
     )
     with_jvp = _residual_bytes(custom, x)
@@ -275,7 +288,7 @@ def test_custom_jvp_agrees_with_differentiating_the_implementation(name):
     custom, plain = _PROBES[name]
     x = (
         jnp.linspace(0.05, 0.45, 40)
-        if name in {"polylog", "spence"}
+        if name in _UNIT_INTERVAL
         else jnp.linspace(0.7, 12.0, 40)
     )
     analytic = jax.grad(lambda a: custom(a).sum())(x)

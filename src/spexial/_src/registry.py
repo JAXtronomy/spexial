@@ -439,6 +439,34 @@ _ROWS: Final = (
         ),
     ),
     Coverage(
+        name="incomplete_beta",
+        jax_name=None,
+        jax_since=None,
+        jax_support=Support.NONE,
+        scipy_array_api=Support.NONE,
+        status=Status.UNIQUE,
+        custom_jvp=True,
+        derivative="z^(a-1) (1-z)^(b-1)",
+        cost=Cost(speed=0.007, memory=0.0144, against="differentiating our own series"),
+        notes=(
+            "The *unregularized* B(a, b, z) of DLMF 8.17.1. Neither JAX nor "
+            "scipy has one: their `betainc` is the regularized I_z(a, b), and "
+            "reconstructing this as `beta(a, b) * betainc(a, b, z)` is `nan` "
+            "for every b <= 0 -- B(a, b) has a pole there while the product "
+            "does not, and b <= 0 is an ordinary slope in a double power-law "
+            "density profile. `jax.scipy.special.hyp2f1` can express it via "
+            "DLMF 8.17.7, but it is a `while_loop` whose trip count depends on "
+            "its data, so under `vmap` every lane pays the worst lane's count "
+            "and its derivative runs a second such loop. Two fixed-length "
+            "series instead, switched at z = 1/2. The custom JVP is the "
+            "strongest case in this table: by Leibniz the z-derivative is just "
+            "the integrand at the endpoint, so it is exact and O(1) against 64 "
+            "terms -- 143x faster on 70x less residual. `custom_jvp` rather "
+            "than `custom_vjp` so `jacfwd(jacrev(...))` still composes. "
+            "Contributed from `galax`."
+        ),
+    ),
+    Coverage(
         name="spence",
         jax_name="spence",
         jax_since="*",

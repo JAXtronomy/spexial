@@ -27,7 +27,9 @@ Pass `jnp` arrays rather than NumPy ones, and enable double precision first — 
 
 Before you trust a ported call, check the function against [Accuracy and domains](../reference/accuracy-and-domains.md) for these:
 
-**Is there a counterpart at all?** `polylog`, `eval_gegenbauers`, `sph_harm_y_cart` and `sph_harm_y_cart_all` have none — they are additions, not replacements.
+**Is there a counterpart at all?** `polylog`, `eval_gegenbauers`, `incomplete_beta`, `sph_harm_y_cart` and `sph_harm_y_cart_all` have none — they are additions, not replacements.
+
+Watch `incomplete_beta` in particular: the _name_ has no SciPy counterpart, but `scipy.special.betainc` looks like one and is not. SciPy's is the regularized $I_z(a,b)$; this is the unregularized $B(a,b,z)$, larger by a factor of the complete beta function. Port `beta(a, b) * betainc(a, b, z)` to `incomplete_beta(a, b, z)`, not `betainc` to `incomplete_beta`.
 
 **Is it as accurate?** Not always — the modified Bessel functions in particular are tested to a looser tolerance than SciPy delivers. Check the _Tested to_ column before you assume parity.
 

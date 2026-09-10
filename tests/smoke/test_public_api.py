@@ -19,6 +19,7 @@ _ORIGINS = {
     "eval_gegenbauer": "spexial._src.gegenbauer",
     "eval_gegenbauers": "spexial._src.gegenbauer",
     "gamma": "spexial._src.gamma",
+    "incomplete_beta": "spexial._src.beta",
     "sph_harm_y": "spexial._src.sph_harm",
     "sph_harm_y_cart": "spexial._src.sph_harm",
     "sph_harm_y_cart_all": "spexial._src.sph_harm",

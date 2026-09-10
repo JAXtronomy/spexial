@@ -11,6 +11,8 @@ import numpy as np
 import pytest
 from hypothesis import assume, example, given, strategies as st
 from scipy.special import (
+    beta as scipy_beta,
+    betainc as scipy_betainc,
     comb as scipy_comb,
     eval_gegenbauer as scipy_eval_gegenbauer,
     gamma as scipy_gamma,
@@ -316,6 +318,39 @@ def test_sph_harm_y_cart_equals_the_spherical_form(n, offset, theta, phi):
         np.asarray(sp.sph_harm_y_cart(n, m, uvec)),
         np.asarray(scipy_sph_harm_y(n, m, theta, phi)).reshape(()),
         rtol=1e-9,
+        atol=1e-13,
+    )
+
+
+# ---------------------------------------------------------------------------
+# incomplete_beta
+
+
+@given(
+    a=floats(0.2, 8.0),
+    b=floats(0.05, 6.0),
+    z=floats(0.0, 1.0),
+)
+@example(a=1.0, b=1.0, z=0.5)
+@example(a=2.0, b=1.5, z=1.0)
+@example(a=0.5, b=0.5, z=0.0)
+def test_incomplete_beta_against_the_regularized_form(a, b, z):
+    """``B(a, b, z) == beta(a, b) * betainc(a, b, z)`` wherever that is defined.
+
+    Strictly positive ``b`` only, and deliberately so: that product is `nan`
+    for every ``b <= 0``, which is the whole reason `incomplete_beta` exists.
+    SciPy has no unregularized form to compare against there, so that half of
+    the domain is checked against the `hyp2f1` identity and direct quadrature
+    in `tests/unit/test_beta.py` instead.
+
+    The tolerance is relative with an absolute floor: near ``z = 0`` the value
+    goes to zero like ``z**a``, and a relative assertion there is a statement
+    about how close Hypothesis got to the origin.
+    """
+    np.testing.assert_allclose(
+        np.asarray(sp.incomplete_beta(a, b, z)),
+        scipy_beta(a, b) * scipy_betainc(a, b, z),
+        rtol=1e-10,
         atol=1e-13,
     )
 

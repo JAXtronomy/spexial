@@ -43,6 +43,7 @@ __all__ = [
     "eval_gegenbauer",
     "eval_gegenbauers",
     "gamma",
+    "incomplete_beta",
     "k0",
     "k0e",
     "k1",
@@ -62,6 +63,7 @@ __all__ = [
 from .setup_package import install_import_hook as _install_import_hook
 
 with _install_import_hook("spexial"):
+    from ._src.beta import incomplete_beta
     from ._src.comb import comb
     from ._src.gamma import gamma
     from ._src.gegenbauer import eval_gegenbauer, eval_gegenbauers

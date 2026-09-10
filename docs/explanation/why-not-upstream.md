@@ -43,6 +43,8 @@ Two functions here are not waiting for anything, because they do something upstr
 
 `zeta` extends JAX's Hurwitz zeta to the negative integers through the functional equation. JAX returns `nan` there. The extension is partial — the critical strip and negative non-integers are still `nan` — and the [accuracy page](../reference/accuracy-and-domains.md) says so rather than implying full coverage.
 
+`incomplete_beta` is the clearest case of a _missing_ function rather than a weaker one. Neither SciPy nor JAX has the unregularized $B(a, b, z)$ at all — their `betainc` is the regularized $I_z(a,b)$, and the obvious reconstruction, `beta(a, b) * betainc(a, b, z)`, is `nan` for every $b \le 0$, because $B(a,b)$ has a pole there while the product does not. `jax.scipy.special.hyp2f1` can express it for any $b$ via DLMF 8.17.7, but it is a `lax.while_loop` whose trip count depends on its data: under `vmap` every lane pays the worst lane's iteration count, and its derivative runs a second such loop. Two fixed-length series with an exact O(1) derivative rule avoid both, and that rule is the strongest entry in the cost table — 143× faster on 70× less residual than differentiating the series it replaces.
+
 `gamma` is the interesting middle case. The value is JAX's, called directly, so it cannot drift. What `spexial` adds is an analytic derivative that keeps 3× less residual memory through the backward pass at parity on time. That is a real benefit and a narrow one, and the registry records it as `DELEGATES` — a row that earns its place on the cost columns alone, and becomes redundant the moment upstream's own gradient matches on both.
 
 ## The case that is none of the above: upstream is wrong
@@ -74,7 +76,7 @@ is polynomial in $\hat{x}$ and $\hat{y}$ and so smooth on the axis. That is new 
 This library is three things at once, and it is worth being clear about which part is which:
 
 1. **A staging area** for functions that belong upstream but are not there yet, or are there only above a floor real users have not reached. `comb` today; more of the Bessel functions eventually.
-2. **A home for things that do not fit the `scipy.special` mirror** — `polylog`, `eval_gegenbauers`, and the Cartesian harmonics.
+2. **A home for things that do not fit the `scipy.special` mirror** — `polylog`, `eval_gegenbauers`, `incomplete_beta` and the Cartesian harmonics.
 3. **A small set of genuine improvements** — complex `spence`, negative `zeta`, cheaper gradients — that exist because a focused package can make choices a general one cannot.
 4. **A place to record, in executable form, where upstream is wrong** — `sph_harm_y`.
 
