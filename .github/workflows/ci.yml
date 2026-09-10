@@ -64,6 +64,17 @@ jobs:
       - name: Checks with prek
         run: uv run --frozen prek run --all-files
 
+      # The Citation File Format project's own validator, against its own
+      # schema. Not reimplemented in the test suite: `tests/unit/test_citation.py`
+      # checks only what is specific to this repository -- that the file agrees
+      # with `pyproject.toml` -- and leaves the schema to the people who define
+      # it. Here rather than as a test dependency because `cffconvert` pins
+      # `jsonschema<4` and pulls `requests` and `pykwalify` with it.
+      - name: Validate CITATION.cff
+        uses: citation-file-format/cffconvert-github-action@4cf11baa70a673bfdf9dad0acc7ee33b3f4b6084 # 2.0.0
+        with:
+          args: "--validate"
+
   # Fast, broad checks -- the package imports and its public API re-exports.
   # Gates the full multi-OS/multi-Python matrix below: catches "the package is
   # broken" in well under a minute instead of waiting on the whole matrix.
