@@ -69,8 +69,12 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     Rounded to five places, not twelve, because these examples have to be true
     at the library's *default* precision as well as under x64. Without x64 this
     is 9.999995: `jax.scipy.special.gammaln` returns ``2**-21`` rather than 0 at
-    a float32 argument of exactly 1 (spexial#29), and ``comb(N, 0)`` -- which
-    reduces to ``exp(-gammaln(1))`` -- is that error and nothing else.
+    a float32 argument of exactly 1 (spexial#29). Over most of the float32
+    range ``comb(N, 0)`` is exactly ``exp(-gammaln(1))``, 0.9999995 -- but not
+    everywhere, and the exceptions are the branch structure showing through:
+    ``N = 10`` is the cross-over itself and lands on 1, ``N >= 1e6`` takes the
+    asymptotic form and is exactly 1 again, and ``N = 1e4`` carries twice the
+    error. `float16` and `bfloat16` round it away entirely.
 
     Out-of-range ``k`` gives 0, not `nan`:
 

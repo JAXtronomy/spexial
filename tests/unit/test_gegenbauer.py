@@ -360,3 +360,20 @@ def test_eval_gegenbauers_array_guard_runs_without_the_typecheck_hook():
     )
     assert "VALUEERROR" in out.stdout, out.stderr
     assert "scalar" in out.stdout
+
+
+@pytest.mark.parametrize("n", [0, 1, 2, 3, 4, 5])
+@pytest.mark.parametrize("x", [np.inf, -np.inf])
+@pytest.mark.parametrize("alpha", [1.0, 0.5, 0.0, -0.25, 5e-324])
+def test_gradient_at_infinity_agrees_between_modes(n, x, alpha):
+    """REGRESSION: `jacrev` was `nan` where `jacfwd` gave 0.
+
+    `_at_infinity` substitutes the limit with a `where`, and the *unselected*
+    branch still held ``2 * alpha * inf``, whose VJP forms ``0 * inf``. Forward
+    mode was the correct one: at fixed ``x = +-inf`` the limit is
+    ``sign(alpha) * inf``, a step in ``alpha``, whose derivative is 0 away from
+    the jump. Pinned so the two modes cannot drift apart again.
+    """
+    f = lambda a: sp.eval_gegenbauer(n, a, jnp.asarray(x))
+    assert float(jax.jacfwd(f)(alpha)) == 0.0
+    assert float(jax.jacrev(f)(alpha)) == 0.0

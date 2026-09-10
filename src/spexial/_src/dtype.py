@@ -13,9 +13,11 @@ the caller keeps its dtype and gets the accuracy that dtype can represent.
 
 __all__: tuple[str, ...] = ()
 
+from functools import partial
 from math import log
 from typing import Any, Final
 
+import jax
 import jax.numpy as jnp
 from jax import lax
 
@@ -140,6 +142,7 @@ def is_negative(z: AnyArray) -> AnyArray:
     return (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
 
 
+@partial(jax.custom_jvp, nondiff_argnums=(1,))
 def ldexp_no_flush(z: AnyArray, exponent: int, /) -> AnyArray:
     """``z * 2**exponent``, including where XLA has flushed a subnormal ``z``.
 
@@ -164,6 +167,26 @@ def ldexp_no_flush(z: AnyArray, exponent: int, /) -> AnyArray:
     return jnp.where(jnp.abs(z) < info.tiny, from_bits, z * float(2.0**exponent))
 
 
+@ldexp_no_flush.defjvp
+def _ldexp_no_flush_jvp(
+    exponent: int, primals: tuple[Any], tangents: tuple[Any]
+) -> tuple[AnyArray, AnyArray]:
+    """``d/dz (z * 2**k) = 2**k``, which the bit path does not supply by itself.
+
+    `lax.bitcast_convert_type` carries an identically **zero** tangent, so the
+    reconstructed branch differentiated to 0 -- and `_log_complex_no_flush` sits
+    on top of it, which made `log_no_flush` non-holomorphic wherever that branch
+    fires: the imaginary-direction derivative was 0 across the band, against a
+    true ``1/z`` of 4.5e307 at ``z = tiny`` -- a representable number, not an
+    overflow. This function is ``z * 2**k`` everywhere, on both branches, so its
+    derivative is the constant and saying so is exact rather than a patch.
+    """
+    (z,), (dz,) = primals, tangents
+    return ldexp_no_flush(z, exponent), dz * jnp.asarray(
+        2.0**exponent, dtype=jnp.asarray(dz).dtype
+    )
+
+
 def _log_complex_no_flush(z: AnyArray, /) -> AnyArray:
     """`log_no_flush` for a complex argument, which cannot be bitcast whole.
 
@@ -182,10 +205,22 @@ def _log_complex_no_flush(z: AnyArray, /) -> AnyArray:
     and the imaginary part of the logarithm was not approximately wrong but
     *entirely absent* -- a 0.79 radian error on `spence`'s complex derivative.
 
-    The scaled branch is taken only where scaling cannot overflow. Past that,
-    the larger component really is enormous beside a subnormal one -- their
-    ratio is below 1e-580 -- and the plain logarithm is right for the original
-    reason.
+    And **only** where the whole number is small, which is the other half of
+    the predicate and was missing for one round. ``0.0 < tiny`` is true, so
+    "either component subnormal" is true of every ``z`` on either axis -- the
+    entire ordinary plane. Those all went down the scaled branch, where
+    ``log(z * 2**k) - k*log2`` subtracts two nearly equal numbers as soon as
+    ``|z| ~ 1``: it cost three decimal digits in complex64 (1.08% relative at
+    ``z = 1.0001``) and was *worse* than the plain logarithm it replaced.
+
+    The bound is the magnitude below which a subnormal component can still
+    change the answer at all. A component ``s`` moves ``hypot`` or ``atan2``
+    only when ``s / magnitude`` exceeds an eps, so ``magnitude < tiny / eps``,
+    i.e. ``tiny * 2**nmant``. Below that the two terms of the subtraction have
+    the same sign and nothing cancels; above it the subnormal is beneath the
+    result's own last bit and `jnp.log` is already right. It doubles as the
+    overflow guard the previous revision used, since scaling a number that
+    small can never reach the dtype's maximum.
     """
     real, imaginary = jnp.real(z), jnp.imag(z)
     info = jnp.finfo(real.dtype)
@@ -193,9 +228,9 @@ def _log_complex_no_flush(z: AnyArray, /) -> AnyArray:
     # room to spare, and is itself an exactly representable power of two.
     exponent = 2 * info.nmant
     magnitude = jnp.maximum(jnp.abs(real), jnp.abs(imaginary))
-    headroom = float(info.max) * float(2.0**-exponent)
+    reachable = float(info.tiny) * float(2.0**info.nmant)
     band = ((jnp.abs(real) < info.tiny) | (jnp.abs(imaginary) < info.tiny)) & (
-        magnitude < headroom
+        magnitude < reachable
     )
     scaled = lax.complex(
         ldexp_no_flush(real, exponent), ldexp_no_flush(imaginary, exponent)
