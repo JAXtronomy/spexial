@@ -5,6 +5,7 @@ an implementation genuinely does not cover a domain, the strategy is restricted
 and the comment says why -- see the module-level notes on each function.
 """
 
+import jax.numpy as jnp
 import mpmath as mp
 import numpy as np
 import pytest
@@ -16,6 +17,8 @@ from scipy.special import (
     k0 as scipy_k0,
     k1 as scipy_k1,
     kn as scipy_kn,
+    sph_harm_y as scipy_sph_harm_y,
+    sph_legendre_p as scipy_sph_legendre_p,
     zeta as scipy_zeta,
 )
 
@@ -227,6 +230,94 @@ def test_kn(order, z):
     """
     func = (sp.K0, sp.K1, sp.K2)[order]
     np.testing.assert_allclose(func(z), _KN_REFERENCE[order](z), rtol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# sph_legendre_p / sph_harm_y
+
+
+@given(
+    n=st.integers(min_value=0, max_value=25),
+    offset=st.integers(min_value=0, max_value=50),
+    theta=floats(0.0, float(np.pi)),
+)
+@example(n=0, offset=0, theta=0.0)
+@example(n=1, offset=0, theta=float(np.pi))
+@example(n=12, offset=12, theta=1e-12)
+def test_sph_legendre_p(n, offset, theta):
+    """Agreement with `scipy.special.sph_legendre_p` over the whole (n, m) triangle.
+
+    ``m`` is drawn as an offset into ``[-n, n]`` rather than directly, so
+    Hypothesis never has to filter an invalid pair -- and so the negative
+    orders, where the Condon-Shortley phase lives, get the same coverage as the
+    positive ones. ``theta`` is confined to SciPy's documented ``[0, pi]``; the
+    two conventions differ by a sign for odd ``m`` outside it, which
+    `tests/unit/test_sph_harm.py` pins deliberately.
+
+    The tolerance is absolute. Relative error is root-amplified -- these are
+    oscillating polynomials with 2n zeros in the interval -- so a relative
+    assertion would be a statement about how close Hypothesis got to a root,
+    not about the implementation.
+    """
+    m = -n + (offset % (2 * n + 1)) if n else 0
+    np.testing.assert_allclose(
+        np.asarray(sp.sph_legendre_p(n, m, theta)),
+        np.asarray(scipy_sph_legendre_p(n, m, theta)).reshape(()),
+        rtol=1e-9,
+        atol=1e-13,
+    )
+
+
+@given(
+    n=st.integers(min_value=0, max_value=25),
+    offset=st.integers(min_value=0, max_value=50),
+    theta=floats(0.0, float(np.pi)),
+    phi=floats(0.0, 2 * float(np.pi)),
+)
+@example(n=0, offset=0, theta=0.0, phi=0.0)
+@example(n=3, offset=3, theta=float(np.pi), phi=1.0)
+def test_sph_harm_y(n, offset, theta, phi):
+    """The full complex harmonic, against `scipy.special.sph_harm_y`.
+
+    Note what is *not* being compared: `jax.scipy.special.sph_harm_y` is not a
+    valid reference here, since it pairs its arguments element-wise instead of
+    broadcasting them. SciPy is.
+    """
+    m = -n + (offset % (2 * n + 1)) if n else 0
+    np.testing.assert_allclose(
+        np.asarray(sp.sph_harm_y(n, m, theta, phi)),
+        np.asarray(scipy_sph_harm_y(n, m, theta, phi)).reshape(()),
+        rtol=1e-9,
+        atol=1e-13,
+    )
+
+
+@given(
+    n=st.integers(min_value=0, max_value=15),
+    offset=st.integers(min_value=0, max_value=30),
+    theta=floats(0.0, float(np.pi)),
+    phi=floats(0.0, 2 * float(np.pi)),
+)
+def test_sph_harm_y_cart_equals_the_spherical_form(n, offset, theta, phi):
+    """The Cartesian entry point is the same function, from a unit direction.
+
+    Compared against SciPy rather than against `spexial.sph_harm_y`, so that a
+    shared error in the recurrence could not cancel out of both sides.
+    """
+    m = -n + (offset % (2 * n + 1)) if n else 0
+    uvec = jnp.asarray(
+        [
+            np.sin(theta) * np.cos(phi),
+            np.sin(theta) * np.sin(phi),
+            np.cos(theta),
+        ]
+    )
+    np.testing.assert_allclose(
+        np.asarray(sp.sph_harm_y_cart(n, m, uvec)),
+        np.asarray(scipy_sph_harm_y(n, m, theta, phi)).reshape(()),
+        rtol=1e-9,
+        atol=1e-13,
+    )
 
 
 # ---------------------------------------------------------------------------

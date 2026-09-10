@@ -42,6 +42,11 @@ __all__ = [
     "eval_gegenbauers",
     "gamma",
     "spence",
+    "sph_harm_y",
+    "sph_harm_y_cart",
+    "sph_harm_y_cart_all",
+    "sph_harm_y_cart_all_terms",
+    "sph_legendre_p",
     "zeta",
 ]
 
@@ -54,6 +59,13 @@ with _install_import_hook("spexial"):
     from ._src.kn import K0, K1, K2, K0e, K1e, K2e
     from ._src.polylog import Li
     from ._src.spence import spence
+    from ._src.sph_harm import (
+        sph_harm_y,
+        sph_harm_y_cart,
+        sph_harm_y_cart_all,
+        sph_harm_y_cart_all_terms,
+        sph_legendre_p,
+    )
     from ._src.zeta import zeta
     from ._version import version as __version__
 

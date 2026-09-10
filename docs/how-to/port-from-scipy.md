@@ -27,13 +27,30 @@ Pass `jnp` arrays rather than NumPy ones, and enable double precision first — 
 
 Before you trust a ported call, check the function against [Accuracy and domains](../reference/accuracy-and-domains.md) for these:
 
-**Is there a counterpart at all?** `Li` and `eval_gegenbauers` have none — they are additions, not replacements.
+**Is there a counterpart at all?** `Li`, `eval_gegenbauers`, `sph_harm_y_cart` and `sph_harm_y_cart_all` have none — they are additions, not replacements.
 
 **Is it as accurate?** Not always — the modified Bessel functions in particular are tested to a looser tolerance than SciPy delivers. Check the _Tested to_ column before you assume parity.
 
 **Does it cover the same arguments?** For the most part yes: `gamma` and `zeta` accept everything their SciPy counterparts do. Check the _Supported domain_ column for the exceptions, which are about representable range rather than coverage — `K0`, `K1` and `K2` underflow above $z \approx 705$, where `K0e`, `K1e` and `K2e` keep working.
 
 In the other direction, `spence` accepts complex input, which SciPy's real path does not, and `K0e`/`K1e`/`K2e` stay accurate to `DBL_MAX`, where `scipy.special.kve` returns `nan`.
+
+## The angular functions take static degrees
+
+`sph_legendre_p` and `sph_harm_y` keep SciPy's names and argument order, but their degree and order are **static Python `int`s** rather than arrays:
+
+```pycon
+>>> theta = jnp.asarray([0.3, 1.1, 2.0])
+>>> sp.sph_legendre_p(2, 1, theta).shape  # not sp.sph_legendre_p([2], [1], theta)
+(3,)
+
+```
+
+So a SciPy call that broadcasts over degrees becomes a Python loop over them — or, better, one call to `sph_harm_y_cart_all`, which returns the whole table in the same layout as `scipy.special.sph_harm_y_all` and shares the recurrences across it.
+
+The narrowing is deliberate: it is what makes the values right. `jax.scipy.special.sph_harm_y` accepts array degrees and pairs them positionally with the angles rather than broadcasting, which is a wrong answer rather than a missing feature. See [Accuracy and domains](../reference/accuracy-and-domains.md).
+
+One convention differs outside SciPy's documented domain. For $\theta \notin [0, \pi]$, `sph_legendre_p` carries $\sin^m\theta$ where SciPy carries $\lvert\sin\theta\rvert^m$, so the two differ by a sign for odd $m$. On $[0, \pi]$ they agree.
 
 ## Expect `nan` where SciPy raised
 

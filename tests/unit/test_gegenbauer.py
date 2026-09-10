@@ -1,8 +1,5 @@
 """Unit tests for `spexial.eval_gegenbauer` and `spexial.eval_gegenbauers`."""
 
-import os
-import subprocess
-import sys
 from functools import partial
 
 import jax
@@ -10,7 +7,6 @@ import jax.numpy as jnp
 import mpmath as mp
 import numpy as np
 import pytest
-from jaxtyping import TypeCheckError
 from scipy.special import eval_gegenbauer as scipy_eval_gegenbauer
 
 import spexial as sp
@@ -293,22 +289,50 @@ def test_nan_alpha_propagates_at_infinity(n):
 
 @pytest.mark.parametrize("n", [0, 1, 2, 3])
 @pytest.mark.parametrize("which", ["alpha", "x"])
-def test_eval_gegenbauers_rejects_array_arguments(n, which):
-    """REGRESSION: ``n <= 1`` concatenated an array argument instead of raising.
+def test_eval_gegenbauers_broadcasts_array_arguments(n, which):
+    """REGRESSION: ``n <= 1`` concatenated an array argument instead of stacking.
 
-    The documented return shape is ``(n + 1,)``. The early returns for orders 0
-    and 1 skip the recurrence entirely, so ``hstack`` glued a ``(3,)`` `alpha`
-    on to `C0` and gave a length-4 answer, while ``n >= 2`` died inside `scan`
-    with a message naming neither argument. One rule now, at every order.
+    `eval_gegenbauers` used to be scalar-only, guarded by an explicit
+    `ValueError`, because the orders were glued together with ``hstack`` --
+    which concatenates rather than stacks once the operands have an axis of
+    their own, so a ``(3,)`` `alpha` came back length 4 where the documented
+    shape was ``(2,)``. It now broadcasts like `eval_gegenbauer` and stacks the
+    orders on a new *leading* axis, which is well defined at every rank.
+
+    Both are checked against ``n + 1`` separate `eval_gegenbauer` calls, which
+    is the definition of what this returns.
     """
     array = jnp.asarray([1.0, 2.0, 3.0])
     args = (array, 0.5) if which == "alpha" else (1.0, array)
-    # Two mechanisms, and which one fires depends on the environment: the
-    # test suite sets `SPEXIAL_ENABLE_RUNTIME_TYPECHECKING`, so jaxtyping
-    # rejects the array against `ScalarLike` before the function's own guard
-    # is reached. Users run without the hook and get the `ValueError`.
-    with pytest.raises((ValueError, TypeCheckError)):
-        sp.eval_gegenbauers(n, *args)
+    got = sp.eval_gegenbauers(n, *args)
+    assert got.shape == (n + 1, 3)
+    for i in range(n + 1):
+        np.testing.assert_allclose(got[i], sp.eval_gegenbauer(i, *args), rtol=1e-13)
+
+
+def test_eval_gegenbauers_broadcasts_alpha_against_x():
+    """A column `alpha` against a row `x` gives the full ``(n + 1, L, N)`` table.
+
+    This is the shape `galax`'s SCF expansion needs -- one `alpha = 2l + 3/2`
+    per angular order, evaluated at every particle -- and the reason the scalar
+    signature was widened rather than left to `jax.vmap`, which measured
+    1.1-1.9x slower for exactly this pattern.
+    """
+    alpha = jnp.asarray([1.5, 3.5, 5.5])[:, None]
+    x = jnp.linspace(-0.9, 0.9, 7)
+    got = sp.eval_gegenbauers(4, alpha, x)
+    assert got.shape == (5, 3, 7)
+    for i in range(5):
+        for j in range(3):
+            np.testing.assert_allclose(
+                got[i, j], sp.eval_gegenbauer(i, alpha[j, 0], x), rtol=1e-12
+            )
+
+
+def test_eval_gegenbauers_scalar_shape_is_unchanged():
+    """Scalar arguments still give ``(n + 1,)``; widening was backward compatible."""
+    assert sp.eval_gegenbauers(3, 1.0, 0.5).shape == (4,)
+    assert sp.eval_gegenbauers(0, 1.0, 0.5).shape == (1,)
 
 
 @pytest.mark.parametrize("n", [1, 2, 3, 4])
@@ -328,38 +352,6 @@ def test_subnormal_alpha_at_infinity_is_the_documented_floor(n, x):
     assert float(sp.eval_gegenbauer(n, 1.0, jnp.asarray(x))) == (
         np.inf if x > 0 else (-1.0) ** n * np.inf
     )
-
-
-def test_eval_gegenbauers_array_guard_runs_without_the_typecheck_hook():
-    """The `ValueError` guard is what *users* hit, and the suite never reached it.
-
-    `pyproject.toml` sets `SPEXIAL_ENABLE_RUNTIME_TYPECHECKING` for the whole
-    run, so jaxtyping rejects an array against `ScalarLike` before the function
-    body executes -- which left the guard uncovered while looking tested. Users
-    run without the hook. A subprocess with it stripped is the only way to
-    exercise the branch they actually reach.
-    """
-    script = (
-        "import jax.numpy as jnp, spexial as sp\n"
-        "try:\n"
-        "    sp.eval_gegenbauers(1, jnp.asarray([1.0, 2.0]), 0.5)\n"
-        "except ValueError as exc:\n"
-        "    print('VALUEERROR', exc)\n"
-    )
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if k != "SPEXIAL_ENABLE_RUNTIME_TYPECHECKING"
-    }
-    out = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=True,
-    )
-    assert "VALUEERROR" in out.stdout, out.stderr
-    assert "scalar" in out.stdout
 
 
 @pytest.mark.parametrize("n", [0, 1, 2, 3, 4, 5])

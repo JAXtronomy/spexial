@@ -93,7 +93,16 @@ test = [
   "pyyaml>=6.0",
   # The parity suite compares against scipy directly. It resolves transitively
   # through jax today; declare it so that stays true.
-  "scipy>=1.11",
+  #
+  # 1.15 is where `sph_legendre_p`, `sph_harm_y` and `sph_harm_y_all` arrived,
+  # and those are the references the angular tests compare against -- they are
+  # the functions `spexial` is *named after*, so substituting an older stand-in
+  # would weaken the check rather than preserve it. The `lpmv` route cannot
+  # replace them: it takes `cos(theta)`, and `cos(1e-9)` is exactly 1.0 in
+  # float64, so the reference loses the near-pole values the implementation
+  # gets right. Note this floor is deliberately *above* the runtime floor --
+  # scipy is a test dependency only, and nothing a user installs is affected.
+  "scipy>=1.15",
   "sybil[pytest]>=9.2.0",
 ]
 # Pinned so the typing guards cannot drift as new checker releases change

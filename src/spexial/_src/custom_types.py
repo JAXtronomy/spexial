@@ -14,7 +14,7 @@ __all__: tuple[str, ...] = ()
 
 from typing import TypeAlias
 
-from jaxtyping import Array, ArrayLike, Real, Shaped
+from jaxtyping import Array, ArrayLike, Complex, Real, Shaped
 
 Scalar: TypeAlias = Shaped[Array, ""]
 """A 0-dimensional `jax.Array` of any dtype."""
@@ -33,3 +33,6 @@ AnyArrayLike: TypeAlias = Shaped[ArrayLike, "..."]
 
 RealArrayLike: TypeAlias = Real[ArrayLike, "..."]
 """Anything array-like with a real (non-complex, non-bool) dtype."""
+
+ComplexArray: TypeAlias = Complex[Array, "..."]
+"""A complex `jax.Array` of any shape."""
