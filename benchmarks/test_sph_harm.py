@@ -111,9 +111,9 @@ def test_reduce_over_stacked_table(benchmark: BenchmarkFixture, n: int) -> None:
     def reduce(u: jax.Array) -> jax.Array:
         table = sp.sph_harm_y_cart_all(n, n, u)
         return sum(
-            coefficients[l, m] * table[l, m].real
-            for l in range(n + 1)
-            for m in range(l + 1)
+            coefficients[deg, k] * table[deg, k].real
+            for deg in range(n + 1)
+            for k in range(deg + 1)
         )
 
     benchmark(warm(reduce, _DIRECTIONS))
@@ -127,9 +127,9 @@ def test_reduce_over_terms(benchmark: BenchmarkFixture, n: int) -> None:
     def reduce(u: jax.Array) -> jax.Array:
         terms = sp.sph_harm_y_cart_all_terms(n, n, u)
         return sum(
-            coefficients[l, m] * terms[l][m].real
-            for l in range(n + 1)
-            for m in range(l + 1)
+            coefficients[deg, k] * terms[deg][k].real
+            for deg in range(n + 1)
+            for k in range(deg + 1)
         )
 
     benchmark(warm(reduce, _DIRECTIONS))
