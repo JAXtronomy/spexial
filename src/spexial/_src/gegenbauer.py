@@ -158,8 +158,14 @@ def _at_infinity(n: int, alpha: AnyArray, x: AnyArray, value: AnyArray) -> AnyAr
     # The sign of `alpha` from its bits, not from `jnp.sign`: XLA reports 0 for
     # a subnormal, so `eval_gegenbauer(1, 5e-324, inf)` took the `sign == 0`
     # branch and returned 0 where the limit is `+inf`.
+    # `nan` first: a `nan` alpha has `bits > 0`, so the bit tests below would
+    # read it as positive and hand back a definite `+inf` for an argument whose
+    # limit does not exist. `jnp.sign` propagated `nan` for free; replacing it
+    # with bit tests dropped that, and this puts it back explicitly.
     alpha_sign = jnp.where(
-        exactly_zero(alpha), 0.0, jnp.where(is_negative(alpha), -1.0, 1.0)
+        jnp.isnan(alpha),
+        jnp.nan,
+        jnp.where(exactly_zero(alpha), 0.0, jnp.where(is_negative(alpha), -1.0, 1.0)),
     )
     sign = alpha_sign * jnp.where(x > 0, 1.0, (-1.0) ** n)
     limit = jnp.where(sign == 0, 0.0, sign * jnp.inf)

@@ -656,3 +656,27 @@ def test_negative_subnormal_gradient_is_nan(func):
     z = jnp.asarray(-1e-320)
     assert jnp.isnan(func(z))
     assert jnp.isnan(jax.grad(func)(z))
+
+
+@pytest.mark.parametrize("wrap", [lambda f: f, jax.jit], ids=["eager", "jit"])
+@pytest.mark.parametrize("z", [2.2e-308, 1.112537e-308, 6e-309])
+def test_k1_subnormal_band_is_the_same_jitted(wrap, z):
+    """The subnormal band must give the same answer compiled as interpreted.
+
+    It did not. Separating the pole from the subnormals with a bit test is
+    correct in isolation and wrong once XLA fuses the select into the same
+    kernel, so `jit(K1)` returned `inf` across the whole band while eager
+    returned the right value -- and every test here called it eagerly.
+    """
+    got = float(wrap(sp.K1)(jnp.asarray(z)))
+    np.testing.assert_allclose(got, float(mp.besselk(1, z)), rtol=1e-13)
+
+
+@pytest.mark.parametrize("wrap", [lambda f: f, jax.jit], ids=["eager", "jit"])
+@pytest.mark.parametrize("func", [sp.K0, sp.K1, sp.K0e, sp.K1e, sp.K2, sp.K2e])
+def test_negative_subnormal_is_out_of_domain_jitted(wrap, func):
+    """A negative subnormal is out of domain, compiled or not.
+
+    Under `jit` the fused bit test read it as the pole and returned `inf`.
+    """
+    assert jnp.isnan(wrap(func)(jnp.asarray(-1.112537e-308)))

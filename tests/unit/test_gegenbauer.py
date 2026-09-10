@@ -272,3 +272,16 @@ def test_both_entry_points_agree_at_small_alpha(n):
     np.testing.assert_allclose(
         float(every[n]), float(sp.eval_gegenbauer(n, 1e-20, 0.5)), rtol=1e-12
     )
+
+
+@pytest.mark.parametrize("n", [1, 2, 3])
+def test_nan_alpha_propagates_at_infinity(n):
+    """A `nan` alpha has `bits > 0`, which the bit tests read as positive.
+
+    `jnp.sign` propagated `nan` for free; replacing it with a bit-level sign
+    test dropped that and handed back a definite `±inf` for a limit that does
+    not exist.
+    """
+    assert jnp.isnan(sp.eval_gegenbauer(n, np.nan, np.inf))
+    assert jnp.isnan(sp.eval_gegenbauer(n, np.nan, -np.inf))
+    assert jnp.isnan(sp.eval_gegenbauers(n, np.nan, np.inf)[n])

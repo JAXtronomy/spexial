@@ -19,7 +19,7 @@ import numpy as np
 from jax.scipy.special import spence as _jax_spence
 
 from .custom_types import AnyArray, AnyArrayLike
-from .dtype import as_float, cast_like, exactly_zero, is_negative, log_no_flush
+from .dtype import as_float, cast_like, is_negative, log_no_flush
 
 _MAXITER: Final = 500
 """Terms taken in each series branch."""
@@ -229,10 +229,29 @@ def _spence_gradient(z: AnyArrayLike) -> AnyArray:
     j = jnp.arange(_GRADIENT_TERMS, dtype=_real_dtype(jnp.asarray(z)))
     series = jnp.polyval(((-1.0) ** (j + 1) / (j + 1))[::-1], u)
     z_safe = jnp.where(near_one, 2.0, z)
-    # `log_no_flush`, because XLA flushes a subnormal argument and `jnp.log`
-    # then reports `-inf` for the whole band below `tiny`, where the true
-    # derivative is an ordinary number -- -713.8 at `z = 1e-310`.
-    closed = log_no_flush(z_safe) / (1 - z_safe)
+    # `log_no_flush` on the real path, because XLA flushes a subnormal argument
+    # and `jnp.log` then reports `-inf` for the whole band below `tiny`, where
+    # the true derivative is an ordinary number -- -713.8 at `z = 1e-310`.
+    #
+    # Not on the complex path: it reads the mantissa with
+    # `lax.bitcast_convert_type`, which is undefined for a complex dtype and
+    # raises. Guarding the *pole* with `exactly_zero` did the same, and between
+    # them they took out every complex derivative -- the branch this module
+    # exists to provide. The dtype test is static, so it costs nothing.
+    #
+    # No pole guard is needed either way. `log_no_flush(0)` is already `-inf`,
+    # so the quotient gives the pole its own answer; a subnormal gets its true
+    # logarithm; and a negative argument gets `nan`. A `where` on top of that
+    # bought nothing and did not survive XLA's fusion -- `exactly_zero` is
+    # correct in isolation and collapses when a select is its only consumer,
+    # which is how `jit(grad(spence))` came to be `-inf` across the band while
+    # eager was right.
+    logarithm = (
+        jnp.log(z_safe)
+        if jnp.issubdtype(jnp.asarray(z).dtype, jnp.complexfloating)
+        else log_no_flush(z_safe)
+    )
+    closed = logarithm / (1 - z_safe)
     # `z = 0` is a pole and the limit is `-inf`, which the real path gets for
     # free from `log(0) / 1`. The *complex* path does not: `(-inf + 0j)` divided
     # by `(1 + 0j)` leaves `0 - (-inf * 0)` in the imaginary part, i.e. `nan`,
@@ -243,11 +262,7 @@ def _spence_gradient(z: AnyArrayLike) -> AnyArray:
     # `-inf` for arguments that have a perfectly finite derivative. That is the
     # defect `dtype.exactly_zero` exists for, and it was reintroduced here by
     # the fix for the *complex* pole one round earlier.
-    # `jnp.asarray` because this helper takes `AnyArrayLike` and the bit test
-    # needs a real array; a Python float reaches it as a jaxtyping scalar.
-    return jnp.where(
-        near_one, series, jnp.where(exactly_zero(jnp.asarray(z)), -jnp.inf, closed)
-    )
+    return jnp.where(near_one, series, closed)
 
 
 @_spence_gradient.defjvp
@@ -277,9 +292,22 @@ def _spence_gradient_jvp(
     u = jnp.where(near_one, z - 1, 0.0)
     m = jnp.arange(_GRADIENT_TERMS - 1, dtype=_real_dtype(jnp.asarray(z)))
     series = jnp.polyval(((m + 1) * (-1.0) ** m / (m + 2))[::-1], u)
+    # `z == 0` is the *flushed* comparison and so covers the whole subnormal
+    # band, not just the pole. That is a ceiling rather than the right answer --
+    # `spence''` is finite over most of the band (4.5e307 at `z = 2.2e-308`) --
+    # but separating the two needs a bit test, and a bit test does not survive
+    # XLA's fusion here: `exactly_zero` is correct in isolation and collapses
+    # when a select is its only consumer. A magnitude test flushes for exactly
+    # the same reason. Both alternatives were tried; the second lost `z = 0`
+    # its `inf` as well, which is worse than the ceiling. Documented instead.
+    #
+    # `log_no_flush` and the static complex guard as in the first derivative:
+    # it reads mantissa bits, which is undefined for a complex dtype.
     at_zero = z == 0
+    complex_input = jnp.issubdtype(jnp.asarray(z).dtype, jnp.complexfloating)
     z_safe = jnp.where(near_one | at_zero, 2.0, z)
-    closed = 1.0 / (z_safe * (1 - z_safe)) + jnp.log(z_safe) / (1 - z_safe) ** 2
+    logarithm = jnp.log(z_safe) if complex_input else log_no_flush(z_safe)
+    closed = 1.0 / (z_safe * (1 - z_safe)) + logarithm / (1 - z_safe) ** 2
     # `z = 0` is a genuine pole, not a removable point: every order diverges,
     # so a constant is the only answer available and orders past this one are
     # 0 there. `z = 1` needs no such guard any more.

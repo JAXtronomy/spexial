@@ -296,3 +296,37 @@ def test_gradient_survives_the_subnormal_band(z):
 def test_the_pole_itself_is_still_minus_infinity():
     """Only exact zero is the pole, and `exactly_zero` is what says so."""
     assert jnp.isneginf(jax.grad(spence)(jnp.asarray(0.0)))
+
+
+@pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+def test_complex_derivative_still_exists(dtype):
+    """The complex branch is why this module is not a plain delegation.
+
+    Guarding the real path with `log_no_flush` and `exactly_zero` -- both of
+    which read mantissa bits -- took out every complex derivative with a
+    `TypeError`, because `lax.bitcast_convert_type` is undefined for a complex
+    dtype. The value kept working, so nothing caught it.
+    """
+    z = jnp.asarray(0.3 + 0.4j, dtype=jnp.dtype(dtype))
+    _, tangent = jax.jvp(spence, (z,), (jnp.asarray(1 + 0j, dtype=jnp.dtype(dtype)),))
+    with mp.workdps(40):
+        w = mp.mpc(0.3, 0.4)
+        expected = complex(mp.log(w) / (1 - w))
+    assert abs(complex(tangent) - expected) <= 1e-6 * abs(expected)
+
+
+@pytest.mark.parametrize("wrap", [lambda f: f, jax.jit], ids=["eager", "jit"])
+@pytest.mark.parametrize("z", [1e-310, 2e-308, 0.5])
+def test_gradient_is_the_same_jitted(wrap, z):
+    """Compiled and interpreted must agree, which is where the last one hid.
+
+    A bit-level pole guard is correct in isolation and collapses once XLA fuses
+    the select into the same kernel, so `jit(grad(spence))` was `-inf` across
+    the whole subnormal band while eager was right -- and every gradient test
+    here ran eagerly.
+    """
+    with mp.workdps(60):
+        expected = float(mp.log(mp.mpf(z)) / (1 - mp.mpf(z)))
+    np.testing.assert_allclose(
+        float(wrap(jax.grad(spence))(jnp.asarray(z))), expected, rtol=1e-14
+    )

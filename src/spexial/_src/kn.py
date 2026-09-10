@@ -12,10 +12,8 @@ from .custom_types import AnyArray, RealArrayLike
 from .dtype import (
     as_float as _as_float,
     cast_like as _cast_like,
-    exactly_zero as _exactly_zero,
     is_negative,
     log_no_flush as _log_no_flush,
-    positive_subnormal as _positive_subnormal,
 )
 
 _EULER_GAMMA: Final = 0.57721566490153286061
@@ -202,7 +200,7 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
     # `1/0 - i1e(0) * K0e(0) == inf - 0 * inf == nan` there. At +inf it is
     # `(0 - 0 * 0) / 0 == nan` for the same reason `K0e` needs a guard.
     # Substitute both limits.
-    at_zero, at_inf = _exactly_zero(z_arr), z_arr == jnp.inf
+    at_inf = z_arr == jnp.inf
     # `z_arr` itself, not a substituted `z_safe`. The degenerate points are
     # overwritten by the `where` below, so the substitution bought nothing --
     # and it cost a great deal: `K0e(z_safe)` is a *different* subgraph from the
@@ -222,9 +220,22 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
     # band 2.9e-39 to 1.2e-38. `e^z K_1(z) -> 1/z` there to relative order
     # `z**2`, and the logarithm is the one form that can read a flushed
     # argument at all. Past that band `1/z` overflows and `inf` is correct.
-    subnormal = _positive_subnormal(z_arr)
-    k1e = jnp.where(subnormal, jnp.exp(-_log_no_flush(z_arr)), k1e)
-    out = jnp.where(at_zero, jnp.inf, jnp.where(at_inf, 0.0, k1e))
+    # `z_arr == 0.0` is the *flushed* comparison, on purpose: it is True for
+    # every argument at or below `tiny`, which is exactly the set this branch
+    # should own, and it behaves identically eager and under `jit`. Separating
+    # the pole from the subnormals with a bit test does not survive XLA's
+    # fusion -- `exactly_zero` is correct in isolation and wrong when the select
+    # is its only consumer, which is how `K1` came to return `inf` across the
+    # whole band under `jit` while eager was right. Nothing here needs the
+    # distinction anyway: `e^z K_1(z) -> 1/z`, and `1/0` is the pole's `inf`.
+    #
+    # `log_no_flush` supplies all three answers from the one expression: `-inf`
+    # at zero, so `exp` gives `inf`; the true logarithm across the subnormal
+    # band, so `exp` gives `1/z`; and `nan` for a negative argument, which is
+    # out of domain. `-0.0` is not negative and correctly gives `inf`.
+    small = z_arr == 0.0
+    k1e = jnp.where(small, jnp.exp(-_log_no_flush(z_arr)), k1e)
+    out = jnp.where(at_inf, 0.0, k1e)
     return _cast_like(out, z)
 
 
