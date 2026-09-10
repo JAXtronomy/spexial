@@ -1,8 +1,22 @@
-"""Package setup information.
+"""Package setup: the runtime type-checking hook and the variable that arms it.
 
-Note that this module is NOT public API nor are any of its contents.
-Stability is NOT guaranteed.
-This module exposes package setup information for the `spexial` package.
+Mostly internal, with two deliberate exceptions -- so this module does not
+carry the blanket "NOT public API" note the rest of `spexial._src` does, which
+would contradict both a user-facing document and a test.
+
+`SPEXIAL_ENABLE_RUNTIME_TYPECHECKING` is **supported**. It is documented for
+users in ``docs/reference/errors.md``, which tells them to set it to
+``beartype.beartype`` to get argument checking, so its name and its three
+accepted values are a contract.
+
+`install_import_hook` is a **development aid**, supported at this location and
+only at this one. `spexial/__init__.py` imports it to wrap the package's own
+imports and then deletes the binding, precisely so that
+``spexial.install_import_hook`` does not become a name anyone depends on by
+accident; `tests/unit/test_setup_package.py` pins both halves of that.
+
+Everything else here -- `RUNTIME_TYPECHECKER` as a name, the parsing of the
+environment variable -- is internal, and stability is not guaranteed for it.
 
 """
 
