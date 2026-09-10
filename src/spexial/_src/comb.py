@@ -145,7 +145,15 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # lgamma(small)` is exact -- checked against `mpmath` at 400 digits, 0 ulp
     # at `N = DBL_MAX`, integer and non-integer `k` alike.
     left, right = n_safe - k_safe + 1, k_safe + 1
-    small, big = jnp.minimum(left, right), jnp.maximum(left, right)
+    # `where`, not `jnp.minimum`/`maximum`, and the difference is entirely in
+    # the transpose. `min`'s reverse rule multiplies the cotangent by a 0/1
+    # selector, and at large `N` that cotangent has already overflowed to `inf`,
+    # so `0 * inf` made `jax.grad(comb)` `nan` from about `N = 1e306` -- and
+    # from `1e154` at `k = 2` -- while the value and `jacfwd` were both correct.
+    # A `where` transposes as a select and never forms the product.
+    swap = left < right
+    small = jnp.where(swap, left, right)
+    big = jnp.where(swap, right, left)
     # The asymptotic is taken wherever it is *exact*, not merely where the
     # subnormal flush forces it. `log B = lgamma(small) - small*log(big)` drops
     # a correction of order `small*(small-1)/(2*big)`, so once that is below an

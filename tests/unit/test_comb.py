@@ -265,3 +265,21 @@ def test_derivative_is_finite_where_the_value_is(k, exponent):
     n, kk = jnp.asarray(10.0**exponent), jnp.asarray(float(k))
     assert jnp.isfinite(sp.comb(n, kk))
     assert jnp.isfinite(jax.grad(sp.comb, 0)(n, kk))
+
+
+@pytest.mark.parametrize(
+    ("exponent", "k"), [(306, 1.0), (307, 1.0), (154, 2.0), (78, 3.0)]
+)
+def test_reverse_and_forward_gradients_agree_at_large_n(exponent, k):
+    """`jnp.minimum`'s transpose multiplies the cotangent by a 0/1 selector.
+
+    At large `N` that cotangent has already overflowed to `inf`, so `0 * inf`
+    made `jax.grad` `nan` from about `N = 1e306` -- and from `1e154` at
+    `k = 2` -- while the value and `jacfwd` were both correct. A `where`
+    transposes as a select and never forms the product.
+    """
+    n, kk = jnp.asarray(10.0**exponent), jnp.asarray(k)
+    reverse = float(jax.grad(sp.comb, 0)(n, kk))
+    forward = float(jax.jacfwd(sp.comb, 0)(n, kk))
+    assert jnp.isfinite(reverse)
+    np.testing.assert_allclose(reverse, forward, rtol=1e-12)
