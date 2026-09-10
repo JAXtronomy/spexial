@@ -27,13 +27,13 @@ Pass `jnp` arrays rather than NumPy ones, and enable double precision first — 
 
 Before you trust a ported call, check the function against [Accuracy and domains](../reference/accuracy-and-domains.md) for these:
 
-**Is there a counterpart at all?** `Li`, `eval_gegenbauers`, `sph_harm_y_cart` and `sph_harm_y_cart_all` have none — they are additions, not replacements.
+**Is there a counterpart at all?** `polylog`, `eval_gegenbauers`, `sph_harm_y_cart` and `sph_harm_y_cart_all` have none — they are additions, not replacements.
 
 **Is it as accurate?** Not always — the modified Bessel functions in particular are tested to a looser tolerance than SciPy delivers. Check the _Tested to_ column before you assume parity.
 
-**Does it cover the same arguments?** For the most part yes: `gamma` and `zeta` accept everything their SciPy counterparts do. Check the _Supported domain_ column for the exceptions, which are about representable range rather than coverage — `K0`, `K1` and `K2` underflow above $z \approx 705$, where `K0e`, `K1e` and `K2e` keep working.
+**Does it cover the same arguments?** For the most part yes: `gamma` and `zeta` accept everything their SciPy counterparts do. Check the _Supported domain_ column for the exceptions, which are about representable range rather than coverage — `k0`, `k1` and `k2` underflow above $z \approx 705$, where `k0e`, `k1e` and `k2e` keep working.
 
-In the other direction, `spence` accepts complex input, which SciPy's real path does not, and `K0e`/`K1e`/`K2e` stay accurate to `DBL_MAX`, where `scipy.special.kve` returns `nan`.
+In the other direction, `spence` accepts complex input, which SciPy's real path does not, and `k0e`/`k1e`/`k2e` stay accurate to `DBL_MAX`, where `scipy.special.kve` returns `nan`.
 
 ## The angular functions take static degrees
 
@@ -57,7 +57,7 @@ One convention differs outside SciPy's documented domain. For $\theta \notin [0,
 SciPy raises or warns on some bad input. Traced JAX code cannot raise, so `spexial` returns `nan` or `inf` instead, and that value propagates silently through `jit`, `vmap` and `grad`. If your SciPy code relied on an exception to catch bad input, replace it with an explicit check:
 
 ```pycon
->>> x = sp.K0(-1.0)  # negative argument: outside the domain
+>>> x = sp.k0(-1.0)  # negative argument: outside the domain
 >>> bool(jnp.isnan(x))
 True
 
@@ -67,11 +67,11 @@ The exception is a parameter that is a static Python value rather than an array 
 
 ```pycon
 >>> try:
-...     sp.Li(0, 0.5)
+...     sp.polylog(0, 0.5)
 ... except ValueError as e:
 ...     print(e)
 ...
-Li is only implemented for integer order n >= 1, got 0
+polylog is only implemented for integer order n >= 1, got 0
 
 ```
 

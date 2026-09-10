@@ -6,7 +6,7 @@ A reasonable first question about this library is why it is a library at all, ra
 
 `jax.scipy.special` mirrors `scipy.special`. That constraint is deliberate and it is load-bearing: it is what lets a NumPy user move to JAX without relearning a namespace. It also decides what can go in.
 
-Two of the functions here have **no `scipy.special` counterpart at all**. `Li` is the general polylogarithm — `scipy` has only `spence`, the order-2 case at a shifted argument. `eval_gegenbauers` returns every order up to `n` from a single pass of the recurrence, which is a JAX-shaped idea rather than a SciPy one: it exists because computing degrees `0..n` separately repeats the same work `n` times, and because returning a stacked array is natural where returning `n + 1` scalars is not. Neither can be upstreamed into a namespace defined by mirroring SciPy without first changing what that namespace is for.
+Two of the functions here have **no `scipy.special` counterpart at all**. `polylog` is the general polylogarithm — `scipy` has only `spence`, the order-2 case at a shifted argument. `eval_gegenbauers` returns every order up to `n` from a single pass of the recurrence, which is a JAX-shaped idea rather than a SciPy one: it exists because computing degrees `0..n` separately repeats the same work `n` times, and because returning a stacked array is natural where returning `n + 1` scalars is not. Neither can be upstreamed into a namespace defined by mirroring SciPy without first changing what that namespace is for.
 
 The rest could go upstream, and some of it should.
 
@@ -74,7 +74,7 @@ is polynomial in $\hat{x}$ and $\hat{y}$ and so smooth on the axis. That is new 
 This library is three things at once, and it is worth being clear about which part is which:
 
 1. **A staging area** for functions that belong upstream but are not there yet, or are there only above a floor real users have not reached. `comb` today; more of the Bessel functions eventually.
-2. **A home for things that do not fit the `scipy.special` mirror** — `Li`, `eval_gegenbauers`, and the Cartesian harmonics.
+2. **A home for things that do not fit the `scipy.special` mirror** — `polylog`, `eval_gegenbauers`, and the Cartesian harmonics.
 3. **A small set of genuine improvements** — complex `spence`, negative `zeta`, cheaper gradients — that exist because a focused package can make choices a general one cannot.
 4. **A place to record, in executable form, where upstream is wrong** — `sph_harm_y`.
 

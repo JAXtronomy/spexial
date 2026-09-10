@@ -14,7 +14,7 @@ This is a real cost, and it is worth being clear-eyed that it is a cost rather t
 
 The practical consequence is that validation moves to you, and it moves _earlier_ — before the call, not after it. [Accuracy and domains](../reference/accuracy-and-domains.md) states each function's supported range for that reason: it is not background reading, it is the input contract you are now responsible for enforcing.
 
-The exception proves the rule. `Li` raises `ValueError` for an order below 1, because the order is a static Python integer, known at trace time and not part of the traced computation at all. A value JAX never sees can be checked the ordinary way.
+The exception proves the rule. `polylog` raises `ValueError` for an order below 1, because the order is a static Python integer, known at trace time and not part of the traced computation at all. A value JAX never sees can be checked the ordinary way.
 
 ## Why precision degrades near a pole
 

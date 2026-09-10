@@ -6,7 +6,7 @@ The recurring theme: for most of these functions the limit is **cancellation, no
 
 ## Modified Bessel `K` — two series and a cross-over
 
-`K0` uses a 30-term ascending series below $z = 9$ and a 10-term asymptotic expansion above it, following Zhang and Jin. `K1` comes from the Wronskian, `K2` from the recurrence.
+`k0` uses a 30-term ascending series below $z = 9$ and a 10-term asymptotic expansion above it, following Zhang and Jin. `k1` comes from the Wronskian, `k2` from the recurrence.
 
 The worst error, $2\times10^{-7}$, sits almost exactly at the hand-off. That is not a coincidence and not a bug: it is where both approximations are simultaneously at their worst, and the cross-over is placed there deliberately, because moving it in either direction makes one branch worse faster than it makes the other better.
 
@@ -16,13 +16,13 @@ $$K_0(z) = -\left(\log\tfrac{z}{2} + \gamma\right) I_0(z) + \sum_k \frac{H_k}{(k
 
 and at $z = 9$ those two pieces are each of size $I_0(9) \approx 1.09\times10^{3}$ while their difference is $K_0(9) \approx 5.09\times10^{-5}$. The ratio is $2.1\times10^{7}$, so about **7.3 decimal digits are destroyed by cancellation** before the result is formed. float64 starts with 16 and finishes with roughly 9. Adding terms to a sum whose leading digits are already cancelling buys nothing.
 
-This is also why the float32 cross-over is 4.65 rather than 9: the loss grows as $2z/\ln 10$ digits, and float32 has only 7 to spend. Applying the float64 constant at float32 made `K0(8.5)` come out **negative**.
+This is also why the float32 cross-over is 4.65 rather than 9: the loss grows as $2z/\ln 10$ digits, and float32 has only 7 to spend. Applying the float64 constant at float32 made `k0(8.5)` come out **negative**.
 
 **Why the asymptotic series cannot either.** Asymptotic expansions diverge. Past some optimal term count the partial sums get worse, not better, and that optimum depends on $z$. Ten terms is near it at the cross-over; more would help at large $z$ and hurt at small.
 
 **What machine precision would cost.** SciPy reaches it with Cephes' rational Chebyshev approximations — separate hard-coded coefficient sets per interval, fitted offline. That is the right answer for a C library shipping a fixed set of functions, and the wrong one here: it is several hundred magic constants per function, it must be refitted for each precision, and it is not obviously differentiable in a form JAX can use. The current approach is about forty lines, works at every dtype, and differentiates analytically. Trading $10^{-16}$ for $10^{-7}$ buys that.
 
-**The scaled forms exist to dodge a different limit entirely.** $K_n(z)$ underflows to zero above $z \approx 705.5$ — not from any weakness in the series, but because the true value is smaller than the smallest normal double and XLA flushes it. $e^z K_n(z)$ decays only as $1/\sqrt{z}$, so `K0e`/`K1e`/`K2e` stay accurate to `DBL_MAX`. Writing them against `i0e` rather than `i0` also removed an overflow ceiling the unscaled code used to have.
+**The scaled forms exist to dodge a different limit entirely.** $K_n(z)$ underflows to zero above $z \approx 705.5$ — not from any weakness in the series, but because the true value is smaller than the smallest normal double and XLA flushes it. $e^z K_n(z)$ decays only as $1/\sqrt{z}$, so `k0e`/`k1e`/`k2e` stay accurate to `DBL_MAX`. Writing them against `i0e` rather than `i0` also removed an overflow ceiling the unscaled code used to have.
 
 ## `spence` — three series and a removable singularity
 
@@ -34,11 +34,11 @@ Near that root the plain defining series $\sum t^n/n^2$ is used instead. It is e
 
 One consequence is worth knowing if you are checking results: **SciPy's complex `spence` still has this defect**, being the same code, so it agrees with the wrong answer at those two points. `mpmath` shares no ancestry with either and is the reference to use there.
 
-## `Li` — three branches and a table
+## `polylog` — three branches and a table
 
 The polylogarithm uses the defining sum for $|z| \le 1/2$, a Hurwitz-zeta expansion in $\log z$ for $1/2 < |z| < 2$, and the inversion formula for $|z| \ge 2$.
 
-The inversion branch needs Bernoulli numbers, and the table stops at $B_{60}$. So the practical bound on the order is **branch-dependent**: $n \le 60$ for $|z| \ge 2$, and $n \le 170$ elsewhere, where $\Gamma(n+1)$ overflows. Past the table the result is `nan` rather than a silently clamped index — an earlier version reused $B_{60}$ for every higher order and returned `Li(62, 3) = 0.979` against a true `3.0`.
+The inversion branch needs Bernoulli numbers, and the table stops at $B_{60}$. So the practical bound on the order is **branch-dependent**: $n \le 60$ for $|z| \ge 2$, and $n \le 170$ elsewhere, where $\Gamma(n+1)$ overflows. Past the table the result is `nan` rather than a silently clamped index — an earlier version reused $B_{60}$ for every higher order and returned `polylog(62, 3) = 0.979` against a true `3.0`.
 
 The derivative uses $\mathrm{Li}_n'(z) = \mathrm{Li}_{n-1}(z)/z$, which is $0/0$ at the origin. Near zero the ratio is therefore evaluated as the series it equals, $\sum_j z^j/(j+1)^{n-1}$, by Horner — a form that is analytic at the origin, so derivatives of every order are correct there. Substituting a value at the singular point instead would fix the function and leave its derivatives wrong, since a constant differentiates to zero.
 
@@ -48,7 +48,7 @@ For $n > 1$ this is `jax.scipy.special.zeta`, unchanged. Above $n = 54$ it is th
 
 The negative half-line uses the functional equation $\zeta(-k) = (-1)^k B_{k+1}/(k+1)$, which is why it covers only the negative _integers_: the equation needs $(-1)^{-n}$, undefined otherwise. The critical strip is not implemented at all.
 
-**The Bernoulli numbers are computed from exact `fractions.Fraction` arithmetic**, not from `jax.scipy.special.bernoulli`, which loses about seven digits on $B_4$ — enough to produce $10^{-6}$ errors in `Li(4, ·)` and `zeta(-3)`. Exact rational arithmetic once at import beats a floating-point recurrence every time here, because the table is small and fixed.
+**The Bernoulli numbers are computed from exact `fractions.Fraction` arithmetic**, not from `jax.scipy.special.bernoulli`, which loses about seven digits on $B_4$ — enough to produce $10^{-6}$ errors in `polylog(4, ·)` and `zeta(-3)`. Exact rational arithmetic once at import beats a floating-point recurrence every time here, because the table is small and fixed.
 
 A gradient on the negative line is finite and **is not** $\zeta'$: the value comes from a table lookup, which carries no information about how $\zeta$ varies between the integers.
 

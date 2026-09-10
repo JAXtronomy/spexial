@@ -5,7 +5,7 @@ SciPy and `spexial` are both float64 implementations of the same formulae, and
 where they agree it is sometimes because they agree on the same approximation
 rather than on the truth. `mpmath` is arbitrary-precision and independent, so
 it is ground truth rather than a second opinion -- and it is the only reference
-available at all for `Li`, and the only usable one in the tails, where SciPy's
+available at all for `polylog`, and the only usable one in the tails, where SciPy's
 own `kn` underflows to zero while the true value is still finite.
 
 The tolerances below are therefore not the same numbers as in the SciPy suite:
@@ -173,8 +173,8 @@ def test_spence_complex(r, phi):
 # SciPy suite therefore stops at 690; this one does not have to.
 
 
-_ORDERS = [(0, sp.K0), (1, sp.K1), (2, sp.K2)]
-_SCALED = [(0, sp.K0e), (1, sp.K1e), (2, sp.K2e)]
+_ORDERS = [(0, sp.k0), (1, sp.k1), (2, sp.k2)]
+_SCALED = [(0, sp.k0e), (1, sp.k1e), (2, sp.k2e)]
 
 
 @pytest.mark.parametrize(("order", "func"), _ORDERS)
@@ -183,7 +183,7 @@ _SCALED = [(0, sp.K0e), (1, sp.K1e), (2, sp.K2e)]
 def test_kn(order, func, z):
     """1e-6, the honest tolerance for a 30-term series meeting a 10-term one.
 
-    Worst measured is 2.0e-7 (`K0`) just below the z = 9 cross-over; away from
+    Worst measured is 2.0e-7 (`k0`) just below the z = 9 cross-over; away from
     it the same code is good to 1e-15.
     """
     np.testing.assert_allclose(func(z), _ref(mp.besselk, order, z), rtol=1e-6)
@@ -221,12 +221,12 @@ def test_scaled_kn_in_the_tail_scipy_cannot_reach(order, func, z):
     forces elsewhere.
     """
     expected = _ref(lambda o, t: mp.exp(t) * mp.besselk(o, t), order, z)
-    assert float(sp.K0(z)) == 0.0  # the unscaled form has nothing to offer here
+    assert float(sp.k0(z)) == 0.0  # the unscaled form has nothing to offer here
     np.testing.assert_allclose(func(z), expected, rtol=1e-15)
 
 
 # ---------------------------------------------------------------------------
-# Li
+# polylog
 #
 # No SciPy counterpart at all, so mpmath is not a cross-check here -- it is the
 # only reference there is.
@@ -249,7 +249,7 @@ def test_li(n, z):
     expected = _cref(mp.polylog, n, z).real
     # 1e-13, not 1e-11: measured worst over this domain is 1.3e-14, so the
     # looser gate would pass a 100x regression.
-    np.testing.assert_allclose(sp.Li(n, z), expected, rtol=1e-13, atol=1e-14)
+    np.testing.assert_allclose(sp.polylog(n, z), expected, rtol=1e-13, atol=1e-14)
 
 
 @pytest.mark.parametrize("n", [1, 2, 3, 5, 10, 20])
@@ -261,7 +261,7 @@ def test_li_at_the_branch_boundaries(n, z):
     real bug once -- no branch covered the boundary and it returned 0.0.
     """
     expected = _cref(mp.polylog, n, z).real
-    np.testing.assert_allclose(sp.Li(n, z), expected, rtol=1e-11, atol=1e-12)
+    np.testing.assert_allclose(sp.polylog(n, z), expected, rtol=1e-11, atol=1e-12)
 
 
 def _recurrence_scale(n, alpha, x):

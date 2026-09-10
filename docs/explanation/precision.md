@@ -8,9 +8,9 @@ JAX defaults to 32-bit floats, and for the workload JAX was built for — traini
 
 A float32 number carries about seven decimal digits. That sounds like plenty until you look at how these functions are actually evaluated. None of them has a closed form you can just apply; each is a sum, a recurrence, or a reflection:
 
-- `K0` sums thirty terms of an ascending series below $z = 9$, and ten terms of an asymptotic expansion above it.
+- `k0` sums thirty terms of an ascending series below $z = 9$, and ten terms of an asymptotic expansion above it.
 - `gamma` evaluates a Lanczos series, and for $x < 1/2$ divides by $\sin(\pi x)$ first.
-- `Li` builds a length-60 vector of powers of $\log z$ and contracts it against Bernoulli numbers.
+- `polylog` builds a length-60 vector of powers of $\log z$ and contracts it against Bernoulli numbers.
 
 Every one of those operations is an opportunity to lose low-order bits, and the losses accumulate rather than cancel. A thirty-term sum whose terms alternate in sign can shed several digits to cancellation alone. Start with seven and you may finish with three — and you will not be told. That is the part that makes float32 dangerous here rather than merely imprecise: the answer comes back looking exactly like a good answer.
 

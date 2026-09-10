@@ -1,4 +1,4 @@
-"""Hypothesis-driven parity against `scipy.special` (and `mpmath` for `Li`).
+"""Hypothesis-driven parity against `scipy.special` (and `mpmath` for `polylog`).
 
 Every tolerance here was measured, not tuned until the suite went green. Where
 an implementation genuinely does not cover a domain, the strategy is restricted
@@ -215,7 +215,7 @@ def test_kn_across_the_crossover(order, z):
     [8.9, 9.1] zero times. Without this test a regression that made the
     asymptotic branch 100x worse would still pass.
     """
-    func = (sp.K0, sp.K1, sp.K2)[order]
+    func = (sp.k0, sp.k1, sp.k2)[order]
     np.testing.assert_allclose(func(z), _KN_REFERENCE[order](z), rtol=1e-6)
 
 
@@ -228,7 +228,7 @@ def test_kn(order, z):
     10 asymptotic ones), so 1e-6 is the honest tolerance -- not machine
     precision.
     """
-    func = (sp.K0, sp.K1, sp.K2)[order]
+    func = (sp.k0, sp.k1, sp.k2)[order]
     np.testing.assert_allclose(func(z), _KN_REFERENCE[order](z), rtol=1e-6)
 
 
@@ -354,12 +354,12 @@ def test_zeta_negative_integers(n):
 
 
 # ---------------------------------------------------------------------------
-# Li -- no scipy counterpart, so mpmath supplies the reference values.
+# polylog -- no scipy counterpart, so mpmath supplies the reference values.
 
 
 @given(
     # Up to 20, matching the range the tolerance below was measured over. The
-    # `j ** n` int64 overflow that used to break `Li` starts at n = 12, so a
+    # `j ** n` int64 overflow that used to break `polylog` starts at n = 12, so a
     # strategy stopping at 8 could not have caught it.
     n=st.integers(min_value=1, max_value=20),
     z=floats(-1000.0, 1000.0),
@@ -372,4 +372,4 @@ def test_li(n, z):
     assume(not (n == 1 and abs(z - 1.0) < 1e-9))  # Li_1(1) is the pole
     with mp.workdps(30):
         expected = complex(mp.polylog(n, z)).real
-    np.testing.assert_allclose(sp.Li(n, z), expected, rtol=1e-11, atol=1e-12)
+    np.testing.assert_allclose(sp.polylog(n, z), expected, rtol=1e-11, atol=1e-12)

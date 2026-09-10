@@ -28,7 +28,7 @@ def as_float(x: AnyArrayLike, /, *, keep_weak: bool = False) -> AnyArray:
     """Promote to at least float32, without disturbing a subnormal.
 
     The promotion is not cosmetic. In `kn`, `float16` and `bfloat16` have no
-    working series/asymptotic cross-over at all -- `K0` in bfloat16 was wrong by
+    working series/asymptotic cross-over at all -- `k0` in bfloat16 was wrong by
     16x and *negative* over part of its range. In `comb`, the log-gamma
     difference has lost every digit by ``N = 20`` in bfloat16, returning `1.0`
     for a true 124750 by ``N = 500``.
@@ -78,7 +78,7 @@ def promote_integers(x: AnyArrayLike, /) -> AnyArray:
 
     The point is what it does *not* do. ``x * 1.0`` is the obvious spelling and
     is wrong for a float: on XLA it flushes a subnormal to zero, which is the
-    hazard this module exists to document and the one that cost `kn.K0` its
+    hazard this module exists to document and the one that cost `kn.k0` its
     whole subnormal band. Integers have no subnormal to lose, so they can take
     the multiply -- and need it, since that is what makes them floats at all.
     """
@@ -115,7 +115,7 @@ def positive_subnormal(z: AnyArray) -> AnyArray:
 
     The float tests cannot do this. XLA compares a subnormal as if it were
     zero, so ``z > 0`` is False for exactly these values and ``z == 0.0`` is
-    True for them -- which is how a subnormal argument reached `kn.K1`'s pole
+    True for them -- which is how a subnormal argument reached `kn.k1`'s pole
     guard and came back ``inf``.
     """
     bits = lax.bitcast_convert_type(z, INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
@@ -251,7 +251,7 @@ def log_no_flush(z: AnyArray, /, *, dtype: Any = None) -> AnyArray:
     """``log(z)``, including where ``z`` is subnormal and XLA has flushed it.
 
     XLA on CPU flushes a subnormal *input* to zero, so `jnp.log` returns
-    ``-inf`` for every ``z`` below ``finfo(dtype).tiny`` -- and `kn.K0` then
+    ``-inf`` for every ``z`` below ``finfo(dtype).tiny`` -- and `kn.k0` then
     returned ``inf`` where the true value is an ordinary number near 700. In
     float32 that band starts at 1.2e-38, an entirely reachable magnitude.
 
@@ -261,7 +261,7 @@ def log_no_flush(z: AnyArray, /, *, dtype: Any = None) -> AnyArray:
     ``log(mantissa)`` plus a constant. `jnp.frexp` is not an alternative -- it
     flushes too, and reports the same exponent for every subnormal.
 
-    Note this is distinct from the `_LN2` subtraction in `_K0_small`, which
+    Note this is distinct from the `_LN2` subtraction in `_k0_small`, which
     stops a *normal* ``z`` being halved into the subnormal range. That fix does
     nothing when the argument arrives subnormal already.
 
@@ -300,7 +300,7 @@ def log_no_flush(z: AnyArray, /, *, dtype: Any = None) -> AnyArray:
     # Every negative except `-0.0`, whose bit pattern is the one integer more
     # negative than all of them. A negative *subnormal* cannot be recognised any
     # other way -- it compares equal to zero, so `jnp.log` returned `-inf` for
-    # it and `kn.K0` came back `inf` where the argument is simply out of domain.
+    # it and `kn.k0` came back `inf` where the argument is simply out of domain.
     negative = (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
     from_bits = jnp.log(mantissa) + (log(float(info.tiny)) - info.nmant * _LN2)
     # Every branch evaluates, so keep `log` off the flushed value.

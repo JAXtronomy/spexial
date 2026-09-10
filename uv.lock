@@ -2808,6 +2808,7 @@ dependencies = [
     { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
     { name = "jaxlib", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
     { name = "jaxtyping" },
+    { name = "typing-extensions" },
 ]
 
 [package.optional-dependencies]
@@ -2920,6 +2921,7 @@ requires-dist = [
     { name = "jax", extras = ["cuda12-local"], marker = "extra == 'cuda12-local'", specifier = ">=0.7.2" },
     { name = "jaxlib", specifier = ">=0.7.2" },
     { name = "jaxtyping", specifier = ">=0.3.9" },
+    { name = "typing-extensions", specifier = ">=4.5" },
 ]
 provides-extras = ["cpu", "cuda12", "cuda12-local"]
 

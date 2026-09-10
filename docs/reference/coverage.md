@@ -16,13 +16,13 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 
 | Function | In JAX | JAX autodiff | scipy on JAX arrays | Custom JVP | Grad speed | Grad memory | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `K0` | -- | -- | value only | yes | 0.674x (1.5x better) | 0.0146x (68.5x better) | only here |
-| `K1` | -- | -- | value only | yes | 0.994x (1.0x better) | 0.333x (3.0x better) | only here |
-| `K2` | -- | -- | -- | yes | 0.989x (1.0x better) | 0.333x (3.0x better) | only here |
-| `K0e` | -- | -- | -- | yes | 0.573x (1.7x better) | 0.0146x (68.5x better) | only here |
-| `K1e` | -- | -- | -- | yes | 0.875x (1.1x better) | 0.0755x (13.2x better) | only here |
-| `K2e` | -- | -- | -- | yes | 0.982x (1.0x better) | 0.195x (5.1x better) | only here |
-| `Li` | -- | -- | -- | yes | 1.29x (1.3x worse) | 0.00373x (268.0x better) | only here |
+| `k0` | -- | -- | value only | yes | 0.674x (1.5x better) | 0.0146x (68.5x better) | only here |
+| `k1` | -- | -- | value only | yes | 0.994x (1.0x better) | 0.333x (3.0x better) | only here |
+| `k2` | -- | -- | -- | yes | 0.989x (1.0x better) | 0.333x (3.0x better) | only here |
+| `k0e` | -- | -- | -- | yes | 0.573x (1.7x better) | 0.0146x (68.5x better) | only here |
+| `k1e` | -- | -- | -- | yes | 0.875x (1.1x better) | 0.0755x (13.2x better) | only here |
+| `k2e` | -- | -- | -- | yes | 0.982x (1.0x better) | 0.195x (5.1x better) | only here |
+| `polylog` | -- | -- | -- | yes | 1.29x (1.3x worse) | 0.00373x (268.0x better) | only here |
 | `eval_gegenbauer` | -- | -- | -- | available | -- | -- | only here |
 | `eval_gegenbauers` | -- | -- | -- | -- | -- | -- | only here |
 | `sph_legendre_p` | -- | -- | -- | -- | -- | -- | only here |
@@ -37,49 +37,49 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 
 ## Per-function detail
 
-`K0`
+`k0`
 :   JAX has no modified Bessel function of the second kind at any version. scipy's `k0` returns a value under `jit` but raises under `grad`. `spexial` defines the analytic derivative, which measured 1.5x faster than differentiating the 30-term series, and keeps 68x less residual -- the column that actually decides.
 
-    Derivative: `-K1(z)`.
+    Derivative: `-k1(z)`.
 
     Gradient cost vs differentiating our own series: speed 0.674x (1.5x better), memory 0.0146x (68.5x better).
 
-`K1`
-:   As `K0`. `K1` is a thin wrapper over `K1e`, whose own rule autodiff already picks up, so the hand-written rule earns its place on the memory column -- 3x less residual at neutral wall-clock. K1'(z) = -K0(z) - K1(z)/z.
+`k1`
+:   As `k0`. `k1` is a thin wrapper over `k1e`, whose own rule autodiff already picks up, so the hand-written rule earns its place on the memory column -- 3x less residual at neutral wall-clock. k1'(z) = -k0(z) - k1(z)/z.
 
-    Derivative: `-K0(z) - K1(z) / z`.
+    Derivative: `-k0(z) - k1(z) / z`.
 
     Gradient cost vs differentiating our own series: speed 0.994x (1.0x better), memory 0.333x (3.0x better).
 
-`K2`
-:   `scipy.special.kn` does not dispatch on JAX arrays at all, even with the array API enabled. As `K1`, kept for the memory column. K2'(z) = -K1(z) - (2/z) K2(z), summed in the scaled variables: formed directly the `(2/z) K2` term is subnormal from z = 699 and XLA flushes it, which cost the derivative 0.29%.
+`k2`
+:   `scipy.special.kn` does not dispatch on JAX arrays at all, even with the array API enabled. As `k1`, kept for the memory column. k2'(z) = -k1(z) - (2/z) k2(z), summed in the scaled variables: formed directly the `(2/z) k2` term is subnormal from z = 699 and XLA flushes it, which cost the derivative 0.29%.
 
-    Derivative: `-K1(z) - (2/z) K2(z)`.
+    Derivative: `-k1(z) - (2/z) k2(z)`.
 
     Gradient cost vs differentiating our own series: speed 0.989x (1.0x better), memory 0.333x (3.0x better).
 
-`K0e`
-:   Exponentially scaled e^z K0(z), matching `scipy.special.k0e`. JAX has no scaled Bessel K at any version, and scipy's does not dispatch on JAX arrays. This is the only form that survives past z = 705.5, where K0 itself is subnormal and XLA flushes it to 0.
+`k0e`
+:   Exponentially scaled e^z k0(z), matching `scipy.special.k0e`. JAX has no scaled Bessel K at any version, and scipy's does not dispatch on JAX arrays. This is the only form that survives past z = 705.5, where k0 itself is subnormal and XLA flushes it to 0.
 
-    Derivative: `K0e(z) - K1e(z)`.
+    Derivative: `k0e(z) - k1e(z)`.
 
     Gradient cost vs differentiating our own series: speed 0.573x (1.7x better), memory 0.0146x (68.5x better).
 
-`K1e`
-:   As `K0e`; matches `scipy.special.k1e`.
+`k1e`
+:   As `k0e`; matches `scipy.special.k1e`.
 
-    Derivative: `K1e(z) - K0e(z) - K1e(z) / z`.
+    Derivative: `k1e(z) - k0e(z) - k1e(z) / z`.
 
     Gradient cost vs differentiating our own series: speed 0.875x (1.1x better), memory 0.0755x (13.2x better).
 
-`K2e`
-:   As `K0e`; matches `scipy.special.kve(2, z)`.
+`k2e`
+:   As `k0e`; matches `scipy.special.kve(2, z)`.
 
-    Derivative: `K2e(z) - K1e(z) - (2/z) K2e(z)`.
+    Derivative: `k2e(z) - k1e(z) - (2/z) k2e(z)`.
 
     Gradient cost vs differentiating our own series: speed 0.982x (1.0x better), memory 0.195x (5.1x better).
 
-`Li`
+`polylog`
 :   No general polylogarithm anywhere. `jax.scipy.special.spence` is the n = 2 case only, and scipy has no polylog. The custom JVP is the one row where the two cost columns disagree: it keeps 268x less residual (4.2 MB -> 16 kB over 2000 points) but runs 1.7x slower, because Li_{n-1} must be evaluated afresh rather than reusing saved intermediates. Kept for the memory, which is the binding constraint when vmapping over a large batch.
 
     Derivative: `Li_{n-1}(z) / z`.
@@ -87,7 +87,7 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
     Gradient cost vs differentiating our own series: speed 1.29x (1.3x worse), memory 0.00373x (268.0x better).
 
 `eval_gegenbauer`
-:   Absent from JAX. scipy's does not dispatch on JAX arrays. The derivative in x is 2a C_{n-1}^{a+1}(x), but a custom JVP is *not* wired up: `alpha` is traced too and dC/da has no closed form, so a rule supplying only the x-tangent would silently break `grad` with respect to `alpha`. The saving on offer is modest anyway -- 6 residual leaves, against 29 for `Li`.
+:   Absent from JAX. scipy's does not dispatch on JAX arrays. The derivative in x is 2a C_{n-1}^{a+1}(x), but a custom JVP is *not* wired up: `alpha` is traced too and dC/da has no closed form, so a rule supplying only the x-tangent would silently break `grad` with respect to `alpha`. The saving on offer is modest anyway -- 6 residual leaves, against 29 for `polylog`.
 
     Derivative: `2a C_{n-1}^{a+1}(x)`.
 

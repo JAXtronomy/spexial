@@ -59,14 +59,14 @@ The polylogarithm $\mathrm{Li}_s(z)$ reduces to the zeta function at $z = 1$: $\
 \zeta(s)$. `spexial` implements the two with entirely separate code, so this is a real check, not a tautology:
 
 ```pycon
->>> float(sp.Li(4, 1.0))
+>>> float(sp.polylog(4, 1.0))
 1.0823232337111384
 
 ```
 
 ```pycon
 >>> import math
->>> math.isclose(float(sp.zeta(4.0)), float(sp.Li(4, 1.0)), rel_tol=1e-15)
+>>> math.isclose(float(sp.zeta(4.0)), float(sp.polylog(4, 1.0)), rel_tol=1e-15)
 True
 
 ```

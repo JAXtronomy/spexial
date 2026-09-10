@@ -1,6 +1,6 @@
 """The polylogarithm."""
 
-__all__ = ["Li"]
+__all__ = ["polylog"]
 
 from functools import partial
 from typing import Any, Final
@@ -51,7 +51,7 @@ def _bernoulli_poly(n: int, x: AnyArray) -> AnyArray:
     # The Bernoulli table is float64 by construction (it comes from exact
     # `Fraction` arithmetic), so a narrower `x` seeds the carry at its own width
     # and the body then widens it -- which `lax.fori_loop` rejects outright,
-    # with an error naming neither `Li` nor the dtype. Casting the table to the
+    # with an error naming neither `polylog` nor the dtype. Casting the table to the
     # carry's dtype keeps the loop type-stable at any input width.
     x_arr = (
         jnp.asarray(x) * 1.0
@@ -65,7 +65,7 @@ def _bernoulli_poly(n: int, x: AnyArray) -> AnyArray:
     )
 
 
-def Li(n: int, z: ScalarLike, /) -> Scalar:
+def polylog(n: int, z: ScalarLike, /) -> Scalar:
     r"""Compute the polylogarithm :math:`\mathrm{Li}_n(z)`.
 
     There is no `scipy.special` counterpart; `mpmath.polylog` is the reference
@@ -80,12 +80,12 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:
     n
         Order of the polylogarithm. Must be a static Python `int` and
         ``>= 1``. A non-integer order -- including a whole-number `float` such
-        as ``Li(2.0, z)`` -- is rejected by the runtime type checker with a
+        as ``polylog(2.0, z)`` -- is rejected by the runtime type checker with a
         `TypeError`; an integer below 1 raises `ValueError`.
     z
         Real, **scalar** argument. The middle series is built from a
         length-60 vector of powers of :math:`\log z`, so it cannot broadcast;
-        use ``jax.vmap(partial(Li, n))`` for arrays.
+        use ``jax.vmap(partial(polylog, n))`` for arrays.
 
     Returns
     -------
@@ -109,15 +109,15 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:
 
     ``Li_1(z) == -log(1 - z)``:
 
-    >>> round(float(sp.Li(1, 0.5)), 12)
+    >>> round(float(sp.polylog(1, 0.5)), 12)
     0.69314718056
 
     ``Li_2(1) == zeta(2)``:
 
-    >>> round(float(sp.Li(2, 1.0)), 10)
+    >>> round(float(sp.polylog(2, 1.0)), 10)
     1.6449340668
 
-    >>> round(float(sp.Li(3, -1.0)), 8)
+    >>> round(float(sp.polylog(3, -1.0)), 8)
     -0.90154268
 
     """
@@ -125,11 +125,11 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:
     # call time instead of during tracing -- a `ValueError` from inside a jitted
     # body surfaces with a confusing traceback and only when the trace happens.
     # `isinstance` and not `n != int(n)`: a whole-number *float* order such as
-    # `Li(2.0, z)` used to reach `lax.fori_loop(0, n + 1, ...)` and die there
+    # `polylog(2.0, z)` used to reach `lax.fori_loop(0, n + 1, ...)` and die there
     # with "lower and upper arguments must have equal types", which says nothing
     # about what the caller did wrong.
     if n < 1:
-        msg = f"Li is only implemented for integer order n >= 1, got {n}"
+        msg = f"polylog is only implemented for integer order n >= 1, got {n}"
         raise ValueError(msg)
     # Two of the three branches take `jnp.real` of a complex intermediate --
     # correct for real `z`, where the imaginary parts cancel exactly, but it
@@ -137,12 +137,14 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:
     # returned wrong: `jnp.iscomplexobj` reads the dtype, so this works on a
     # tracer and costs nothing at runtime.
     if jnp.iscomplexobj(z):
-        msg = f"Li is only implemented for real z, got dtype {jnp.asarray(z).dtype}"
+        msg = (
+            f"polylog is only implemented for real z, got dtype {jnp.asarray(z).dtype}"
+        )
         raise ValueError(msg)
     # `_li_core` evaluates all three branches under `jnp.where`, and two of them
     # build float64 constants (the zeta table, `gamma(arange(...))`, the
     # Bernoulli table), so the `where` promoted a float32 argument to float64 --
-    # leaving `Li` the only public function whose primal disagreed with its own
+    # leaving `polylog` the only public function whose primal disagreed with its own
     # `grad`. Narrowed back here, as `kn.py` does with `_cast_like`.
     out = _li(n, z)
     dtype = jnp.asarray(z).dtype
@@ -156,7 +158,7 @@ def Li(n: int, z: ScalarLike, /) -> Scalar:
 
 @partial(jax.custom_jvp, nondiff_argnums=(0,))
 def _li_core(n: int, z: ScalarLike) -> Scalar:
-    """Evaluate the polylogarithm; see `Li`, which validates ``n`` first."""
+    """Evaluate the polylogarithm; see `polylog`, which validates ``n`` first."""
 
     def series(z: AnyArray) -> AnyArray:
         """Evaluate the defining series, for |z| <= 1/2."""
@@ -250,7 +252,7 @@ def _li_jvp(n: int, primals: tuple[Any], tangents: tuple[Any]) -> tuple[Scalar, 
     :math:`\mathrm{Li}_{n-1}` replaces all of it.
 
     ``n = 1`` is special-cased. The identity needs :math:`\mathrm{Li}_0(z) =
-    z/(1-z)`, which `Li` itself refuses to compute (it requires ``n >= 1``), and
+    z/(1-z)`, which `polylog` itself refuses to compute (it requires ``n >= 1``), and
     :math:`\mathrm{Li}_0(z)/z` is just :math:`1/(1-z)`.
     """
     (z,), (dz,) = primals, tangents
@@ -259,7 +261,7 @@ def _li_jvp(n: int, primals: tuple[Any], tangents: tuple[Any]) -> tuple[Scalar, 
         deriv = 1.0 / (1.0 - z_arr)
     else:
         # `Li_{n-1}(0) / 0` is 0/0, and returned `nan` for every order n >= 2
-        # while the *value* `Li(n, 0)` was correctly 0. (`n = 1` has its own
+        # while the *value* `polylog(n, 0)` was correctly 0. (`n = 1` has its own
         # branch and was never affected, which made the break look selective.)
         #
         # Guarding it with `where(z == 0, 1.0, ratio)` fixes the first

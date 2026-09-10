@@ -126,7 +126,7 @@ def _by_eta(n: AnyArray) -> AnyArray:
     k = jnp.arange(1.0, _ETA_TERMS + 1.0, dtype=n.dtype)
     # `n[..., None]` puts the 32 terms on a *trailing* axis and sums over that
     # one only. Without it an array argument broadcasts against the term axis
-    # and the shapes collide -- the same mistake `_K0_small` once made with a
+    # and the shapes collide -- the same mistake `_k0_small` once made with a
     # bare `jnp.sum`, which silently collapsed the caller's own axis instead.
     weights = (-1.0) ** (k - 1.0) * weights_table
     eta = -jnp.sum(weights / k ** jnp.asarray(n)[..., None], axis=-1)
