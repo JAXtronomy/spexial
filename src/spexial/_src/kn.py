@@ -302,7 +302,9 @@ def K0(z: RealArrayLike, /) -> AnyArray:
         figures: in float32 the cross-over moves to 4.65 and the worst error is
         ~7e-3 (see `_SMALL_Z`). `float16` and `bfloat16` are computed in
         float32 and rounded back, so they get what their dtype can hold. Underflows to 0
-        above ``z = 705.5``, where the true value is subnormal; use `K0e` there.
+        where the true value falls below the *dtype's* smallest normal, which is a
+        different place in each: 705.3 in float64, 85.3 in float32,
+        85.2 in bfloat16 and 16.1 in float16. Use `K0e` above it.
 
     Examples
     --------
@@ -346,7 +348,9 @@ def K1(z: RealArrayLike, /) -> AnyArray:
         figures: in float32 the cross-over moves to 4.65 and the worst error is
         ~7e-3 (see `_SMALL_Z`). `float16` and `bfloat16` are computed in
         float32 and rounded back, so they get what their dtype can hold. Underflows to 0
-        above ``z = 705.5``, where the true value is subnormal; use `K1e` there.
+        where the true value falls below the *dtype's* smallest normal, which is a
+        different place in each: 705.3 in float64, 85.3 in float32,
+        85.2 in bfloat16 and 16.2 in float16. Use `K1e` above it.
 
     Examples
     --------
@@ -386,7 +390,9 @@ def K2(z: RealArrayLike, /) -> AnyArray:
         figures: in float32 the cross-over moves to 4.65 and the worst error is
         ~7e-3 (see `_SMALL_Z`). `float16` and `bfloat16` are computed in
         float32 and rounded back, so they get what their dtype can hold. Underflows to 0
-        above ``z = 705.5``, where the true value is subnormal; use `K2e` there.
+        where the true value falls below the *dtype's* smallest normal, which is a
+        different place in each: 705.3 in float64, 85.4 in float32,
+        85.2 in bfloat16 and 16.3 in float16. Use `K2e` above it.
 
     Examples
     --------

@@ -70,7 +70,7 @@ result = jax.vmap(lambda z: sp.Li(2, z))(zs)
 
 **`K0`/`K1`/`K2` are accurate to ~`1e-7`, not machine precision.** A 30-term ascending series meets a 10-term asymptotic expansion at `z = 9`; the worst relative error is `2.0e-7`, at `z = 8.9984` just below that cross-over. It improves in stages away from it: ~`8e-9` to `z = 15`, ~`1e-15` past `z = 30`. If you need full double precision from a modified Bessel function, this is not it.
 
-**Above `z = 705.5`, use `K0e`/`K1e`/`K2e`.** The unscaled functions underflow to 0 there — the true value is smaller than any normal double, and XLA on CPU flushes it. The scaled `e^z K_n(z)` decays only as `1/sqrt(z)` and stays exact to `DBL_MAX`.
+**Above `z = 705.3`, use `K0e`/`K1e`/`K2e`.** The unscaled functions underflow to 0 there — the true value is smaller than any normal double, and XLA on CPU flushes it. That ceiling belongs to the **dtype**, not the function: it is `z = 85.3` in float32, `85.2` in bfloat16 and `16.2` in float16. The scaled `e^z K_n(z)` decays only as `1/sqrt(z)` and stays exact to `DBL_MAX`.
 
 **In float32 the cross-over moves to `z = 4.65` and the worst error is `7.1e-3`** — about 2.5 digits. `float16`/`bfloat16` are computed in float32 and rounded back. Enable x64 if you need better.
 
@@ -82,10 +82,10 @@ Everything below assumes x64. Full detail, including how each was measured, is a
 
 | Function | Domain | Accurate to |
 | --- | --- | --- |
-| `comb` | `0 <= k <= N`, to `DBL_MAX` | `2.6e-12` |
+| `comb` | `0 <= k <= N`, to `DBL_MAX` | `3.6e-12` |
 | `gamma` | real or complex, `\|x\| < 171` | `4e-13` |
-| `eval_gegenbauer` | `n <= 20`, `alpha > -0.5`, `\|x\| <= 1` | `2.1e-13` rtol; absolute error scales with the recurrence, up to `9e-5` at `n = 20, alpha = 10` |
-| `K0`/`K1`/`K2` | `0 < z < 705.5` | `2.0e-7` |
+| `eval_gegenbauer` | `n <= 20`, `alpha > -0.5`, `\|x\| <= 1` | `1.8e-12` rtol; absolute error scales with the recurrence, up to `9e-5` at `n = 20, alpha = 10` |
+| `K0`/`K1`/`K2` | `0 < z < 705.3` (float64; 85.3 in float32, 16.2 in float16) | `2.0e-7` |
 | `K0e`/`K1e`/`K2e` | `z > 0`, no upper limit | `2.0e-7` |
 | `Li` | scalar `z`, `n >= 1` | `6e-13` |
 | `zeta` | `n > 1`, or negative integer `> -60` | `7e-16` |

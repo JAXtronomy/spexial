@@ -144,6 +144,11 @@ def spence(z: AnyArrayLike, /) -> AnyArray:
 
         \int_{1}^{z} dt \frac{\log(t)}{1 - t}
 
+    There is no upper limit on a real argument. Above ``z = 1/tiny`` the value
+    comes from the inversion formula rather than from upstream, whose opening
+    ``1/z`` is subnormal there and is flushed into the wrong branch; see the
+    comment on that branch. ``spence(inf)`` is `nan`, as in SciPy.
+
     See Also
     --------
     scipy.special.spence: the reference implementation in scipy
@@ -187,7 +192,7 @@ def spence(z: AnyArrayLike, /) -> AnyArray:
         # exactly zero, the `x < 0.5` branch is taken instead of the reflected
         # one, and `log(0) * 0` makes the answer `nan` -- across the top two
         # binades of every width, where SciPy is finite and this module's own
-        # complex path returns the right number.
+        # complex path returns the right number. Reported as spexial#28.
         #
         # There the asymptotic form is not an approximation. With `w = 1 - z`,
         # `spence(z) = Li_2(w)` and the inversion `Li_2(w) = -pi**2/6 -

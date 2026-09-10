@@ -258,7 +258,10 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
 
     Those are the *scalar* figures. XLA re-associates the 32-term eta sum
     differently once there is a batch axis, so an array or `jax.jit` argument
-    can differ from the scalar one by up to ``1.5e-14`` on the strip.
+    can differ from the scalar one by up to ``1.5e-14`` on the strip -- and by
+    more on the window below zero the same series covers, where a batched call
+    measures ``2.7e-14`` against the scalar ``8.2e-15``. The caveat belongs to
+    the eta series, not to the strip alone.
 
     Examples
     --------
