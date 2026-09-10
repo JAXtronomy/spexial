@@ -89,7 +89,7 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
     # is still representable for the factor of about two between `tiny` and
     # `1/max`, which in float32 is the reachable band 2.9e-39 to 1.2e-38, and
     # SciPy gives the finite value there. This is the one place the delegated
-    # value is deliberately overridden, and only where upstream has no answer.
+    # value is deliberately overridden. See the guard below for on what grounds.
     magnitude = jnp.abs(x_arr)
     # The logarithm and its exponential are taken at the default float width,
     # not the caller's. A bfloat16 subnormal is a *float32* subnormal too --

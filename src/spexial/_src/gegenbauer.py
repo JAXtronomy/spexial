@@ -57,18 +57,16 @@ def C1(alpha: AnyArrayLike, x: AnyArrayLike, /) -> AnyArray:
     # `x` the product would otherwise stay int64,
     # while `C0` is always float, and `lax.scan` then rejects the carry as having
     # mismatched types. scipy promotes integer input to float, so we do too.
-    # A plain multiply, which loses a subnormal `x` to XLA's flush. That is
-    # recoverable -- `dtype.mul_no_flush` regroups the product around the
-    # mantissa bits and gets `eval_gegenbauer(1, 1e300, 5e-324)` exactly right
-    # -- but it costs two things this function is not willing to pay. It needs
-    # `lax.optimization_barrier` to survive XLA's reassociation, which inside
-    # the recurrence blocks fusion (1.58x slower over 128 points), and its
-    # `where` over bitcast integers returns a *strongly* typed result, so
-    # `eval_gegenbauer(3, 0.5, 0.25)` stopped being weakly typed -- the property
-    # `C0` is written `x * 0 + 1` to preserve, and which changes how every
-    # ordinary result promotes downstream.
+    # A plain multiply, which loses a subnormal `x` to XLA's flush. Regrouping
+    # the product around the mantissa bits recovers it eagerly, and costs three
+    # things: a `lax.optimization_barrier` to survive XLA's reassociation, which
+    # inside the recurrence blocks fusion (1.58x slower over 128 points); a
+    # `where` over bitcast integers, which returns a *strongly* typed result and
+    # so cost `eval_gegenbauer(3, 0.5, 0.25)` its weak typing -- the property
+    # `C0` is written `x * 0 + 1` to preserve; and, as a later round found, it
+    # would not survive fusion under `jit` anyway, which is how this is called.
     #
-    # Both costs land on every caller; the loss lands only where `alpha` is
+    # The costs land on every caller; the loss lands only where `alpha` is
     # around 1e285, since below that the lost quantity is itself denormal. So
     # the flush stays, documented as the platform floor it is.
     return 2 * promote_integers(alpha) * promote_integers(x)
@@ -175,7 +173,8 @@ def _at_infinity(n: int, alpha: AnyArray, x: AnyArray, value: AnyArray) -> AnyAr
 def _C_n_plus_1(carry: _Carry, n: AnyArray) -> tuple[_Carry, AnyArray]:
     """Apply the three-term Gegenbauer recurrence once."""
     alpha, x, Cn, Cn_minus_1 = carry
-    # Deliberately a plain multiply, unlike `C1`. `mul_no_flush` would keep a
+    # Deliberately a plain multiply, unlike `C1`. Regrouping around the
+    # mantissa bits would keep a
     # subnormal `x` alive here too, but it needs `lax.optimization_barrier` to
     # stop XLA reassociating its grouping, and a barrier inside the scan body
     # blocks the fusion the recurrence depends on: measured 1.58x slower on

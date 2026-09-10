@@ -85,7 +85,7 @@ def _eta_weights() -> tuple[float, ...]:
 
 @cache
 def _zeta_at_negative_integers() -> tuple[float, ...]:
-    r"""``|B_{k+1} / (k+1)|`` for :math:`k = 0 \ldots` `ORDER`, rounded once.
+    r"""``B_i / i`` for :math:`i = 0 \ldots` `ORDER`, rounded once rather than twice.
 
     :math:`\zeta(-k) = (-1)^k B_{k+1} / (k+1)`, and doing that division in
     floating point costs a second rounding: `bernoulli_numbers` has already

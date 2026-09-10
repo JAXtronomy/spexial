@@ -140,43 +140,6 @@ def is_negative(z: AnyArray) -> AnyArray:
     return (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
 
 
-def mul_no_flush(a: AnyArray, x: AnyArray, /) -> AnyArray:
-    """Multiply ``a`` by an ``x`` that may be subnormal, without losing it.
-
-    The multiply is the problem, not the value: a subnormal *operand* is flushed
-    on XLA-CPU, so `eval_gegenbauer(1, 1e300, 5e-324)` -- whose answer is an
-    ordinary 9.9e-24 -- came out exactly 0. Neither `ldexp` nor a wider dtype
-    recovers it; bfloat16 and float32 share an exponent range, and float64 has
-    nothing above it.
-
-    A subnormal is ``mantissa * tiny / 2**nmant`` with the mantissa an integer,
-    so the product can be regrouped as ``(a * mantissa) * tiny * 2**-nmant``
-    where every operand is normal. Order matters: the two small factors go last,
-    after ``a`` has absorbed the mantissa.
-
-    What this cannot do is make a subnormal *result* survive -- the final
-    multiply underflows and XLA flushes that too. So it recovers exactly the
-    cases that were visibly wrong, where ``a`` is large enough that ``a * x`` is
-    a normal number, and leaves the rest at the platform's floor.
-    """
-    info = jnp.finfo(x.dtype)
-    bits = lax.bitcast_convert_type(x, INT_OF_WIDTH[jnp.dtype(x.dtype).itemsize])
-    mantissa = jnp.bitwise_and(bits, (1 << info.nmant) - 1).astype(x.dtype)
-    negative = (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
-    # `-0.0` has a non-zero bit pattern (it is `iinfo.min`) but is not
-    # subnormal; without excluding it the reconstruction runs and returns
-    # `+0.0`, losing the sign IEEE gives `a * -0.0`.
-    subnormal = (jnp.abs(x) < info.tiny) & (bits != 0) & ~exactly_zero(x)
-    signed = jnp.where(negative, -mantissa, mantissa)
-    # `optimization_barrier` between the steps, because the grouping *is* the
-    # fix and XLA will otherwise reassociate the chain straight back into
-    # something that flushes. Without the barriers this is correct eagerly and
-    # returns zero again under `jit` -- which is how the callers run.
-    absorbed = lax.optimization_barrier(a * signed)
-    scaled = lax.optimization_barrier(absorbed * info.tiny)
-    return jnp.where(subnormal, scaled * (2.0**-info.nmant), a * x)
-
-
 def log_no_flush(z: AnyArray, /, *, dtype: Any = None) -> AnyArray:
     """``log(z)``, including where ``z`` is subnormal and XLA has flushed it.
 

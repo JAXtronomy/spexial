@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from jax.scipy.special import betaln, gammaln
 
 from .custom_types import AnyArray, AnyArrayLike
-from .dtype import as_float, cast_like, is_negative
+from .dtype import as_float, cast_like, exactly_zero, is_negative
 
 _BETA_FROM: Final = 1000.0
 """Above this ``N``, the Beta form replaces the log-gamma difference, in float64.
@@ -182,7 +182,7 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # for every N including infinity, as scipy also returns.
     # C(inf, inf) is indeterminate, and `nan` is what scipy returns for it.
     at_infinity = jnp.where(
-        k_arr == 0, 1.0, jnp.where(jnp.isinf(k_arr), jnp.nan, jnp.inf)
+        exactly_zero(k_arr), 1.0, jnp.where(jnp.isinf(k_arr), jnp.nan, jnp.inf)
     )
     # Narrowed to what `N` and `k` promote to, not to `N`. `comb` is the only
     # two-argument entry point here, and casting to `N` alone returned float32
