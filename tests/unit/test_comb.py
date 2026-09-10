@@ -352,3 +352,58 @@ def test_derivative_is_continuous_across_the_asymptotic_join():
             * (mp.digamma(mp.mpf(1000) - kk + 1) - mp.digamma(kk + 1))
         )
         assert got == pytest.approx(expect, rel=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("n", "still_negative"),
+    [(1e150, True), (1e153, True), (1e154, False), (1e200, False)],
+)
+def test_second_derivative_sign_is_the_documented_floor(n, still_negative):
+    """`comb`'s second derivative w.r.t. ``N`` flips sign past ``N = 1.3e154``.
+
+    Both surviving terms are of size ``1/N**2``, which is *subnormal* there, and
+    XLA flushes subnormals: `jax.grad(jax.grad(jnp.log))(1e154)` is ``-0.0``
+    where the true ``-1e-308`` is a representable denormal. The dominant
+    negative term vanishes and the positive one is left, so the magnitude is
+    right and the sign inverted. Nothing recovers it short of a rule that never
+    enters log space, which `comb` cannot have. Pinned so the boundary cannot
+    move unnoticed.
+    """
+    hessian = jax.hessian(lambda v: sp.comb(v[0], v[1]))
+    got = float(hessian(jnp.asarray([n, 0.5]))[0, 0])
+    expect = -0.25 / math.gamma(1.5) * n**-1.5
+    assert abs(got) == pytest.approx(abs(expect), rel=1e-10)
+    assert (got < 0.0) is still_negative, "the sign floor moved"
+
+
+@pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+def test_comb_n_choose_zero_is_one(dtype):
+    """``C(N, 0) = C(N, N) = 1`` exactly, to within the documented trade.
+
+    Round 14 routed these two points through `betaln` to make the *derivative*
+    right, which cost the value 28 ulps in float64 for ``1000 < N < 3e6``. That
+    is the trade; this pins how large it is allowed to be.
+    """
+    for n in (5.0, 1001.0, 1e6, 1e100):
+        if dtype is jnp.float32 and n > 1e30:
+            continue
+        assert float(sp.comb(jnp.asarray(n, dtype), jnp.asarray(0.0, dtype))) == (
+            pytest.approx(1.0, rel=1e-6 if dtype is jnp.float32 else 1e-13)
+        )
+        assert float(sp.comb(jnp.asarray(n, dtype), jnp.asarray(n, dtype))) == (
+            pytest.approx(1.0, rel=1e-6 if dtype is jnp.float32 else 1e-13)
+        )
+
+
+@pytest.mark.parametrize("wrap", [lambda f: f, jax.jit], ids=["eager", "jit"])
+def test_infinite_n_with_subnormal_k_is_inf_in_float16(wrap):
+    """float16 is the one width where the subnormal-`k` floor does not apply.
+
+    `as_float` widens float16 to float32 before anything else, and a float16
+    subnormal (3.05e-5) is an entirely normal float32, so it survives the flush
+    and `comb(inf, k)` returns the mathematically correct `inf`. The documented
+    `1.0` floor is real at every other width; this pins that float16 escapes it.
+    """
+    subnormal = jnp.asarray(3.0517578125e-05, dtype=jnp.float16)
+    got = wrap(sp.comb)(jnp.asarray(jnp.inf, dtype=jnp.float16), subnormal)
+    assert float(got) == np.inf

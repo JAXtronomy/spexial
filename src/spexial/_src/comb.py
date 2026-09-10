@@ -63,20 +63,26 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     >>> import jax.numpy as jnp
     >>> import spexial as sp
 
-    >>> round(float(sp.comb(5, 2)), 12)
+    >>> round(float(sp.comb(5, 2)), 5)
     10.0
+
+    Rounded to five places, not twelve, because these examples have to be true
+    at the library's *default* precision as well as under x64. Without x64 this
+    is 9.999995: `jax.scipy.special.gammaln` returns ``2**-21`` rather than 0 at
+    a float32 argument of exactly 1 (spexial#29), and ``comb(N, 0)`` -- which
+    reduces to ``exp(-gammaln(1))`` -- is that error and nothing else.
 
     Out-of-range ``k`` gives 0, not `nan`:
 
     >>> [
-    ...     round(float(c), 12)
+    ...     round(float(c), 5)
     ...     for c in sp.comb(jnp.asarray([5, 5, 5]), jnp.asarray([2, 6, -1]))
     ... ]
     [10.0, 0.0, 0.0]
 
     Non-integer arguments are the generalized binomial coefficient:
 
-    >>> round(float(sp.comb(5.5, 2)), 12)
+    >>> round(float(sp.comb(5.5, 2)), 5)
     12.375
 
     """

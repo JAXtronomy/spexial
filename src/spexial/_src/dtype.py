@@ -173,16 +173,30 @@ def _log_complex_no_flush(z: AnyArray, /) -> AnyArray:
     so the components can be lifted out of the band one at a time and the
     logarithm taken of the scaled number.
 
-    Only when the whole number is inside the band. A complex with one normal
-    component is already fine: the subnormal one is 292 decades below it and
-    contributes nothing to either the modulus or the argument at this precision.
+    Whenever **either** component is inside the band, not only when both are.
+    An earlier revision required both, on the reasoning that a subnormal beside
+    a normal component is 292 decades below it and contributes nothing. That is
+    true at the top of the normal range and false at the bottom of it: with
+    ``real`` exactly ``tiny`` and ``imaginary`` just under it the two are within
+    a factor of two, the flush took the argument to ``0`` instead of ``pi/4``,
+    and the imaginary part of the logarithm was not approximately wrong but
+    *entirely absent* -- a 0.79 radian error on `spence`'s complex derivative.
+
+    The scaled branch is taken only where scaling cannot overflow. Past that,
+    the larger component really is enormous beside a subnormal one -- their
+    ratio is below 1e-580 -- and the plain logarithm is right for the original
+    reason.
     """
     real, imaginary = jnp.real(z), jnp.imag(z)
     info = jnp.finfo(real.dtype)
     # Twice the mantissa width lands every subnormal in the normal range with
     # room to spare, and is itself an exactly representable power of two.
     exponent = 2 * info.nmant
-    band = (jnp.abs(real) < info.tiny) & (jnp.abs(imaginary) < info.tiny)
+    magnitude = jnp.maximum(jnp.abs(real), jnp.abs(imaginary))
+    headroom = float(info.max) * float(2.0**-exponent)
+    band = ((jnp.abs(real) < info.tiny) | (jnp.abs(imaginary) < info.tiny)) & (
+        magnitude < headroom
+    )
     scaled = lax.complex(
         ldexp_no_flush(real, exponent), ldexp_no_flush(imaginary, exponent)
     )
@@ -220,6 +234,14 @@ def log_no_flush(z: AnyArray, /, *, dtype: Any = None) -> AnyArray:
     ordinary magnitude in complex64 -- after the real one had been fixed.
     """
     if jnp.issubdtype(z.dtype, jnp.complexfloating):
+        # Not silently ignored. `dtype` widens the arithmetic for a caller whose
+        # own width cannot hold the answer -- bfloat16, where a logarithm near
+        # -87 has nowhere to go -- and there is no complex bfloat16, so no
+        # caller needs the combination. Raising says so rather than returning a
+        # narrower answer than was asked for.
+        if dtype is not None:
+            msg = "log_no_flush: `dtype` widening is not supported for complex input"
+            raise NotImplementedError(msg)
         return _log_complex_no_flush(z)
     info = jnp.finfo(z.dtype)
     bits = lax.bitcast_convert_type(z, INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])

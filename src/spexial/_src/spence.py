@@ -326,19 +326,26 @@ def _spence_gradient_jvp(
     # the same reason. Both alternatives were tried; the second lost `z = 0`
     # its `inf` as well, which is worse than the ceiling. Documented instead.
     #
-    # `log_no_flush` and the static complex guard as in the first derivative:
-    # it reads mantissa bits, which is undefined for a complex dtype.
+    # `log_no_flush` handles complex input itself now, so there is no dtype
+    # test here any more. It matters at second order for the same reason it did
+    # at first: `at_zero` compares a *complex* `z` componentwise, so a real part
+    # of exactly `tiny` beside a subnormal imaginary part is not "at zero" and
+    # reached the logarithm with one component already flushed.
     at_zero = z == 0
-    complex_input = jnp.issubdtype(jnp.asarray(z).dtype, jnp.complexfloating)
     z_safe = jnp.where(near_one | at_zero, 2.0, z)
-    logarithm = jnp.log(z_safe) if complex_input else log_no_flush(z_safe)
-    # `(1/z) / (1-z)`, not `1 / (z*(1-z))`. The same number, and not the same
-    # derivative: differentiating the fused form squares `z(1-z)`, which
-    # underflows below `z = 1.5e-154` and made the *third* derivative `nan` --
-    # where `spence'''(z) ~ -1/z**2` has genuinely overflowed and `-inf` is the
-    # right answer. Splitting the reciprocal never forms that square, so the
-    # overflow arrives as an infinity instead of as a `nan`.
-    closed = (1.0 / z_safe) / (1 - z_safe) + logarithm / (1 - z_safe) ** 2
+    logarithm = log_no_flush(z_safe)
+    # **Neither** quotient is fused, and both halves matter. Differentiating
+    # `a / b` forms `a * db / b**2`, so a squared denominator here becomes a
+    # *fourth* power in the third derivative: `1 / (z*(1-z))` squared `z(1-z)`
+    # and made the third derivative `nan` below `z = 1.5e-154`, and
+    # `log(z) / (1-z)**2` squares `(1-z)**2` into `(1-z)**4`, which overflows
+    # from `z = 8.2e76` -- dropping the dominant `2 log z / (1-z)**3` term and
+    # leaving the third derivative with the **wrong sign**, `+3/z**3`, in every
+    # mode at once. In float32 that starts at `z = 3.1e9`. Splitting the second
+    # term was the round-14 fix; splitting only one of the two left the same
+    # defect standing at the other end of the range, which is why they are now
+    # written the same way.
+    closed = (1.0 / z_safe) / (1 - z_safe) + (logarithm / (1 - z_safe)) / (1 - z_safe)
     # `z = 0` is a genuine pole, not a removable point: every order diverges,
     # so a constant is the only answer available and orders past this one are
     # 0 there. `z = 1` needs no such guard any more.

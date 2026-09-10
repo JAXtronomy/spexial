@@ -400,3 +400,51 @@ def test_third_derivative_overflows_rather_than_nan(z):
     got = float(third(jnp.asarray(z)))
     assert got == -np.inf
     assert float(jax.jit(third)(jnp.asarray(z))) == got
+
+
+# Only where the answer is still representable: `spence''' ~ 2 log z / z**3`
+# falls under the smallest subnormal past `z = 1e105`, where `0` is correct.
+@pytest.mark.parametrize("z", [1e70, 8.3e76, 1e100])
+def test_third_derivative_keeps_its_sign_at_large_z(z):
+    """REGRESSION: the third derivative was positive above ``z = 8.2e76``.
+
+    ``spence'''`` is dominated by ``2 log z / (1-z)**3`` and is negative for
+    large ``z``. Differentiating ``a / b`` forms ``a db / b**2``, so the
+    ``log(z) / (1-z)**2`` term raised ``(1-z)`` to the *fourth* power one order
+    up, which overflows there -- dropping the dominant term and leaving
+    ``+3/z**3``. Every mode agreed on the wrong sign, so nothing caught it.
+    In float32 the onset is ``z = 3.1e9``.
+    """
+    mp.mp.dps = 60
+    third = jax.grad(jax.grad(jax.grad(spence)))
+    got = float(third(jnp.asarray(z)))
+    zz = mp.mpf(z)
+    expect = float(
+        -1 / (zz**2 * (1 - zz))
+        + 2 / (zz * (1 - zz) ** 2)
+        + 2 * mp.log(zz) / (1 - zz) ** 3
+    )
+    assert got < 0.0
+    assert got == pytest.approx(expect, rel=1e-12)
+    # `approx`, not equality: eager and `jit` reassociate the sum and can differ
+    # in the last ulp. What must not differ is the sign.
+    jitted = float(jax.jit(third)(jnp.asarray(z)))
+    assert jitted < 0.0
+    assert jitted == pytest.approx(got, rel=1e-14)
+
+
+@pytest.mark.parametrize("z", [1e150, 1e154, 1e155])
+def test_second_derivative_keeps_the_log_term_at_large_z(z):
+    """The same fused-denominator defect, one order down.
+
+    ``(1-z)**2`` overflows from ``z = 1.3e154``, which dropped
+    ``log z / (1-z)**2`` outright and returned `0` at ``z = 1e155`` where the
+    true value is a perfectly ordinary normal double.
+    """
+    mp.mp.dps = 60
+    second = jax.grad(jax.grad(spence))
+    got = float(second(jnp.asarray(z)))
+    zz = mp.mpf(z)
+    expect = float(1 / (zz * (1 - zz)) + mp.log(zz) / (1 - zz) ** 2)
+    assert got == pytest.approx(expect, rel=1e-2)
+    assert got != 0.0
