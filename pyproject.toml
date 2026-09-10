@@ -88,6 +88,9 @@ test = [
   "pytest-github-actions-annotate-failures>=0.3.0",
   "pytest-xdist>=3.6.1",
   "pytest>=8.4.2",
+  # `tests/unit/test_citation.py` parses `CITATION.cff`. Resolves transitively
+  # today; declare it so that stays true.
+  "pyyaml>=6.0",
   # The parity suite compares against scipy directly. It resolves transitively
   # through jax today; declare it so that stays true.
   "scipy>=1.11",
