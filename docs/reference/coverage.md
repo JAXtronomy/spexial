@@ -29,6 +29,7 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 | `sph_harm_y` | yes (all >= 0.7.2) | value + autodiff | -- | -- | -- | -- | extends upstream |
 | `sph_harm_y_cart` | -- | -- | -- | -- | -- | -- | only here |
 | `sph_harm_y_cart_all` | -- | -- | -- | -- | -- | -- | only here |
+| `sph_harm_y_cart_all_terms` | -- | -- | -- | -- | -- | -- | only here |
 | `spence` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.2x (5.0x better) | 0.026x (38.5x better) | extends upstream |
 | `zeta` | yes (all >= 0.7.2) | value + autodiff | -- | -- | 1.08x (1.1x worse) | -- | extends upstream |
 | `comb` | yes (>= 0.10.2) | value + autodiff | -- | -- | 1.07x (1.1x worse) | -- | redundant above floor |
@@ -104,6 +105,9 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 
 `sph_harm_y_cart_all`
 :   Stands to `sph_harm_y_cart` as `eval_gegenbauers` does to `eval_gegenbauer`: the whole (l, m) table is a by-product of the recurrences any single entry already runs. Shape and index layout follow `scipy.special.sph_harm_y_all`, negative orders at the far end of the second axis included. Since l and m are static the saving is in *traced* operations -- a smaller HLO, so faster tracing and compiling, not faster execution, which XLA's fusion had already recovered. Measured on the equivalent code in `galax`: tracing 3-4.6x faster up to n = 20, run time flat.
+
+`sph_harm_y_cart_all_terms`
+:   `sph_harm_y_cart_all`'s values, same indexing and same layout, returned as a nested tuple of separate arrays instead of one stacked array. The container is the whole point: indexing a stacked table stops XLA folding each term into a caller's reduction as it is produced, so the table is materialized. Measured on a multipole expansion at n = 12 over a million directions, summing from the stacked form took 17.7 s against 10 ms from these terms. The only function here not wrapped in `jax.jit`, deliberately: a jitted function returning a pytree materializes each leaf at the call boundary, which is exactly the fusion this exists to preserve.
 
 `spence`
 :   JAX has had `spence` since before our floor, but it is real-only and raises on complex input; this accepts both, which is the reason the row exists. It also wins on both cost columns -- 5.0x faster on 38.5x less residual -- because the analytic derivative log(z)/(1-z) is simply the integrand of the definition. The custom JVP is not merely an optimisation here: `lax.select` evaluates every branch, so differentiating the implementation yields `nan` -- and JAX's own `spence` differentiates to `nan` across roughly 1 < x < 2, where ours is exact. Contributed by Colm Talbot, translated from scipy's Cython implementation.

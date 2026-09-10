@@ -108,3 +108,16 @@ def test_sph_harm_y_signatures() -> None:
     assert spherical.shape == (2,)
     assert cartesian.shape == ()
     assert table.shape == (degree + 1, 2 * order + 1)
+
+
+def test_sph_harm_y_cart_all_terms_signature() -> None:
+    """The unstacked table is a nested tuple of Arrays, not an Array."""
+    degree: int = 3
+    order: int = 2
+    uvec = jnp.asarray([0.0, 0.6, 0.8])
+    terms: tuple[tuple[Out, ...], ...] = sp.sph_harm_y_cart_all_terms(
+        degree, order, uvec
+    )
+    assert len(terms) == degree + 1
+    assert len(terms[0]) == 2 * order + 1
+    assert terms[degree][order].shape == ()

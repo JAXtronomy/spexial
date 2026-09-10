@@ -23,6 +23,7 @@ Every function is tested against a reference implementation — `scipy.special` 
 | `sph_harm_y` | `sph_harm_y` | as `sph_legendre_p`; $\theta$, $\phi$ broadcast at any rank | as `sph_legendre_p`; worst $7.6\times10^{-15}$ absolute for $n \le 12$ |
 | `sph_harm_y_cart` | -- | as `sph_harm_y`, from a **unit** direction of shape $(\ldots, 3)$ | as `sph_harm_y` |
 | `sph_harm_y_cart_all` | `sph_harm_y_all` (layout only) | as `sph_harm_y_cart` | as `sph_harm_y`; agrees with the per-pair function to $10^{-13}$ relative |
+| `sph_harm_y_cart_all_terms` | -- | as `sph_harm_y_cart_all` | identical values; the two differ only in their container |
 | `spence` | `spence` | real or complex $z$ | rtol $10^{-12}$, atol $10^{-13}$ vs scipy; worst $1.6 \times 10^{-14}$ real, $4.9 \times 10^{-15}$ complex |
 | `zeta` | `zeta` | all real $n$, finite where $\lvert\zeta\rvert$ fits a double | rtol $10^{-12}$; worst $6\times10^{-13}$, at large $\lvert n\rvert$ |
 
@@ -45,6 +46,8 @@ Every function is tested against a reference implementation — `scipy.special` 
 `sph_harm_y_cart`, `sph_harm_y_cart_all` : The direction is assumed **already normalized** and is not normalized internally. That is deliberate twice over: it avoids repeating a caller's own work, and it leaves the $r = 0$ policy with the caller. A **zero vector** is well defined here — $Y_0^0 = N_{00}$, and zero for every $m \ge 1$ — and remains twice differentiable, which normalizing internally would turn into `nan`. A non-unit direction is not rejected; it simply evaluates the formula, which is the harmonic scaled by a power of the norm.
 
 `sph_harm_y_cart`, `sph_harm_y_cart_all` : These exist because the **Cartesian gradient on the z-axis** is exactly `0.0` for every $m \ge 1$ term of any harmonic evaluated through $\theta$ and $\phi$ — neither angle has a directional derivative there — against a non-zero true limit. That is a property of the coordinates, not of an implementation, so SciPy and JAX share it and no upstream fix would remove it. Verified against a finite difference taken along $x$ from the pole, agreeing to $10^{-5}$ with the step size used.
+
+`sph_harm_y_cart_all_terms` : Same values, same indexing and the same layout as `sph_harm_y_cart_all`, returned as a nested tuple of arrays rather than one stacked array. **Reach for it whenever you are going to reduce over the table** — summing $\sum_{lm} c_{lm} Y_l^m$, say. Indexing a *stacked* table stops XLA folding each term into the reduction as it is produced, so the whole table is materialized: measured on a multipole expansion at $n = 12$ over a million directions, 17.7 s through the stacked form against 10 ms through these terms, for identical values. It is also the one public function here not wrapped in `jax.jit`, deliberately — a jitted function returning a pytree materializes each leaf at the call boundary, which is the fusion it exists to preserve. `jit` around it instead.
 
 `sph_harm_y_cart_all` : Shape and index layout follow `scipy.special.sph_harm_y_all`: the result is $(n+1, 2m+1, \ldots)$ and negative orders live at the *end* of the second axis, so `Y[l, -k]` reaches them by ordinary negative indexing. Entries with $\lvert j \rvert > i$ are zero, since no such harmonic exists.
 

@@ -108,6 +108,56 @@ def test_sph_harm_y_cart_all_matches_the_one_pair_function(n, m):
             )
 
 
+@pytest.mark.parametrize(("n", "m"), [(0, 0), (1, 1), (4, 2), (6, 6), (7, 0)])
+def test_terms_and_stacked_table_are_the_same_values(n, m):
+    """`sph_harm_y_cart_all_terms` and `sph_harm_y_cart_all` differ only in container.
+
+    Same values, same indexing, same layout -- ``terms[i][j]`` against
+    ``table[i, j]``, negative orders included. The container is a performance
+    decision, not a semantic one, and this is the statement of that.
+    """
+    uvec = jnp.asarray(UVEC)
+    terms = sp.sph_harm_y_cart_all_terms(n, m, uvec)
+    table = sp.sph_harm_y_cart_all(n, m, uvec)
+    assert len(terms) == n + 1
+    assert all(len(row) == 2 * m + 1 for row in terms)
+    for i in range(n + 1):
+        for j in range(-m, m + 1):
+            np.testing.assert_allclose(
+                np.asarray(terms[i][j]), np.asarray(table[i, j]), rtol=1e-13, atol=1e-15
+            )
+
+
+def test_terms_is_not_jitted_so_it_can_fuse():
+    """REGRESSION: the terms form must stay un-`jit`ted, and that is load-bearing.
+
+    A `jax.jit`-wrapped function returning a pytree materializes each leaf as
+    its own output buffer at the call boundary -- exactly the fusion this form
+    exists to preserve. Every other public function here is jitted; this one
+    must not be, and a well-meaning decorator would silently undo the whole
+    point without changing a single value.
+    """
+    assert not isinstance(sp.sph_harm_y_cart_all_terms, jax.stages.Wrapped)
+    assert not hasattr(sp.sph_harm_y_cart_all_terms, "lower")
+    # It still traces and composes: `jit` belongs around it, not on it.
+    uvec = jnp.asarray(UVEC)
+    fused = jax.jit(
+        lambda v: sum(
+            row[j].real
+            for i, row in enumerate(sp.sph_harm_y_cart_all_terms(3, 3, v))
+            for j in range(i + 1)
+        )
+    )(uvec)
+    assert np.all(np.isfinite(np.asarray(fused)))
+
+
+@pytest.mark.parametrize(("n", "m"), [(2, 3), (-1, 0)])
+def test_terms_validates_its_orders(n, m):
+    """The same eager validation as the rest of the family."""
+    with pytest.raises(ValueError, match="0 <= "):
+        sp.sph_harm_y_cart_all_terms(n, m, jnp.asarray([0.0, 0.0, 1.0]))
+
+
 # ============================================================================
 # The upstream defects
 

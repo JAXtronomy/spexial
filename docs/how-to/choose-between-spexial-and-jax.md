@@ -1,6 +1,6 @@
 # How to choose between `spexial` and `jax.scipy.special`
 
-Twelve of the seventeen functions `spexial` exports have no counterpart in JAX at any version, so for those there is nothing to decide. This page is about the other five, where both libraries have something and the right answer depends on what you need.
+Thirteen of the eighteen functions `spexial` exports have no counterpart in JAX at any version, so for those there is nothing to decide. This page is about the other five, where both libraries have something and the right answer depends on what you need.
 
 The short version: **use JAX unless one of the reasons below applies to you** — with one exception, `sph_harm_y`, where JAX's returns wrong values. Fewer dependencies is worth something, and for two of the five the only difference is a gradient you may not be taking.
 
@@ -57,6 +57,7 @@ There is no decision to make for these — JAX has nothing at any version:
 | `sph_legendre_p` | normalized associated Legendre — in `scipy.special` since 1.15, never in JAX |
 | `sph_harm_y_cart` | spherical harmonic from a **Cartesian** direction: correct gradients on the z-axis, where the $(\theta, \phi)$ form gives exactly zero |
 | `sph_harm_y_cart_all` | the whole $(l, m)$ table in one sweep, laid out as `scipy.special.sph_harm_y_all` |
+| `sph_harm_y_cart_all_terms` | the same table unstacked, so a caller's reduction over it stays fused |
 
 `scipy.special` has most of these, but it does not help inside a JAX program: with `SCIPY_ARRAY_API=1` only `gamma` differentiates, `k0`/`k1` return a value but do not, and `kn`, `comb` and `eval_gegenbauer` do not dispatch on JAX arrays at all — they silently convert to NumPy, which breaks under `jit`.
 
@@ -68,7 +69,8 @@ The table above is generated from a registry that ships with the package, and it
 >>> from spexial.registry import REGISTRY, Status
 >>> sorted(k for k, v in REGISTRY.items() if v.status is Status.UNIQUE)
 ['K0', 'K0e', 'K1', 'K1e', 'K2', 'K2e', 'Li', 'eval_gegenbauer', 'eval_gegenbauers',
- 'sph_harm_y_cart', 'sph_harm_y_cart_all', 'sph_legendre_p']
+ 'sph_harm_y_cart', 'sph_harm_y_cart_all', 'sph_harm_y_cart_all_terms',
+ 'sph_legendre_p']
 
 ```
 

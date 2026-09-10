@@ -45,6 +45,7 @@ __all__ = [
     "sph_harm_y",
     "sph_harm_y_cart",
     "sph_harm_y_cart_all",
+    "sph_harm_y_cart_all_terms",
     "sph_legendre_p",
     "zeta",
 ]
@@ -62,6 +63,7 @@ with _install_import_hook("spexial"):
         sph_harm_y,
         sph_harm_y_cart,
         sph_harm_y_cart_all,
+        sph_harm_y_cart_all_terms,
         sph_legendre_p,
     )
     from ._src.zeta import zeta

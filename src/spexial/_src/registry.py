@@ -415,6 +415,30 @@ _ROWS: Final = (
         ),
     ),
     Coverage(
+        name="sph_harm_y_cart_all_terms",
+        jax_name=None,
+        jax_since=None,
+        jax_support=Support.NONE,
+        scipy_array_api=Support.NONE,
+        status=Status.UNIQUE,
+        custom_jvp=False,
+        derivative=None,
+        cost=None,
+        notes=(
+            "`sph_harm_y_cart_all`'s values, same indexing and same layout, "
+            "returned as a nested tuple of separate arrays instead of one "
+            "stacked array. The container is the whole point: indexing a "
+            "stacked table stops XLA folding each term into a caller's "
+            "reduction as it is produced, so the table is materialized. "
+            "Measured on a multipole expansion at n = 12 over a million "
+            "directions, summing from the stacked form took 17.7 s against "
+            "10 ms from these terms. The only function here not wrapped in "
+            "`jax.jit`, deliberately: a jitted function returning a pytree "
+            "materializes each leaf at the call boundary, which is exactly the "
+            "fusion this exists to preserve."
+        ),
+    ),
+    Coverage(
         name="spence",
         jax_name="spence",
         jax_since="*",
