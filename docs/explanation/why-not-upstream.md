@@ -61,7 +61,7 @@ The part worth more than the implementation is `tests/unit/test_sph_harm.py`, wh
 
 `sph_harm_y_cart` is here for a reason no upstream change would remove.
 
-On the z-axis, $\theta$ and $\phi$ have no directional derivative. Any spherical harmonic evaluated through them therefore has a *Cartesian* gradient of exactly `0.0` there for every $m \ge 1$ term, against a non-zero true limit — not because of how the function is implemented, but because of the coordinates it is written in. SciPy has the same limitation, as does every implementation that takes angles as its arguments.
+On the z-axis, $\theta$ and $\phi$ have no directional derivative. Any spherical harmonic evaluated through them therefore has a _Cartesian_ gradient of exactly `0.0` there for every $m \ge 1$ term, against a non-zero true limit — not because of how the function is implemented, but because of the coordinates it is written in. SciPy has the same limitation, as does every implementation that takes angles as its arguments.
 
 Evaluating from a Cartesian unit direction instead,
 

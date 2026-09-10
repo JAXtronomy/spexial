@@ -41,7 +41,7 @@ In the other direction, `spence` accepts complex input, which SciPy's real path 
 
 ```pycon
 >>> theta = jnp.asarray([0.3, 1.1, 2.0])
->>> sp.sph_legendre_p(2, 1, theta).shape       # not sp.sph_legendre_p([2], [1], theta)
+>>> sp.sph_legendre_p(2, 1, theta).shape  # not sp.sph_legendre_p([2], [1], theta)
 (3,)
 
 ```
