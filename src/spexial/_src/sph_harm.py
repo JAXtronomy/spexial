@@ -430,6 +430,19 @@ def sph_harm_y_cart_all(n: int, m: int, uvec: RealArrayLike, /) -> ComplexArray:
     Layout and argument order follow `scipy.special.sph_harm_y_all`, which has
     no JAX counterpart; the difference is only that the direction is Cartesian.
 
+    .. warning::
+
+        Reach for this when you want the **table**. If instead you are about
+        to index it and reduce -- summing :math:`\\sum_{lm} c_{lm} Y_l^m`,
+        say -- call `sph_harm_y_cart` per pair and fold each term into the sum
+        as it is produced. Indexing a stacked table defeats XLA's fusion, so
+        the whole thing is materialized: measured on a multipole expansion at
+        :math:`n = 12` over a million directions, the table form ran in 17.7 s
+        against 10 ms for per-pair calls, for identical values. The saving
+        here is in *traced* operations -- roughly 2.3x less tracing and
+        compiling at :math:`n = 20` -- which is worth having only when the
+        table itself is the thing you need.
+
     Parameters
     ----------
     n
