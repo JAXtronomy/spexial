@@ -66,7 +66,7 @@ zs = jnp.array([0.25, 0.5, 1.5])
 result = jax.vmap(lambda z: sp.Li(2, z))(zs)
 ```
 
-`n` must be an integer `>= 1`, and is bounded above by gamma overflow around 170.
+`n` must be an integer `>= 1`. For `|z| >= 2` it is capped at **60** by the Bernoulli table the inversion formula needs, and the result is `nan` past that; smaller `|z|` has no ceiling at all (`Li(500, 1.5)` is exact).
 
 **`K0`/`K1`/`K2` are accurate to ~`1e-7`, not machine precision.** A 30-term ascending series meets a 10-term asymptotic expansion at `z = 9`; the worst relative error is `2.0e-7`, at `z = 8.9984` just below that cross-over. It improves in stages away from it: ~`8e-9` to `z = 15`, ~`1e-15` past `z = 30`. If you need full double precision from a modified Bessel function, this is not it.
 
@@ -80,12 +80,12 @@ result = jax.vmap(lambda z: sp.Li(2, z))(zs)
 
 Everything below assumes x64. Full detail, including how each was measured, is at <https://jaxtronomy.github.io/spexial/reference/accuracy-and-domains/>.
 
-| Function          | Domain                                  | Accurate to  |
-| ----------------- | --------------------------------------- | ------------ |
-| `comb`            | `0 <= k <= N`, to `DBL_MAX`             | `1.2e-12`    |
-| `gamma`           | real or complex, `\|x\| < 171`          | `4e-13`      |
-| `eval_gegenbauer` | `n <= 20`, `alpha > -0.5`, `\|x\| <= 1` | `2e-12` atol |
-| `K0`/`K1`/`K2`    | `0 < z < 705.5`                         | `2.0e-7`     |
-| `K0e`/`K1e`/`K2e` | `z > 0`, no upper limit                 | `2.0e-7`     |
-| `Li`              | scalar `z`, `n >= 1`                    | `6e-13`      |
-| `zeta`            | `n > 1`, or negative integer `> -60`    | `7e-16`      |
+| Function | Domain | Accurate to |
+| --- | --- | --- |
+| `comb` | `0 <= k <= N`, to `DBL_MAX` | `2.6e-12` |
+| `gamma` | real or complex, `\|x\| < 171` | `4e-13` |
+| `eval_gegenbauer` | `n <= 20`, `alpha > -0.5`, `\|x\| <= 1` | `2.1e-13` rtol; absolute error scales with the recurrence, up to `9e-5` at `n = 20, alpha = 10` |
+| `K0`/`K1`/`K2` | `0 < z < 705.5` | `2.0e-7` |
+| `K0e`/`K1e`/`K2e` | `z > 0`, no upper limit | `2.0e-7` |
+| `Li` | scalar `z`, `n >= 1` | `6e-13` |
+| `zeta` | `n > 1`, or negative integer `> -60` | `7e-16` |
