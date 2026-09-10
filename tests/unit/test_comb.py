@@ -283,3 +283,72 @@ def test_reverse_and_forward_gradients_agree_at_large_n(exponent, k):
     forward = float(jax.jacfwd(sp.comb, 0)(n, kk))
     assert jnp.isfinite(reverse)
     np.testing.assert_allclose(reverse, forward, rtol=1e-12)
+
+
+@pytest.mark.parametrize("wrap", [lambda f: f, jax.jit], ids=["eager", "jit"])
+@pytest.mark.parametrize(
+    ("k", "expected"),
+    [(0.0, 1.0), (-0.0, 1.0), (5e-324, 1.0), (1e-320, 1.0), (1.0, np.inf)],
+)
+def test_infinite_n_agrees_between_modes(wrap, k, expected):
+    """REGRESSION: the ``k = 0`` limit at ``N = inf`` must not depend on `jit`.
+
+    `dtype.exactly_zero` read the bits so that a subnormal ``k`` would not be
+    mistaken for zero, and got ``inf`` -- eagerly. Under `jit` the operand
+    reaching the bitcast has already been flushed, so the same call returned
+    ``1.0``: one value disagreeing with itself between the two modes. The
+    flushed comparison gives the whole subnormal band the ``k = 0`` answer,
+    which is a documented floor rather than the limit, but it is one answer.
+    """
+    got = wrap(sp.comb)(jnp.asarray(jnp.inf), jnp.asarray(k))
+    assert float(got) == expected
+
+
+@pytest.mark.parametrize("n", [11.0, 100.0, 1000.0])
+def test_derivative_at_k_zero_float32(n):
+    """REGRESSION: the asymptotic branch was taken at ``k = 0`` for every ``N``.
+
+    Its dropped correction is ``small (small - 1) / (2 big)``, which vanishes
+    identically at ``k = 0`` (where ``small`` is 1) but whose *derivative* is
+    ``1 / (2 (N + 1))``. Testing the value alone therefore let the branch fire
+    across the whole float32 Beta range and left ``jax.grad`` low by exactly
+    that -- 1.4e-2 relative at ``N = 11``, in the most ordinary call there is.
+    """
+    mp.mp.dps = 60
+    got = float(jax.grad(lambda k: sp.comb(jnp.float32(n), k))(jnp.float32(0.0)))
+    expect = float(
+        mp.binomial(mp.mpf(n), 0) * (mp.digamma(mp.mpf(n) + 1) - mp.digamma(1))
+    )
+    assert got == pytest.approx(expect, rel=1e-6)
+
+
+@pytest.mark.parametrize("n", [1001.0, 1e4, 1e6, 1e16, 1e100, 1e300])
+def test_derivative_at_the_ends_of_the_k_range(n):
+    """The same defect in float64, at both ``k = 0`` and ``k = N``."""
+    mp.mp.dps = 300
+    expect = float(
+        mp.binomial(mp.mpf(n), 0) * (mp.digamma(mp.mpf(n) + 1) - mp.digamma(1))
+    )
+    at_zero = float(jax.grad(lambda k: sp.comb(jnp.float64(n), k))(jnp.float64(0.0)))
+    at_n = float(jax.grad(lambda m: sp.comb(m, jnp.float64(n)))(jnp.float64(n)))
+    assert at_zero == pytest.approx(expect, rel=1e-13)
+    assert at_n == pytest.approx(expect, rel=1e-13)
+
+
+def test_derivative_is_continuous_across_the_asymptotic_join():
+    """No step in ``d comb / dk`` where the asymptotic branch takes over.
+
+    The old predicate put the join at ``k = 2 big eps``, and the derivative
+    jumped by 6.7e-5 relative across it -- a reachable interval in float32.
+    """
+    mp.mp.dps = 60
+    for k in (1e-5, 1e-4, 2.0e-4, 2.4e-4, 1e-3):
+        got = float(
+            jax.grad(lambda kk: sp.comb(jnp.float32(1000.0), kk))(jnp.float32(k))
+        )
+        kk = mp.mpf(float(np.float32(k)))
+        expect = float(
+            mp.binomial(mp.mpf(1000), kk)
+            * (mp.digamma(mp.mpf(1000) - kk + 1) - mp.digamma(kk + 1))
+        )
+        assert got == pytest.approx(expect, rel=1e-5)

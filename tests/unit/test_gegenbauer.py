@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import mpmath as mp
 import numpy as np
 import pytest
+from jaxtyping import TypeCheckError
 from scipy.special import eval_gegenbauer as scipy_eval_gegenbauer
 
 import spexial as sp
@@ -285,3 +286,42 @@ def test_nan_alpha_propagates_at_infinity(n):
     assert jnp.isnan(sp.eval_gegenbauer(n, np.nan, np.inf))
     assert jnp.isnan(sp.eval_gegenbauer(n, np.nan, -np.inf))
     assert jnp.isnan(sp.eval_gegenbauers(n, np.nan, np.inf)[n])
+
+
+@pytest.mark.parametrize("n", [0, 1, 2, 3])
+@pytest.mark.parametrize("which", ["alpha", "x"])
+def test_eval_gegenbauers_rejects_array_arguments(n, which):
+    """REGRESSION: ``n <= 1`` concatenated an array argument instead of raising.
+
+    The documented return shape is ``(n + 1,)``. The early returns for orders 0
+    and 1 skip the recurrence entirely, so ``hstack`` glued a ``(3,)`` `alpha`
+    on to `C0` and gave a length-4 answer, while ``n >= 2`` died inside `scan`
+    with a message naming neither argument. One rule now, at every order.
+    """
+    array = jnp.asarray([1.0, 2.0, 3.0])
+    args = (array, 0.5) if which == "alpha" else (1.0, array)
+    # Two mechanisms, and which one fires depends on the environment: the
+    # test suite sets `SPEXIAL_ENABLE_RUNTIME_TYPECHECKING`, so jaxtyping
+    # rejects the array against `ScalarLike` before the function's own guard
+    # is reached. Users run without the hook and get the `ValueError`.
+    with pytest.raises((ValueError, TypeCheckError)):
+        sp.eval_gegenbauers(n, *args)
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 4])
+@pytest.mark.parametrize("x", [np.inf, -np.inf])
+def test_subnormal_alpha_at_infinity_is_the_documented_floor(n, x):
+    """A subnormal ``alpha`` gets the ``alpha = 0`` limit, in both entry points.
+
+    The true limit is ``sign(alpha) * inf``, and reading the sign off the bits
+    recovers it -- eagerly. Both entry points are unconditionally `jax.jit`,
+    and inside that fused kernel the operand has already been flushed, so the
+    bit test reached the same 0 by a longer route. Pinned so the documented
+    floor cannot drift without a test noticing.
+    """
+    assert float(sp.eval_gegenbauer(n, 5e-324, jnp.asarray(x))) == 0.0
+    assert float(sp.eval_gegenbauers(n, 5e-324, jnp.asarray(x))[n]) == 0.0
+    # An ordinary `alpha` still gets its infinity, and its sign.
+    assert float(sp.eval_gegenbauer(n, 1.0, jnp.asarray(x))) == (
+        np.inf if x > 0 else (-1.0) ** n * np.inf
+    )

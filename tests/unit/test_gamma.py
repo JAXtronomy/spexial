@@ -266,3 +266,28 @@ def test_float16_subnormals_use_the_more_accurate_branch():
     upstream = [float(jss.gamma(v)) for v in xs]
     for g, u, e in zip(got, upstream, expected, strict=True):
         assert abs(g - e) <= abs(u - e)
+
+
+def test_float16_subnormals_use_the_reciprocal_branch():
+    """The substitution is applied to float16 subnormals, and is the better answer.
+
+    An earlier revision gated it on upstream returning a non-finite value, on a
+    measurement that had been read backwards. Over the 767 float16 subnormals
+    where `jax.scipy.special.gamma` is finite, this branch is closer to the
+    truth at 690 of them and worse at 5, with a worst case of 4.9e-4 against
+    upstream's 4.2e-3.
+    """
+    mp.mp.dps = 40
+    subnormals = np.arange(1, 1024, dtype=np.uint16).view(np.float16)
+    ours = np.asarray(sp.gamma(jnp.asarray(subnormals)), dtype=np.float64)
+    upstream = np.asarray(
+        jax.scipy.special.gamma(jnp.asarray(subnormals)), dtype=np.float64
+    )
+    assert (ours != upstream).any(), "the substitution is no longer applied"
+
+    finite = np.isfinite(upstream)
+    true = np.array([float(mp.gamma(mp.mpf(float(b)))) for b in subnormals])
+    ours_error = np.abs(ours[finite] - true[finite]) / np.abs(true[finite])
+    upstream_error = np.abs(upstream[finite] - true[finite]) / np.abs(true[finite])
+    assert (ours_error < upstream_error).sum() > 600
+    assert ours_error.max() < upstream_error.max()

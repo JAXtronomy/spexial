@@ -182,6 +182,25 @@ def spence(z: AnyArrayLike, /) -> AnyArray:
         # SciPy returns `nan`; the sign has to be read off the bits, since
         # `z < 0` is False for exactly these values.
         out = _jax_spence(promoted)
+        # Upstream's first move for `x > 2` is `x -> 1/x`, and XLA flushes that
+        # reciprocal as soon as it is subnormal. From `z = 1/tiny` up it is
+        # exactly zero, the `x < 0.5` branch is taken instead of the reflected
+        # one, and `log(0) * 0` makes the answer `nan` -- across the top two
+        # binades of every width, where SciPy is finite and this module's own
+        # complex path returns the right number.
+        #
+        # There the asymptotic form is not an approximation. With `w = 1 - z`,
+        # `spence(z) = Li_2(w)` and the inversion `Li_2(w) = -pi**2/6 -
+        # log(-w)**2/2 - Li_2(1/w)` leaves a correction of order `1/z`, which
+        # below `tiny` is 1e-313 of the value -- 300 orders under an eps. It
+        # agrees with SciPy to the last bit at `1/tiny`, `1e308` and `DBL_MAX`.
+        #
+        # `isfinite`, so that `z = inf` keeps the `nan` SciPy gives it rather
+        # than the `-inf` the limit would suggest.
+        huge = jnp.isfinite(promoted) & (
+            promoted >= 1.0 / jnp.finfo(promoted.dtype).tiny
+        )
+        out = jnp.where(huge, -(np.pi**2) / 6 - jnp.log(promoted) ** 2 / 2, out)
         return cast_like(jnp.where(is_negative(promoted), jnp.nan, out), z)
     return jax.lax.select(
         abs(z) < 0.5,
@@ -229,29 +248,30 @@ def _spence_gradient(z: AnyArrayLike) -> AnyArray:
     j = jnp.arange(_GRADIENT_TERMS, dtype=_real_dtype(jnp.asarray(z)))
     series = jnp.polyval(((-1.0) ** (j + 1) / (j + 1))[::-1], u)
     z_safe = jnp.where(near_one, 2.0, z)
-    # `log_no_flush` on the real path, because XLA flushes a subnormal argument
-    # and `jnp.log` then reports `-inf` for the whole band below `tiny`, where
-    # the true derivative is an ordinary number -- -713.8 at `z = 1e-310`.
+    # `log_no_flush`, because XLA flushes a subnormal argument and `jnp.log`
+    # then reports `-inf` for the whole band below `tiny`, where the true
+    # derivative is an ordinary number -- -713.8 at `z = 1e-310`. It now covers
+    # complex input too, so there is no dtype test here any more: routing
+    # complex to a plain `jnp.log` to keep the bitcast away from it left the
+    # complex derivative `nan` across that same band, which in complex64 starts
+    # at 1.18e-38.
     #
-    # Not on the complex path: it reads the mantissa with
-    # `lax.bitcast_convert_type`, which is undefined for a complex dtype and
-    # raises. Guarding the *pole* with `exactly_zero` did the same, and between
-    # them they took out every complex derivative -- the branch this module
-    # exists to provide. The dtype test is static, so it costs nothing.
-    #
-    # No pole guard is needed either way. `log_no_flush(0)` is already `-inf`,
-    # so the quotient gives the pole its own answer; a subnormal gets its true
-    # logarithm; and a negative argument gets `nan`. A `where` on top of that
-    # bought nothing and did not survive XLA's fusion -- `exactly_zero` is
-    # correct in isolation and collapses when a select is its only consumer,
-    # which is how `jit(grad(spence))` came to be `-inf` across the band while
-    # eager was right.
-    logarithm = (
-        jnp.log(z_safe)
-        if jnp.issubdtype(jnp.asarray(z).dtype, jnp.complexfloating)
-        else log_no_flush(z_safe)
-    )
-    closed = logarithm / (1 - z_safe)
+    # No pole guard. `log_no_flush(0)` is already `-inf`, so the quotient gives
+    # the pole its own answer; a subnormal gets its true logarithm; and a
+    # negative argument gets `nan`. A `where` on top of that bought nothing and
+    # did not survive XLA's fusion -- `exactly_zero` is correct in isolation and
+    # collapses when a select is its only consumer, which is how
+    # `jit(grad(spence))` came to be `-inf` across the band while eager was
+    # right.
+    logarithm = log_no_flush(z_safe)
+    # Below `tiny` the denominator is exactly 1, so dividing by it is a no-op --
+    # except in complex arithmetic, where `(-inf + 0j) / (1 + 0j)` forms
+    # `-inf * 0` in the imaginary part and hands back `nan`. Skipping the
+    # division changes no value and removes that, at the pole and across the
+    # band alike. The comparison is the flushed one, which is exactly the set
+    # where `1 - z == 1`.
+    negligible = jnp.abs(z_safe) < jnp.finfo(_real_dtype(jnp.asarray(z))).tiny
+    closed = jnp.where(negligible, logarithm, logarithm / (1 - z_safe))
     # `z = 0` is a pole and the limit is `-inf`, which the real path gets for
     # free from `log(0) / 1`. The *complex* path does not: `(-inf + 0j)` divided
     # by `(1 + 0j)` leaves `0 - (-inf * 0)` in the imaginary part, i.e. `nan`,
@@ -307,7 +327,13 @@ def _spence_gradient_jvp(
     complex_input = jnp.issubdtype(jnp.asarray(z).dtype, jnp.complexfloating)
     z_safe = jnp.where(near_one | at_zero, 2.0, z)
     logarithm = jnp.log(z_safe) if complex_input else log_no_flush(z_safe)
-    closed = 1.0 / (z_safe * (1 - z_safe)) + logarithm / (1 - z_safe) ** 2
+    # `(1/z) / (1-z)`, not `1 / (z*(1-z))`. The same number, and not the same
+    # derivative: differentiating the fused form squares `z(1-z)`, which
+    # underflows below `z = 1.5e-154` and made the *third* derivative `nan` --
+    # where `spence'''(z) ~ -1/z**2` has genuinely overflowed and `-inf` is the
+    # right answer. Splitting the reciprocal never forms that square, so the
+    # overflow arrives as an infinity instead of as a `nan`.
+    closed = (1.0 / z_safe) / (1 - z_safe) + logarithm / (1 - z_safe) ** 2
     # `z = 0` is a genuine pole, not a removable point: every order diverges,
     # so a constant is the only answer available and orders past this one are
     # 0 there. `z = 1` needs no such guard any more.

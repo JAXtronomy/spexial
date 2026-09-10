@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 
 from .custom_types import AnyArray, AnyArrayLike, ScalarLike, Vector
-from .dtype import exactly_zero, is_negative, promote_integers
+from .dtype import is_negative, promote_integers
 
 _Carry: TypeAlias = tuple[AnyArray, AnyArray, AnyArray, AnyArray]
 
@@ -153,17 +153,25 @@ def _at_infinity(n: int, alpha: AnyArray, x: AnyArray, value: AnyArray) -> AnyAr
     """
     if n == 0:
         return value
-    # The sign of `alpha` from its bits, not from `jnp.sign`: XLA reports 0 for
-    # a subnormal, so `eval_gegenbauer(1, 5e-324, inf)` took the `sign == 0`
-    # branch and returned 0 where the limit is `+inf`.
-    # `nan` first: a `nan` alpha has `bits > 0`, so the bit tests below would
+    # `nan` first: a `nan` alpha has `bits > 0`, so the bit test below would
     # read it as positive and hand back a definite `+inf` for an argument whose
     # limit does not exist. `jnp.sign` propagated `nan` for free; replacing it
     # with bit tests dropped that, and this puts it back explicitly.
+    #
+    # `alpha == 0.0` is the *flushed* comparison, so a subnormal `alpha` takes
+    # the `sign == 0` branch and this returns 0 where the true limit is
+    # `sign(alpha) * inf`. That is a documented floor, not an oversight:
+    # `exactly_zero` reads the bits and is right eagerly, but both entry points
+    # are unconditionally `jax.jit`, and inside that fused kernel the operand
+    # has already been flushed -- so the bit test cost a helper call to arrive
+    # at the same 0 by a longer route, while claiming in a comment to have
+    # fixed the case. `is_negative` is kept because a flushed negative keeps its
+    # sign bit, so it alone still separates the two signs of an ordinary
+    # argument without a second comparison.
     alpha_sign = jnp.where(
         jnp.isnan(alpha),
         jnp.nan,
-        jnp.where(exactly_zero(alpha), 0.0, jnp.where(is_negative(alpha), -1.0, 1.0)),
+        jnp.where(alpha == 0.0, 0.0, jnp.where(is_negative(alpha), -1.0, 1.0)),
     )
     sign = alpha_sign * jnp.where(x > 0, 1.0, (-1.0) ** n)
     limit = jnp.where(sign == 0, 0.0, sign * jnp.inf)
@@ -250,13 +258,32 @@ def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
 
     """
     alpha, x = _unify_dtypes(alpha, x)
+    # Scalar-only, and it has to say so. The recurrence stacks one value per
+    # order, so an array argument has nowhere to put its own axis: from `n = 2`
+    # it died inside `scan` with a message naming neither argument, and at
+    # `n <= 1` the early returns skip that machinery entirely and `hstack`
+    # silently *concatenated* -- a `(3,)` alpha gave a length-4 answer where the
+    # documented shape is `(2,)`. `jnp.ndim` reads the logical rank, so
+    # `jax.vmap` over either argument still works.
+    if jnp.ndim(alpha) or jnp.ndim(x):
+        msg = (
+            "eval_gegenbauers takes scalar `alpha` and `x`; "
+            "map over many points with jax.vmap"
+        )
+        raise ValueError(msg)
     C0_val = C0(x)
     if n == 0:
         return jnp.atleast_1d(C0_val)
 
     C1_val = C1(alpha, x)
     if n == 1:
-        return jnp.hstack([C0_val, C1_val])
+        # Through `_at_infinity`, exactly as the `n >= 2` path below sends every
+        # order. `C_1 = 2 a x` is `0 * inf == nan` for an `alpha` of zero -- or
+        # one XLA has flushed -- so skipping the substitution here left
+        # `eval_gegenbauers(1, 5e-324, inf)` returning `nan` where the singular
+        # `eval_gegenbauer(1, 5e-324, inf)` returns 0: the two entry points
+        # disagreeing at the same argument, and only at `n = 1`.
+        return jnp.stack([C0_val, _at_infinity(1, alpha, x, C1_val)])
 
     carry = (alpha, x, C1_val, C0_val)
     n_values = jnp.arange(1, n)  # starts at 1: 0 is already initialized above

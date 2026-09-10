@@ -680,3 +680,57 @@ def test_negative_subnormal_is_out_of_domain_jitted(wrap, func):
     Under `jit` the fused bit test read it as the pole and returned `inf`.
     """
     assert jnp.isnan(wrap(func)(jnp.asarray(-1.112537e-308)))
+
+
+@pytest.mark.parametrize("f", [sp.K0, sp.K1, sp.K2, sp.K0e, sp.K1e, sp.K2e])
+@pytest.mark.parametrize("sign", [1.0, -1.0], ids=["nan", "-nan"])
+def test_derivative_of_nan_is_nan(f, sign):
+    """REGRESSION: the pole guard fired on a `nan` argument.
+
+    `_at_pole` keyed on the derivative being non-finite and on ``z`` not being
+    negative. A `nan` makes the derivative `nan` too and has an unset sign bit,
+    so the scaled family handed back ``-inf`` for the first derivative and
+    ``+inf`` for the second -- a definite answer for an argument whose *value*
+    is `nan`, and one that flipped to `nan` for ``-nan``, i.e. turned on a bit
+    that carries no meaning. `scipy.special.kve(0, nan)` is `nan`.
+    """
+    argument = jnp.asarray(sign * np.nan)
+    assert np.isnan(float(f(argument)))
+    assert np.isnan(float(jax.grad(f)(argument)))
+    assert np.isnan(float(jax.grad(jax.grad(f))(argument)))
+
+
+@pytest.mark.parametrize("z", [1e-154, 1e-120, 1e-104, 0.0])
+def test_second_derivative_at_the_pole_agrees_between_modes(z):
+    """REGRESSION: ``jit(grad(grad(K2e)))`` was ``-inf`` where eager was `nan`.
+
+    Both stand for the same ``inf - inf``, and which one it comes out as is a
+    property of the graph, not of the arithmetic: XLA reassociates the sum under
+    `jit`. Keying the guard on `isnan` therefore missed it in exactly the mode
+    users run, and returned the pole's infinity with the sign flipped --
+    ``(e^z K_2)'' ~ 12/z**4`` is ``+inf``.
+    """
+    second = jax.grad(jax.grad(sp.K2e))
+    argument = jnp.asarray(z)
+    assert float(second(argument)) == np.inf
+    assert float(jax.jit(second)(argument)) == np.inf
+    assert float(jax.jit(jax.vmap(second))(jnp.asarray([z]))[0]) == np.inf
+
+
+@pytest.mark.parametrize(
+    ("dtype", "ceilings"),
+    [
+        (jnp.float64, (705.34, 705.34, 705.35)),
+        (jnp.float32, (85.34, 85.34, 85.36)),
+        (jnp.float16, (16.15, 16.18, 16.27)),
+    ],
+    ids=["float64", "float32", "float16"],
+)
+def test_underflow_ceiling_per_dtype(dtype, ceilings):
+    """Where each unscaled `K` reaches zero, which is a property of the *dtype*.
+
+    The docstrings quoted float64's 705 for every width; float16 dies at 16.
+    """
+    for f, ceiling in zip((sp.K0, sp.K1, sp.K2), ceilings, strict=True):
+        assert float(f(jnp.asarray(ceiling * 0.99, dtype=dtype))) > 0.0
+        assert float(f(jnp.asarray(ceiling * 1.01, dtype=dtype))) == 0.0

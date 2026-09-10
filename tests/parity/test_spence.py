@@ -330,3 +330,73 @@ def test_gradient_is_the_same_jitted(wrap, z):
     np.testing.assert_allclose(
         float(wrap(jax.grad(spence))(jnp.asarray(z))), expected, rtol=1e-14
     )
+
+
+@pytest.mark.parametrize("z", [1e30, 8.6e37, 1e300, 1e308, np.finfo(np.float64).max])
+def test_matches_scipy_at_the_top_of_the_range(z):
+    """REGRESSION: `spence` was `nan` over the top two binades of every width.
+
+    `jax.scipy.special.spence` opens with ``x -> 1/x`` for ``x > 2``, and XLA
+    flushes that reciprocal once it is subnormal: from ``z = 1/tiny`` up it is
+    exactly zero, the wrong branch is taken, and ``log(0) * 0`` gives `nan`
+    where SciPy is finite -- and where this module's own complex path returns
+    the right number. `9e37` is inside float32's range, so the default
+    configuration reaches it.
+    """
+    got = float(spence(jnp.asarray(z)))
+    assert np.isfinite(got)
+    assert got == pytest.approx(float(scipy_spence(z)), rel=1e-14)
+
+
+def test_real_and_complex_agree_at_the_top_of_the_range():
+    """The two paths must not disagree at an argument both can take."""
+    z = 1e300
+    real = float(spence(jnp.asarray(z)))
+    complexified = complex(spence(jnp.asarray(complex(z), dtype=jnp.complex128)))
+    assert complexified.real == pytest.approx(real, rel=1e-13)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "zs"),
+    [
+        (jnp.complex128, [5e-324, 1e-320, 1e-310]),
+        (jnp.complex64, [1e-45, 1e-40, 1e-39]),
+    ],
+    ids=["complex128", "complex64"],
+)
+def test_complex_derivative_across_the_subnormal_band(dtype, zs):
+    """REGRESSION: the complex derivative was `nan` wherever the real one is exact.
+
+    `log_no_flush` was kept off the complex path because
+    `lax.bitcast_convert_type` is undefined for a complex dtype -- so `jnp.log`
+    saw a flushed operand, returned ``-inf``, and the quotient gave
+    ``nan + nanj``. In complex64 that band starts at 1.18e-38, an entirely
+    ordinary magnitude. It now goes through the components, which keep their
+    bits.
+    """
+    tangent = jnp.asarray(1 + 0j, dtype=dtype)
+    real_dtype = jnp.zeros((), dtype).real.dtype
+    for z in zs:
+        got = complex(
+            jax.jvp(spence, (jnp.asarray(complex(z), dtype=dtype),), (tangent,))[1]
+        )
+        assert np.isfinite(got.real)
+        # The value the dtype actually holds, not the decimal literal.
+        held = float(jnp.asarray(z, dtype=real_dtype))
+        expect = float(jax.grad(spence)(jnp.asarray(held, dtype=real_dtype)))
+        assert got.real == pytest.approx(expect, rel=1e-6)
+
+
+@pytest.mark.parametrize("z", [1e-154, 1e-200, 1e-250])
+def test_third_derivative_overflows_rather_than_nan(z):
+    """REGRESSION: ``grad**3`` was `nan` below ``z = 1.5e-154``.
+
+    ``spence'''(z) ~ -1/z**2``, which has genuinely overflowed there, so
+    ``-inf`` is the answer. The fused ``1 / (z (1 - z))`` squares its
+    denominator when differentiated and underflowed to a `nan` instead;
+    splitting the reciprocal never forms that square.
+    """
+    third = jax.grad(jax.grad(jax.grad(spence)))
+    got = float(third(jnp.asarray(z)))
+    assert got == -np.inf
+    assert float(jax.jit(third)(jnp.asarray(z))) == got

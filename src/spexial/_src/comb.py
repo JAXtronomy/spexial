@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from jax.scipy.special import betaln, gammaln
 
 from .custom_types import AnyArray, AnyArrayLike
-from .dtype import as_float, cast_like, exactly_zero, is_negative
+from .dtype import as_float, cast_like, is_negative
 
 _BETA_FROM: Final = 1000.0
 """Above this ``N``, the Beta form replaces the log-gamma difference, in float64.
@@ -167,8 +167,19 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # `betaln` in it, so it differentiates cleanly, and it now covers the whole
     # band where that defect lives.
     eps = jnp.finfo(compute_dtype).eps
+    # `small * (small + 1)`, and the `+ 1` is the whole point. The dropped
+    # correction is `small * (small - 1) / (2 * big)`, whose *derivative* is
+    # `(2 * small - 1) / (2 * big)` -- and at `k = 0` (or `k = N`) `small` is
+    # exactly 1, where the correction vanishes identically but its derivative
+    # does not. Testing the value alone therefore fired this branch for **every**
+    # `N` past the cross-over at both ends of the `k` range, and left
+    # `jax.grad(comb)` low by exactly `1 / (2(N + 1))`: 6.7e-5 relative at
+    # `N = 1001` in float64 and 1.4e-2 at `N = 11` in float32, in the most
+    # ordinary call there is. `small * (small + 1)` dominates both the
+    # correction and its derivative for every `small >= 1`, so one comparison
+    # keeps the branch to where it is exact in value *and* slope.
     flushed = (small < big * jnp.finfo(compute_dtype).tiny) | (
-        small * (small - 1) < 2 * big * eps
+        small * (small + 1) < 2 * big * eps
     )
     neg_log_beta = jnp.where(
         flushed, small * jnp.log(big) - gammaln(small), -betaln(left, right)
@@ -181,8 +192,18 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # plainly +inf and scipy returns that -- except at k = 0, where C(N, 0) = 1
     # for every N including infinity, as scipy also returns.
     # C(inf, inf) is indeterminate, and `nan` is what scipy returns for it.
+    #
+    # `k_arr == 0.0` is the *flushed* comparison, and so also claims every
+    # subnormal `k`, whose true limit is `inf`. That is a ceiling, deliberately
+    # taken: `exactly_zero` gets it right eagerly and collapses under `jit`,
+    # where the operand reaching the bitcast has already been flushed, so the
+    # bit-level test read `inf` eagerly and `1.0` jitted -- the same value
+    # disagreeing with itself between the two modes. No bit test can do better
+    # here, because flushing destroys the very distinction it wants to draw;
+    # the sibling `is_negative` guard survives only because a flushed negative
+    # keeps its sign bit as `-0.0`. One documented answer beats two.
     at_infinity = jnp.where(
-        exactly_zero(k_arr), 1.0, jnp.where(jnp.isinf(k_arr), jnp.nan, jnp.inf)
+        k_arr == 0.0, 1.0, jnp.where(jnp.isinf(k_arr), jnp.nan, jnp.inf)
     )
     # Narrowed to what `N` and `k` promote to, not to `N`. `comb` is the only
     # two-argument entry point here, and casting to `N` alone returned float32

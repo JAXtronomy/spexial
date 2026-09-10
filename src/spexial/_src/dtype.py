@@ -140,6 +140,61 @@ def is_negative(z: AnyArray) -> AnyArray:
     return (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
 
 
+def ldexp_no_flush(z: AnyArray, exponent: int, /) -> AnyArray:
+    """``z * 2**exponent``, including where XLA has flushed a subnormal ``z``.
+
+    `jax.numpy.ldexp` is no use here for the same reason `jnp.frexp` is no use
+    to `log_no_flush`: it does arithmetic on the flushed operand. The bits are
+    still there, though, and a subnormal is exactly
+    ``mantissa * 2**(minexp - nmant)``, so the scaled value is a plain product
+    of two perfectly normal numbers.
+
+    Only for lifting a subnormal *up*: a normal ``z`` takes the ordinary
+    multiply and will overflow if ``exponent`` is large enough to send it past
+    the dtype's maximum.
+    """
+    info = jnp.finfo(z.dtype)
+    bits = lax.bitcast_convert_type(z, INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
+    mantissa = jnp.bitwise_and(bits, (1 << info.nmant) - 1).astype(z.dtype)
+    sign = jnp.where(bits < 0, -1.0, 1.0)
+    from_bits = sign * mantissa * float(2.0 ** (info.minexp - info.nmant + exponent))
+    # The flushed comparison, deliberately: it is True for every subnormal and
+    # also for zero, whose zero mantissa sends `from_bits` to zero as well --
+    # the same answer by either route, so the two need not be told apart.
+    return jnp.where(jnp.abs(z) < info.tiny, from_bits, z * float(2.0**exponent))
+
+
+def _log_complex_no_flush(z: AnyArray, /) -> AnyArray:
+    """`log_no_flush` for a complex argument, which cannot be bitcast whole.
+
+    `lax.bitcast_convert_type` is undefined for a complex dtype, but
+    `jax.numpy.real` and `jax.numpy.imag` hand back ordinary floats *with the
+    subnormal bits intact* -- in both modes, which is the part that matters --
+    so the components can be lifted out of the band one at a time and the
+    logarithm taken of the scaled number.
+
+    Only when the whole number is inside the band. A complex with one normal
+    component is already fine: the subnormal one is 292 decades below it and
+    contributes nothing to either the modulus or the argument at this precision.
+    """
+    real, imaginary = jnp.real(z), jnp.imag(z)
+    info = jnp.finfo(real.dtype)
+    # Twice the mantissa width lands every subnormal in the normal range with
+    # room to spare, and is itself an exactly representable power of two.
+    exponent = 2 * info.nmant
+    band = (jnp.abs(real) < info.tiny) & (jnp.abs(imaginary) < info.tiny)
+    scaled = lax.complex(
+        ldexp_no_flush(real, exponent), ldexp_no_flush(imaginary, exponent)
+    )
+    # Both branches evaluate, and each would poison the other: the scaled form
+    # overflows for an ordinary argument, and the plain one is `-inf` for a
+    # subnormal. Mask the operand on each side, not just the result.
+    one = jnp.ones((), z.dtype)
+    from_bits = jnp.log(jnp.where(band, scaled, one)) - exponent * _LN2
+    plain = jnp.log(jnp.where(band, one, z))
+    return jnp.where(band, from_bits, plain)
+
+
 def log_no_flush(z: AnyArray, /, *, dtype: Any = None) -> AnyArray:
     """``log(z)``, including where ``z`` is subnormal and XLA has flushed it.
 
@@ -157,7 +212,15 @@ def log_no_flush(z: AnyArray, /, *, dtype: Any = None) -> AnyArray:
     Note this is distinct from the `_LN2` subtraction in `_K0_small`, which
     stops a *normal* ``z`` being halved into the subnormal range. That fix does
     nothing when the argument arrives subnormal already.
+
+    Complex input goes to `_log_complex_no_flush`, which takes the two
+    components apart rather than bitcasting the pair. Callers therefore need no
+    dtype test of their own; `spence` carried one at two sites, and it was the
+    reason its *complex* derivative stayed `nan` across the whole band -- an
+    ordinary magnitude in complex64 -- after the real one had been fixed.
     """
+    if jnp.issubdtype(z.dtype, jnp.complexfloating):
+        return _log_complex_no_flush(z)
     info = jnp.finfo(z.dtype)
     bits = lax.bitcast_convert_type(z, INT_OF_WIDTH[jnp.dtype(z.dtype).itemsize])
     # The bits must be read at the argument's own width, but the arithmetic on

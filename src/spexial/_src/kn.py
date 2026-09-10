@@ -508,8 +508,19 @@ def _at_pole(z: AnyArray, deriv: AnyArray, limit: float = -jnp.inf) -> AnyArray:
     overflow to `inf` and `K2e - K1e - (2/z) K2e` becomes `inf - inf` -- a
     guard on ``z == 0`` alone left `grad(K2e)` returning `nan` there while
     `grad(K2)` and `grad(K1e)` both returned the true limit. Keyed on the
-    result being `nan` rather than on a magnitude threshold, so it cannot go
-    stale. Negative `z` keeps its `nan`: that is outside the domain, not a pole.
+    result not being *finite* rather than on a magnitude threshold, so it
+    cannot go stale. Negative `z` keeps its `nan`: that is outside the domain,
+    not a pole, and so does a `nan` argument.
+
+    Not-finite rather than `nan`, because which of the two an ``inf - inf``
+    comes out as is a property of the graph and not of the arithmetic: XLA
+    reassociates the sum under `jit`, so ``jit(grad(grad(K2e)))`` was `-inf`
+    across ``3.2e-154 <~ z <~ 5.6e-103`` where eager was `nan` and the true
+    limit is ``+inf`` -- the same value disagreeing with itself between the two
+    modes, and with the sign flipped in the mode users actually run. Every
+    ``e^z K_n`` decreases on ``z > 0``, so the only non-finite derivative
+    available on the domain is the pole's own, and substituting it is a no-op
+    wherever the closed form already found it.
 
     First derivatives tend to `-inf` there and second derivatives to `+inf`, the
     `1/z^2` term dominating, so the three second-derivative rules pass
@@ -520,7 +531,13 @@ def _at_pole(z: AnyArray, deriv: AnyArray, limit: float = -jnp.inf) -> AnyArray:
     # pole limit -- the scaled gradients returned `-inf` for an argument whose
     # value is `nan`. This function's own docstring says negative `z` keeps its
     # `nan`, and that is exactly what failed.
-    return jnp.where(~is_negative(z) & jnp.isnan(deriv), limit, deriv)
+    # `~jnp.isnan(z)`, because a `nan` argument makes `deriv` `nan` too and so
+    # walked straight into the pole substitution: `grad(K0e)(nan)` was `-inf`
+    # and the second derivative `+inf`, for an argument whose *value* is `nan`
+    # and which SciPy's `kve` also calls `nan`. Worse, `-nan` came back `nan`,
+    # so the answer turned on a sign bit that carries no meaning.
+    at_pole = ~is_negative(z) & ~jnp.isnan(z) & ~jnp.isfinite(deriv)
+    return jnp.where(at_pole, limit, deriv)
 
 
 @jax.custom_jvp
