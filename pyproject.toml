@@ -96,7 +96,7 @@ test = [
 # Pinned so the typing guards cannot drift as new checker releases change
 # diagnostics. All scoped to the `tests/typing` fixture; see [tool.pyright],
 # [tool.ty.src], and [tool.mypy].
-typecheck = ["mypy==2.3.0", "pyright==1.1.411", "ty==0.0.64"]
+typecheck = ["mypy==2.3.1", "pyright==1.1.411", "ty==0.0.78"]
 
 
 [tool.hatch]
