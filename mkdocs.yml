@@ -1,0 +1,121 @@
+site_name: spexial
+site_description: scipy.special in JAX.
+site_author: Spexial Maintainers
+site_url: https://jaxtronomy.github.io/spexial
+
+repo_url: https://github.com/JAXtronomy/spexial
+repo_name: JAXtronomy/spexial
+edit_uri: ""
+
+theme:
+  name: material
+  features:
+    - navigation.indexes # Section landing pages: the mode's index.md IS its nav entry.
+    - navigation.sections # Sections are rendered as groups in the left sidebar.
+    - navigation.path # Breadcrumbs, so a reader arriving from search sees which mode they landed in.
+    - navigation.top
+    - content.code.copy
+    # NOTE: `toc.integrate` was removed deliberately -- it is incompatible with
+    # `navigation.indexes`, and the four-mode structure needs the landing pages.
+    - header.autohide # header disappears as you scroll
+  palette:
+    # Light mode / dark mode. Deliberately no `media` auto-detection: default
+    # to light mode, which is more obvious about offering a toggle.
+    - scheme: default
+      primary: white
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github # GitHub logo in top right
+    logo: "material/function-variant" # spexial logo in top left
+  favicon: "_static/favicon.svg"
+  custom_dir: "docs/_overrides" # Overriding part of the HTML
+
+extra_javascript:
+  # The below two make MathJax work, see https://squidfunk.github.io/mkdocs-material/reference/mathjax/
+  - _static/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+extra_css:
+  - _static/custom_css.css
+
+markdown_extensions:
+  - pymdownx.arithmatex: # Render LaTeX via MathJax. Load-bearing: this is a special-functions library.
+      generic: true
+  - pymdownx.superfences # Syntax highlighting when used with the Material theme.
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details # Hidden expandable regions denoted by ???
+  - pymdownx.snippets: # Include one Markdown file into another
+      base_path: docs
+  - admonition
+  - attr_list # Required by the card grid on the landing page.
+  - md_in_html # Ditto.
+  - toc:
+      permalink: "¤" # Adds a clickable permalink to each section heading
+      toc_depth: 4
+
+plugins:
+  - search:
+      # See https://github.com/squidfunk/mkdocs-material/discussions/8116#discussioncomment-12632752
+      # In particular this allows searching e.g. 'eval_gegenbauer' and matching
+      # 'spexial.eval_gegenbauer'.
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  - hippogriffe
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            # The docstrings are NumPy-style. Left at the default (google),
+            # griffe does not recognise the `Examples` section, so doctest
+            # output like `Array([0.9, 0.0])` is rendered as markdown and the
+            # brackets are parsed as unresolvable link references.
+            docstring_style: numpy
+            force_inspection: true
+            heading_level: 4
+            inherited_members: true
+            members_order: source
+            show_bases: false
+            show_if_no_docstring: true
+            show_overloads: false
+            show_root_heading: true
+            show_signature_annotations: true
+            show_source: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+
+nav:
+  - "index.md"
+  - Tutorials:
+      - "tutorials/index.md"
+      - Compute the Stefan-Boltzmann constant: "tutorials/stefan-boltzmann.md"
+      - Check Gegenbauer orthogonality: "tutorials/gegenbauer-orthogonality.md"
+  - How-to guides:
+      - "how-to/index.md"
+      - How to enable double precision: "how-to/enable-double-precision.md"
+      - How to use spexial with jit, vmap and grad: "how-to/use-with-jit-vmap-and-grad.md"
+      - How to port code from scipy.special: "how-to/port-from-scipy.md"
+      - How to choose between spexial and jax: "how-to/choose-between-spexial-and-jax.md"
+  - Reference:
+      - "reference/index.md"
+      - Coverage: "reference/coverage.md"
+      - API reference: "reference/api.md"
+      - Accuracy and domains: "reference/accuracy-and-domains.md"
+      - Conventions: "reference/conventions.md"
+      - Errors: "reference/errors.md"
+  - Explanation:
+      - "explanation/index.md"
+      - About precision: "explanation/precision.md"
+      - About domain edges: "explanation/edges.md"
+      - Why not upstream: "explanation/why-not-upstream.md"
+      - About the algorithms: "explanation/algorithms.md"
+  - About:
+      - Contributing: "about/contributing.md"

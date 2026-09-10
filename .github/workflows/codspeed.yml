@@ -1,5 +1,8 @@
 name: CodSpeed
 
+# Runs on every PR and every push to main, deliberately: CodSpeed compares a PR
+# against the base commit's measurements, so gating this behind a label would
+# leave the baseline missing exactly when a comparison is wanted.
 on:
   workflow_dispatch:
   pull_request:
@@ -11,38 +14,46 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  FORCE_COLOR: 3
-
 permissions:
   contents: read
-  id-token: write # for OpenID Connect authentication with CodSpeed
+  id-token: write # OpenID Connect authentication with CodSpeed
+
+env:
+  FORCE_COLOR: 3
 
 jobs:
   benchmarks:
     name: Run benchmarks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # hatch-vcs needs the tags to derive a version
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: "Set up Python"
-        uses: actions/setup-python@v5
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version-file: ".python-version"
 
-      - name: Install the project
-        run: uv sync --all-extras --dev
+      - name: Install
+        run: uv sync --no-default-groups --group bench --locked
 
-      - name: Run benchmarks
-        uses: CodSpeedHQ/action@v5
+      # `-p no:env` disables pytest-env, which would otherwise set
+      # SPEXIAL_ENABLE_RUNTIME_TYPECHECKING=beartype.beartype (see
+      # [tool.pytest_env]). That beartype wrapping is a test-time aid; leaving it
+      # on would measure the instrumented build rather than production
+      # performance. `src/spexial/setup_package.py` defaults the variable to
+      # "False", so simply not setting it is enough -- but JAX_ENABLE_X64, which
+      # pytest-env also sets, *is* production-relevant, so it is set at job level.
+      #
+      # `benchmarks/conftest.py` additionally pins the CPU backend and a
+      # single-threaded XLA pool, so the numbers do not move with the runner's
+      # core count.
+      - name: Run benchmarks under CodSpeed
+        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        env:
+          JAX_ENABLE_X64: "True"
         with:
           mode: simulation
-          run: uv run pytest benchmarks --codspeed
+          run: uv run --frozen pytest benchmarks --codspeed -p no:env
+          token: ${{ secrets.CODSPEED_TOKEN }}

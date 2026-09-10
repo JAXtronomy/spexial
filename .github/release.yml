@@ -1,0 +1,132 @@
+# Release-notes categorisation for GitHub's auto-generated release notes.
+#
+# The labels below are the gitmoji-conventional set that `cz_gitmoji`
+# ([tool.commitizen] in pyproject.toml) uses for commit types, mirrored as PR
+# labels. A PR carrying none of them lands in an uncategorised "Other" section,
+# so keep this list in sync with the repository's labels rather than pruning
+# entries that look inapplicable today.
+changelog:
+  exclude:
+    authors:
+      - dependabot[bot]
+      - github-actions[bot]
+  categories:
+    - title: 💥 Breaking Changes
+      labels:
+        - "💥 Introduce breaking changes"
+    - title: ✨ New Features
+      labels:
+        - "✨ Introduce new features"
+        - "🎉 Begin a project"
+    - title: 🐛 Bug Fixes
+      labels:
+        - "🐛 Fix a bug"
+        - "🚑️ Critical hotfix"
+        - "🩹 Simple fix (non-critical)"
+        - "🥅 Catch errors"
+        - "🚨 Fix compiler / linter warnings"
+        - "✏️ Fix typos"
+    - title: 🔒️ Security
+      labels:
+        - "🔒️ Fix security / privacy issues"
+        - "🔐 Add / update secrets"
+        - "🛂 Authorization / roles / permissions"
+    - title: ⚡️ Performance
+      labels:
+        - "⚡️ Improve performance"
+        - "🧵 Add / update multithreading / concurrency"
+    - title: 📝 Documentation
+      labels:
+        - "📝 Add / update documentation"
+        - "💡 Add / update source code comments"
+        - "📄 Add / update license"
+    - title: 🎨♻️ Code Quality & Refactoring
+      labels:
+        - "🎨 Improve code structure / format"
+        - "♻️ Refactor code"
+        - "⚰️ Remove dead code"
+        - "🔥 Remove code or files"
+        - "🚚 Move / rename resources"
+        - "🗑️ Deprecate code"
+    - title: ✅ Testing
+      labels:
+        - "✅ Add / update / pass tests"
+        - "🧪 Add a failing test"
+        - "📸 Add / update snapshots"
+        - "🤡 Mock things"
+    - title: 🔧 Configuration & Dependencies
+      labels:
+        - "🔧 Add / update configuration"
+        - "⬆️ Upgrade dependencies"
+        - "⬇️ Downgrade dependencies"
+        - "📌 Pin dependencies"
+        - "➕ Add a dependency"
+        - "➖ Remove a dependency"
+        - "🚩 Add / update / remove feature flags"
+    - title: 🏗️ Architecture & Infrastructure
+      labels:
+        - "🏗️ Architectural changes"
+        - "🧱 Infrastructure changes"
+        - "👷 Add / update CI build system"
+        - "💚 Fix CI build"
+        - "📦️ Add / update packages"
+        - "🍱 Add / update assets"
+    - title: 🚀 Deployment & Releases
+      labels:
+        - "🚀 Deploy"
+        - "🔖 Release / version tags"
+    - title: 🎨 UI & Styling
+      labels:
+        - "💄 Add / update UI and styles"
+        - "💫 Add / update animations"
+        - "📱 Work on responsive design"
+    - title: ♿️ Accessibility & UX
+      labels:
+        - "♿️ Improve accessibility"
+        - "🚸 Improve UX / usability"
+        - "✈️ Improve offline support"
+    - title: 🌐 Internationalization
+      labels:
+        - "🌐 Internationalization / localization"
+        - "💬 Add / update text and literals"
+    - title: 🗃️ Data & Database
+      labels:
+        - "🗃️ Database changes"
+        - "🌱 Add / update seed files"
+    - title: 🔊 Logging & Monitoring
+      labels:
+        - "🔊 Add / update logs"
+        - "🔇 Remove logs"
+        - "🩺 Add / update healthcheck"
+        - "🔍️ Improve SEO"
+        - "📈 Add / update analytics"
+    - title: 🏷️ Types & Validation
+      labels:
+        - "🏷️ Add / update types"
+        - "🦺 Add / update validation"
+    - title: 👔 Business Logic & Sponsorship
+      labels:
+        - "👔 Add / update business logic"
+        - "💸 Add sponsorships / financial infrastructure"
+    - title: 🔨 Development Experience
+      labels:
+        - "🔨 Add / update development scripts"
+        - "🧑‍💻 Improve developer experience"
+        - "🙈 Add / update .gitignore"
+        - "🔀 Merge branches"
+        - "⏪️ Revert changes"
+    - title: 👽️🦖 External & Backwards Compatibility Changes
+      labels:
+        - "👽️ Update due to external API changes"
+        - "🦖 Add backwards compatibility"
+    - title: 🚧 Work in Progress & Experiments
+      labels:
+        - "🚧 Work in progress"
+        - "⚗️ Perform experiments"
+        - "🧐 Data exploration / inspection"
+    - title: 🍻 Miscellaneous
+      labels:
+        - "🍻 Write code drunkenly"
+        - "💩 Bad code (needs improvement)"
+        - "🥚 Add / update easter egg"
+        - "👥 Add / update contributors"

@@ -1,0 +1,91 @@
+name: Weekly CI
+
+# The scheduled ecosystem check: ordinary CI installs from the lockfile, so
+# nothing there notices an upstream release that breaks us. These jobs resolve
+# fresh (and, for `pre-release`, against alphas/betas/rcs) to catch breakage
+# that lands without any change to this repo.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Every Monday at 6am UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: 3
+  PYTHON_VERSIONS: '["3.11", "3.13", "3.14"]'
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    outputs:
+      python-versions: ${{ env.PYTHON_VERSIONS }}
+    steps:
+      - name: Expose the Python matrix
+        run: echo "${{ env.PYTHON_VERSIONS }}"
+
+  newest-supported:
+    name: Newest deps (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: [setup]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.setup.outputs.python-versions) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install with latest stable deps
+        run: uv sync --no-default-groups --group test --upgrade
+
+      - name: Test
+        run: uv run --no-sync pytest -n logical --dist=loadfile
+
+  pre-release:
+    name: Pre-release deps (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: [setup]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(needs.setup.outputs.python-versions) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install with pre-release deps (alpha/beta/rc/nightly)
+        run:
+          uv sync --no-default-groups --group test --upgrade --prerelease=allow
+
+      - name: Test
+        run: uv run --no-sync pytest -n logical --dist=loadfile
+
+  weekly-pass:
+    name: Weekly CI Pass
+    runs-on: ubuntu-latest
+    needs: [setup, newest-supported, pre-release]
+    if: ${{ !cancelled() }}
+    steps:
+      - name: All required jobs passed
+        uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        with:
+          jobs: ${{ toJSON(needs) }}

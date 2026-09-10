@@ -7,7 +7,7 @@ from pytest_codspeed import BenchmarkFixture
 
 from benchmarks.utils import warm
 
-import spexial
+import spexial as sp
 
 # The polylogarithm implementation uses a different series in each of these
 # three ranges of |z|.
@@ -31,14 +31,26 @@ def test_polylog_scalar(
 ) -> None:
     """Evaluate the polylogarithm of order 3 at a single point."""
     del regime  # only used to name the benchmark
-    benchmark(warm(lambda z: spexial.Li(3, z), z))
+    benchmark(warm(lambda z: sp.Li(3, z), z))
 
 
 @pytest.mark.parametrize("n", [3, 10])
 def test_polylog_vector(benchmark: BenchmarkFixture, n: int) -> None:
     """Evaluate the polylogarithm on 200 points."""
-    fn = jax.vmap(lambda z: spexial.Li(n, z))
+    fn = jax.vmap(lambda z: sp.Li(n, z))
     benchmark(warm(fn, Z_VECTOR))
+
+
+@pytest.mark.parametrize(("branch", "n"), [("series", 4.0), ("table", -7.0)])
+def test_zeta_scalar(benchmark: BenchmarkFixture, branch: str, n: float) -> None:
+    """Evaluate the Riemann zeta function at a single point.
+
+    The two arguments select the two entirely different code paths: ``n > 1``
+    sums a series, while the negative line is a Bernoulli-table lookup through
+    the functional equation.
+    """
+    del branch  # only used to name the benchmark
+    benchmark(warm(sp.zeta, jnp.asarray(n)))
 
 
 @pytest.mark.parametrize(
@@ -48,4 +60,4 @@ def test_polylog_vector(benchmark: BenchmarkFixture, n: int) -> None:
 def test_zeta_vector(benchmark: BenchmarkFixture, sign: str, n: jax.Array) -> None:
     """Evaluate the Riemann zeta function on 40 integer arguments."""
     del sign  # only used to name the benchmark
-    benchmark(warm(jax.vmap(spexial.zeta), n))
+    benchmark(warm(jax.vmap(sp.zeta), n))
