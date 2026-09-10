@@ -265,7 +265,13 @@ def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
     # silently *concatenated* -- a `(3,)` alpha gave a length-4 answer where the
     # documented shape is `(2,)`. `jnp.ndim` reads the logical rank, so
     # `jax.vmap` over either argument still works.
-    if jnp.ndim(alpha) or jnp.ndim(x):
+    if jnp.ndim(alpha) or jnp.ndim(x):  # pragma: no cover
+        # Not covered *in this process*, and not untested: the suite sets
+        # `SPEXIAL_ENABLE_RUNTIME_TYPECHECKING`, so jaxtyping rejects an array
+        # against `ScalarLike` before this body runs. Users run without the
+        # hook and land here instead, which
+        # `test_eval_gegenbauers_array_guard_runs_without_the_typecheck_hook`
+        # exercises in a subprocess -- where coverage cannot follow it.
         msg = (
             "eval_gegenbauers takes scalar `alpha` and `x`; "
             "map over many points with jax.vmap"
@@ -275,7 +281,10 @@ def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
     if n == 0:
         return jnp.atleast_1d(C0_val)
 
-    C1_val = C1(alpha, x)
+    # See `eval_gegenbauer`: the recurrence is kept away from an infinite `x`
+    # so that the unselected branch cannot transpose into `0 * inf`.
+    x_safe = jnp.where(jnp.isinf(x), 1.0, x)
+    C1_val = C1(alpha, x_safe)
     if n == 1:
         # Through `_at_infinity`, exactly as the `n >= 2` path below sends every
         # order. `C_1 = 2 a x` is `0 * inf == nan` for an `alpha` of zero -- or
@@ -285,7 +294,7 @@ def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
         # disagreeing at the same argument, and only at `n = 1`.
         return jnp.stack([C0_val, _at_infinity(1, alpha, x, C1_val)])
 
-    carry = (alpha, x, C1_val, C0_val)
+    carry = (alpha, x_safe, C1_val, C0_val)
     n_values = jnp.arange(1, n)  # starts at 1: 0 is already initialized above
     _, C_values = jax.lax.scan(_C_n_plus_1, carry, n_values)
 
@@ -362,14 +371,22 @@ def eval_gegenbauer(n: int, alpha: AnyArrayLike, x: AnyArrayLike, /) -> AnyArray
     # whose shape follows `x` alone, so an `alpha` wider than `x` came back the
     # wrong shape instead of broadcasting as scipy does.
     alpha_arr, x_arr = _seed(alpha, x)
+    # The recurrence never sees an infinite `x`. `_at_infinity` replaces those
+    # lanes with the analytic limit anyway, so masking changes no value -- but
+    # leaving `inf` in the *unselected* branch left its VJP forming `0 * inf`,
+    # and `jax.jacrev` came back `nan` where `jax.jacfwd` gave 0. At fixed
+    # `x = +-inf` the limit is `sign(alpha) * inf`, a step in `alpha`, whose
+    # derivative is 0 away from the jump -- so forward mode had it right and
+    # the two now agree. `C0` already masks `x` this way, for the value.
+    x_safe = jnp.where(jnp.isinf(x_arr), 1.0, x_arr)
     if n == 0:
         return C0(x_arr)
     if n == 1:
         # `2 * alpha * x` is `nan` at alpha = 0 with x infinite, so this early
         # return needs the same limit substitution as the scan below.
-        return _at_infinity(1, alpha_arr, x_arr, C1(alpha_arr, x_arr))
+        return _at_infinity(1, alpha_arr, x_arr, C1(alpha_arr, x_safe))
 
-    carry = (alpha_arr, x_arr, C1(alpha_arr, x_arr), C0(x_arr))
+    carry = (alpha_arr, x_safe, C1(alpha_arr, x_safe), C0(x_arr))
     n_values = jnp.arange(1, n)  # 0 is already done
     _, C_values = jax.lax.scan(_C_n_plus_1, carry, n_values)
     return _at_infinity(n, alpha_arr, x_arr, C_values[-1])

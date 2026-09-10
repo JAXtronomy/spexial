@@ -1,5 +1,8 @@
 """Unit tests for `spexial.eval_gegenbauer` and `spexial.eval_gegenbauers`."""
 
+import os
+import subprocess
+import sys
 from functools import partial
 
 import jax
@@ -325,3 +328,35 @@ def test_subnormal_alpha_at_infinity_is_the_documented_floor(n, x):
     assert float(sp.eval_gegenbauer(n, 1.0, jnp.asarray(x))) == (
         np.inf if x > 0 else (-1.0) ** n * np.inf
     )
+
+
+def test_eval_gegenbauers_array_guard_runs_without_the_typecheck_hook():
+    """The `ValueError` guard is what *users* hit, and the suite never reached it.
+
+    `pyproject.toml` sets `SPEXIAL_ENABLE_RUNTIME_TYPECHECKING` for the whole
+    run, so jaxtyping rejects an array against `ScalarLike` before the function
+    body executes -- which left the guard uncovered while looking tested. Users
+    run without the hook. A subprocess with it stripped is the only way to
+    exercise the branch they actually reach.
+    """
+    script = (
+        "import jax.numpy as jnp, spexial as sp\n"
+        "try:\n"
+        "    sp.eval_gegenbauers(1, jnp.asarray([1.0, 2.0]), 0.5)\n"
+        "except ValueError as exc:\n"
+        "    print('VALUEERROR', exc)\n"
+    )
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k != "SPEXIAL_ENABLE_RUNTIME_TYPECHECKING"
+    }
+    out = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert "VALUEERROR" in out.stdout, out.stderr
+    assert "scalar" in out.stdout
