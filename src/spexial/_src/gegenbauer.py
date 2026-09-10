@@ -8,7 +8,7 @@ from typing import TypeAlias
 import jax
 import jax.numpy as jnp
 
-from .custom_types import AnyArray, AnyArrayLike, ScalarLike, Vector
+from .custom_types import AnyArray, AnyArrayLike
 from .dtype import is_negative, promote_integers
 
 _Carry: TypeAlias = tuple[AnyArray, AnyArray, AnyArray, AnyArray]
@@ -114,9 +114,9 @@ def _seed(alpha: AnyArrayLike, x: AnyArrayLike, /) -> tuple[AnyArray, AnyArray]:
     carry output must have equal types" -- naming neither this function nor the
     argument at fault -- but only from ``n >= 2``, since orders 0 and 1 never
     reach the scan. `scipy.special.eval_gegenbauer` broadcasts here, so rather
-    than reject it, match it -- in `eval_gegenbauer` only. `eval_gegenbauers`
-    keeps `alpha` scalar: its documented return shape is ``(n + 1,)``, which an
-    array `alpha` would silently change.
+    than reject it, match it. `eval_gegenbauers` broadcasts the same way and
+    stacks the orders on a *new leading* axis, so its shape stays well defined
+    at every rank: ``(n + 1,)`` for scalars, ``(n + 1, *broadcast)`` otherwise.
     """
     # `jnp.broadcast_arrays` unifies *shapes* but not *dtypes*, which left the
     # dtype half of the same bug: a strongly-typed float64 `alpha` against a
@@ -204,7 +204,7 @@ def _C_n_plus_1(carry: _Carry, n: AnyArray) -> tuple[_Carry, AnyArray]:
 
 # TODO: support n non-integer
 @partial(jax.jit, static_argnums=(0,))
-def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
+def eval_gegenbauers(n: int, alpha: AnyArrayLike, x: AnyArrayLike, /) -> AnyArray:
     r"""Return the Gegenbauer polynomial of degree ``n`` and all lower ones.
 
     There is no `scipy.special` counterpart; it is the by-product of the
@@ -228,15 +228,16 @@ def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
         Degree of the polynomial. Must be a static Python `int`; non-integer
         degrees are not supported yet.
     alpha
-        Parameter.
+        Parameter. Broadcast against ``x``.
     x
-        Scalar point at which to evaluate the polynomials. Use
-        ``jax.vmap(..., in_axes=(None, None, 0))`` for many points.
+        Point(s) at which to evaluate the polynomials.
 
     Returns
     -------
-    Array[float, (n + 1,)]
-        Values of :math:`C_i^{(\alpha)}(x)` for ``i = 0 ... n``.
+    Array[float, (n + 1, ...)]
+        Values of :math:`C_i^{(\alpha)}(x)` for ``i = 0 ... n``, stacked on a
+        leading axis over the broadcast shape of ``alpha`` and ``x``. Scalar
+        arguments therefore give ``(n + 1,)``, as before.
 
     References
     ----------
@@ -256,30 +257,29 @@ def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
     >>> sp.eval_gegenbauers(0, 1.0, 0.5).tolist()
     [1.0]
 
+    ``alpha`` and ``x`` broadcast, so a whole table of orders against
+    parameters comes out of the one recurrence:
+
+    >>> import jax.numpy as jnp
+    >>> alpha = jnp.asarray([1.0, 2.0])[:, None]
+    >>> x = jnp.asarray([0.0, 0.5, 1.0])
+    >>> sp.eval_gegenbauers(3, alpha, x).shape
+    (4, 2, 3)
+
     """
-    alpha, x = _unify_dtypes(alpha, x)
-    # Scalar-only, and it has to say so. The recurrence stacks one value per
-    # order, so an array argument has nowhere to put its own axis: from `n = 2`
-    # it died inside `scan` with a message naming neither argument, and at
-    # `n <= 1` the early returns skip that machinery entirely and `hstack`
-    # silently *concatenated* -- a `(3,)` alpha gave a length-4 answer where the
-    # documented shape is `(2,)`. `jnp.ndim` reads the logical rank, so
-    # `jax.vmap` over either argument still works.
-    if jnp.ndim(alpha) or jnp.ndim(x):  # pragma: no cover
-        # Not covered *in this process*, and not untested: the suite sets
-        # `SPEXIAL_ENABLE_RUNTIME_TYPECHECKING`, so jaxtyping rejects an array
-        # against `ScalarLike` before this body runs. Users run without the
-        # hook and land here instead, which
-        # `test_eval_gegenbauers_array_guard_runs_without_the_typecheck_hook`
-        # exercises in a subprocess -- where coverage cannot follow it.
-        msg = (
-            "eval_gegenbauers takes scalar `alpha` and `x`; "
-            "map over many points with jax.vmap"
-        )
-        raise ValueError(msg)
+    # `_seed`, not `_unify_dtypes`: both arguments broadcast against each other
+    # here exactly as they do in `eval_gegenbauer`, and the stacked axis is
+    # *added* on the left rather than being the only one. This used to be
+    # scalar-only, with an explicit guard, because the orders were glued
+    # together with `hstack` -- which concatenates rather than stacks as soon as
+    # the operands have an axis of their own, so a `(3,)` `alpha` came back
+    # length 4 where the documented shape was `(2,)`. Stacking on a new leading
+    # axis is what makes the batched shape well defined, and the guard
+    # unnecessary.
+    alpha, x = _seed(alpha, x)
     C0_val = C0(x)
     if n == 0:
-        return jnp.atleast_1d(C0_val)
+        return C0_val[None]
 
     # See `eval_gegenbauer`: the recurrence is kept away from an infinite `x`
     # so that the unselected branch cannot transpose into `0 * inf`.
@@ -298,7 +298,7 @@ def eval_gegenbauers(n: int, alpha: ScalarLike, x: ScalarLike, /) -> Vector:
     n_values = jnp.arange(1, n)  # starts at 1: 0 is already initialized above
     _, C_values = jax.lax.scan(_C_n_plus_1, carry, n_values)
 
-    orders = jnp.hstack([C0_val, C1_val, C_values])
+    orders = jnp.concatenate([C0_val[None], C1_val[None], C_values], axis=0)
     # Every order from 3 up is `inf - inf` when `x` is infinite; substitute each
     # one's limit. `C_0` is 1 there and `C_1 = 2 a x` is already right except at
     # a = 0, so the whole vector goes through `_at_infinity` order by order.
