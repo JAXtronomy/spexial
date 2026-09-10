@@ -236,3 +236,33 @@ def test_the_subnormal_override_never_beats_upstream_where_upstream_works(dtype)
         assert float(sp.gamma(x)) == float(upstream)
     else:
         assert jnp.isfinite(sp.gamma(x)) or jnp.isinf(sp.gamma(x))
+
+
+@pytest.mark.parametrize("x", [0.0, -0.0])
+def test_gradient_at_the_pole_is_infinite(x):
+    """`positive_subnormal` tests `bits > 0`, which is False at exact zero.
+
+    So the subnormal guard covered the whole band except the one point most
+    likely to be evaluated, and `gamma(0)` fell through to `inf * digamma(0)`,
+    i.e. `inf * nan`.
+    """
+    assert jnp.isneginf(jax.grad(sp.gamma)(jnp.asarray(x)))
+
+
+def test_float16_subnormals_use_the_more_accurate_branch():
+    """Delegation is the default; being more accurate is a reason to depart.
+
+    Over the float16 subnormals where `jax.scipy.special.gamma` returns a
+    finite value, the `1/x` branch is better at 690 of 767 points -- worst
+    4.8e-4 against upstream's 4.2e-3. An earlier gate kept upstream's answer
+    there, justified by a figure that had been measured backwards.
+    """
+    xs = jnp.asarray(
+        [jnp.asarray(m, jnp.uint16).view(jnp.float16) for m in (200, 500, 900)]
+    )
+    with mp.workdps(60):
+        expected = [float(mp.gamma(mp.mpf(float(v)))) for v in xs]
+    got = [float(sp.gamma(v)) for v in xs]
+    upstream = [float(jss.gamma(v)) for v in xs]
+    for g, u, e in zip(got, upstream, expected, strict=True):
+        assert abs(g - e) <= abs(u - e)

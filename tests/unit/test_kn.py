@@ -644,3 +644,15 @@ def test_k1_is_infinite_only_where_one_over_z_overflows(z):
     """Past the band the true value exceeds the dtype, and `inf` is correct."""
     dtype = jnp.float32 if z > 1e-45 else jnp.float64
     assert jnp.isinf(sp.K1(jnp.asarray(z, dtype=dtype)))
+
+
+@pytest.mark.parametrize("func", [sp.K0e, sp.K1e, sp.K2e])
+def test_negative_subnormal_gradient_is_nan(func):
+    """The pole guard used `z >= 0.0`, which XLA reads as True for these.
+
+    So a negative subnormal -- out of domain, and `nan` in the value -- was
+    handed the pole limit and came back `-inf` in the gradient.
+    """
+    z = jnp.asarray(-1e-320)
+    assert jnp.isnan(func(z))
+    assert jnp.isnan(jax.grad(func)(z))

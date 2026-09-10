@@ -19,7 +19,7 @@ import numpy as np
 from jax.scipy.special import spence as _jax_spence
 
 from .custom_types import AnyArray, AnyArrayLike
-from .dtype import as_float, cast_like, is_negative
+from .dtype import as_float, cast_like, exactly_zero, is_negative, log_no_flush
 
 _MAXITER: Final = 500
 """Terms taken in each series branch."""
@@ -229,13 +229,25 @@ def _spence_gradient(z: AnyArrayLike) -> AnyArray:
     j = jnp.arange(_GRADIENT_TERMS, dtype=_real_dtype(jnp.asarray(z)))
     series = jnp.polyval(((-1.0) ** (j + 1) / (j + 1))[::-1], u)
     z_safe = jnp.where(near_one, 2.0, z)
-    closed = jnp.log(z_safe) / (1 - z_safe)
+    # `log_no_flush`, because XLA flushes a subnormal argument and `jnp.log`
+    # then reports `-inf` for the whole band below `tiny`, where the true
+    # derivative is an ordinary number -- -713.8 at `z = 1e-310`.
+    closed = log_no_flush(z_safe) / (1 - z_safe)
     # `z = 0` is a pole and the limit is `-inf`, which the real path gets for
     # free from `log(0) / 1`. The *complex* path does not: `(-inf + 0j)` divided
     # by `(1 + 0j)` leaves `0 - (-inf * 0)` in the imaginary part, i.e. `nan`,
     # so the branch this module exists to provide disagreed with the real one at
     # the one point both can reach.
-    return jnp.where(near_one, series, jnp.where(z == 0, -jnp.inf, closed))
+    # `exactly_zero`, not `z == 0`: XLA compares every subnormal equal to zero,
+    # so the pole guard fired across the whole subnormal band and returned
+    # `-inf` for arguments that have a perfectly finite derivative. That is the
+    # defect `dtype.exactly_zero` exists for, and it was reintroduced here by
+    # the fix for the *complex* pole one round earlier.
+    # `jnp.asarray` because this helper takes `AnyArrayLike` and the bit test
+    # needs a real array; a Python float reaches it as a jaxtyping scalar.
+    return jnp.where(
+        near_one, series, jnp.where(exactly_zero(jnp.asarray(z)), -jnp.inf, closed)
+    )
 
 
 @_spence_gradient.defjvp

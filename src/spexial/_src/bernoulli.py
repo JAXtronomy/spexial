@@ -30,12 +30,23 @@ ORDER: Final = 60
 
 
 @cache
-def _bernoulli_floats() -> tuple[float, ...]:
-    r"""Build :math:`B_0 \ldots B_{60}` exactly, then round to `float`."""
+def bernoulli_fractions() -> tuple[Fraction, ...]:
+    r"""Build :math:`B_0 \ldots B_{60}` exactly, as `fractions.Fraction`.
+
+    Exposed unrounded because `zeta` needs :math:`B_{k+1}/(k+1)`, and doing
+    that division after rounding is a rounding of a rounding -- one ulp off at
+    five of the negative integers.
+    """
     bs = [Fraction(1)] + [Fraction(0)] * ORDER
     for m in range(1, ORDER + 1):
         bs[m] = -sum(comb(m + 1, k) * bs[k] for k in range(m)) / (m + 1)
-    return tuple(float(b) for b in bs)
+    return tuple(bs)
+
+
+@cache
+def _bernoulli_floats() -> tuple[float, ...]:
+    r"""Build :math:`B_0 \ldots B_{60}` exactly, then round to `float`."""
+    return tuple(float(b) for b in bernoulli_fractions())
 
 
 def bernoulli_numbers() -> Vector:

@@ -163,7 +163,10 @@ def mul_no_flush(a: AnyArray, x: AnyArray, /) -> AnyArray:
     bits = lax.bitcast_convert_type(x, INT_OF_WIDTH[jnp.dtype(x.dtype).itemsize])
     mantissa = jnp.bitwise_and(bits, (1 << info.nmant) - 1).astype(x.dtype)
     negative = (bits < 0) & (bits != jnp.iinfo(bits.dtype).min)
-    subnormal = (jnp.abs(x) < info.tiny) & (bits != 0)
+    # `-0.0` has a non-zero bit pattern (it is `iinfo.min`) but is not
+    # subnormal; without excluding it the reconstruction runs and returns
+    # `+0.0`, losing the sign IEEE gives `a * -0.0`.
+    subnormal = (jnp.abs(x) < info.tiny) & (bits != 0) & ~exactly_zero(x)
     signed = jnp.where(negative, -mantissa, mantissa)
     # `optimization_barrier` between the steps, because the grouping *is* the
     # fix and XLA will otherwise reassociate the chain straight back into

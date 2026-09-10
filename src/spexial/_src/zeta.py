@@ -10,7 +10,7 @@ from typing import Final
 import jax.numpy as jnp
 from jax.scipy.special import gammaln, zeta as _hurwitz_zeta
 
-from .bernoulli import ORDER, bernoulli_numbers
+from .bernoulli import ORDER, bernoulli_fractions
 from .custom_types import AnyArray, RealArrayLike
 
 _UNIT: Final = 54.0
@@ -81,6 +81,29 @@ def _eta_weights() -> tuple[float, ...]:
         partial.append(total)
     last = partial[n]
     return tuple(float((partial[k] - last) / last) for k in range(n))
+
+
+@cache
+def _zeta_at_negative_integers() -> tuple[float, ...]:
+    r"""``|B_{k+1} / (k+1)|`` for :math:`k = 0 \ldots` `ORDER`, rounded once.
+
+    :math:`\zeta(-k) = (-1)^k B_{k+1} / (k+1)`, and doing that division in
+    floating point costs a second rounding: `bernoulli_numbers` has already
+    rounded :math:`B_{k+1}`, so ``float(B) / (k + 1)`` is a rounding of a
+    rounding and lands one ulp off the correctly-rounded answer at
+    ``n = -11, -13, -23, -27, -33``. The coverage table calls this column
+    "exact (0 ulp)", so one ulp is one too many.
+
+    Dividing inside `Fraction` and converting once makes the claim true. The
+    tabulated value keeps ``B_i``'s own alternating sign; the caller's
+    ``(-1)**k`` factor is separate from it.
+    """
+    exact = bernoulli_fractions()
+    # Indexed by the caller's clipped ``k + 1``, so entry ``i`` holds
+    # ``|B_i / i|``. Entry 0 is unreachable -- ``k + 1 <= 0`` means ``n >= 1``,
+    # which the positive branch owns -- and exists only to keep the offsets
+    # lined up.
+    return (0.0, *(float(exact[i] / i) for i in range(1, ORDER + 1)))
 
 
 def _by_eta(n: AnyArray) -> AnyArray:
@@ -281,9 +304,6 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     # `(-1) ** k` would be `nan` under `jax.grad` (it differentiates through
     # `log(-1)`); take the sign off the parity of k instead.
     sign = jnp.where(jnp.mod(k_round, 2.0) == 0.0, 1.0, -1.0)
-    # Likewise keep the denominator away from 0: k == -1 (i.e. n == 1) is the
-    # pole, and belongs to the `positive` branch.
-    denom = jnp.where(positive, 1.0, k + 1.0)
     # The Bernoulli table is exact where it reaches -- 0 ulp against mpmath at
     # the negative odd integers, better than SciPy -- so it is kept for those.
     # Everything else on the negative half-line goes through the functional
@@ -291,7 +311,12 @@ def zeta(n: RealArrayLike, /) -> AnyArray:
     # table. `1 - n` is safe there by construction, but the reflection is also
     # evaluated on the unselected positive branch, so feed it a negative
     # argument to keep `gammaln` and `log` off their own edges.
-    from_table = sign * bernoulli_numbers().astype(n_arr.dtype)[index] / denom
+    # Built at float64 and *then* narrowed, never constructed at the caller's
+    # dtype: entries reach 1e32, and asking numpy for a float16 array of those
+    # emits an overflow warning that `filterwarnings = ["error"]` turns into a
+    # failure -- even on the strip, where this branch is not selected at all.
+    table = jnp.asarray(_zeta_at_negative_integers()).astype(n_arr.dtype)
+    from_table = sign * table[index]
     in_table = is_integer & (k_round + 1.0 <= ORDER)
 
     # `_hurwitz_zeta` is `nan` for n above ~1e15, and is exactly 1.0 for every n

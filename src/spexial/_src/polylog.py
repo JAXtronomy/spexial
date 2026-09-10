@@ -13,6 +13,7 @@ from jax.scipy.special import gamma as _jax_gamma
 from .bernoulli import ORDER, bernoulli_numbers
 from .comb import comb
 from .custom_types import AnyArray, Scalar, ScalarLike
+from .dtype import promote_integers
 from .zeta import zeta
 
 _N_TERMS: Final = ORDER
@@ -218,7 +219,7 @@ def _li_core(n: int, z: ScalarLike) -> Scalar:
             -((-1) ** n) * recip - (2 * jnp.pi * 1j) ** n / _jax_gamma(n + 1) * bern
         )
 
-    z_arr = jnp.asarray(z) * 1.0
+    z_arr = promote_integers(z)
     abs_z = jnp.abs(z_arr)
     small = abs_z <= 0.5
     large = abs_z >= 2.0  # `>=`, not `>`: |z| == 2 used to fall through all three
@@ -253,7 +254,7 @@ def _li_jvp(n: int, primals: tuple[Any], tangents: tuple[Any]) -> tuple[Scalar, 
     :math:`\mathrm{Li}_0(z)/z` is just :math:`1/(1-z)`.
     """
     (z,), (dz,) = primals, tangents
-    z_arr = jnp.asarray(z) * 1.0
+    z_arr = promote_integers(z)
     if n == 1:
         deriv = 1.0 / (1.0 - z_arr)
     else:

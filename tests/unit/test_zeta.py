@@ -8,6 +8,7 @@ import pytest
 from scipy.special import zeta as scipy_zeta
 
 import spexial as sp
+from spexial._src.bernoulli import bernoulli_fractions
 
 
 def test_float_input_does_not_raise():
@@ -268,3 +269,16 @@ def test_far_negative_odd_integers_are_infinite_not_nan(n):
     """
     assert jnp.isinf(sp.zeta(n))
     assert np.isinf(scipy_zeta(n))
+
+
+@pytest.mark.parametrize("n", range(0, -60, -1))
+def test_the_table_is_exactly_the_correctly_rounded_value(n):
+    """The table's 'exact (0 ulp)' claim has to actually hold.
+
+    `float(B) / (k + 1)` is a rounding of a rounding, and landed one ulp off at
+    `n = -11, -13, -23, -27, -33`. Dividing inside `Fraction` and converting
+    once makes the documented claim true.
+    """
+    k = -n
+    expected = float((-1) ** k * bernoulli_fractions()[k + 1] / (k + 1))
+    assert float(sp.zeta(float(n))) == expected

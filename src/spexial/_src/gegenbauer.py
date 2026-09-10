@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 
 from .custom_types import AnyArray, AnyArrayLike, ScalarLike, Vector
-from .dtype import promote_integers
+from .dtype import exactly_zero, is_negative, promote_integers
 
 _Carry: TypeAlias = tuple[AnyArray, AnyArray, AnyArray, AnyArray]
 
@@ -155,7 +155,13 @@ def _at_infinity(n: int, alpha: AnyArray, x: AnyArray, value: AnyArray) -> AnyAr
     """
     if n == 0:
         return value
-    sign = jnp.sign(alpha) * jnp.where(x > 0, 1.0, (-1.0) ** n)
+    # The sign of `alpha` from its bits, not from `jnp.sign`: XLA reports 0 for
+    # a subnormal, so `eval_gegenbauer(1, 5e-324, inf)` took the `sign == 0`
+    # branch and returned 0 where the limit is `+inf`.
+    alpha_sign = jnp.where(
+        exactly_zero(alpha), 0.0, jnp.where(is_negative(alpha), -1.0, 1.0)
+    )
+    sign = alpha_sign * jnp.where(x > 0, 1.0, (-1.0) ** n)
     limit = jnp.where(sign == 0, 0.0, sign * jnp.inf)
     return jnp.where(jnp.isinf(x), limit, value)
 

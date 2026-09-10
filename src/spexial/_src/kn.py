@@ -13,6 +13,7 @@ from .dtype import (
     as_float as _as_float,
     cast_like as _cast_like,
     exactly_zero as _exactly_zero,
+    is_negative,
     log_no_flush as _log_no_flush,
     positive_subnormal as _positive_subnormal,
 )
@@ -503,7 +504,12 @@ def _at_pole(z: AnyArray, deriv: AnyArray, limit: float = -jnp.inf) -> AnyArray:
     `1/z^2` term dominating, so the three second-derivative rules pass
     ``limit=jnp.inf``.
     """
-    return jnp.where((z >= 0.0) & jnp.isnan(deriv), limit, deriv)
+    # `~is_negative(z)`, not `z >= 0.0`: XLA compares a subnormal equal to
+    # zero, so a *negative* subnormal satisfied `z >= 0.0` and was handed the
+    # pole limit -- the scaled gradients returned `-inf` for an argument whose
+    # value is `nan`. This function's own docstring says negative `z` keeps its
+    # `nan`, and that is exactly what failed.
+    return jnp.where(~is_negative(z) & jnp.isnan(deriv), limit, deriv)
 
 
 @jax.custom_jvp

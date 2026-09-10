@@ -14,7 +14,13 @@ import jax.scipy.special as jss
 from jax.scipy.special import digamma
 
 from .custom_types import AnyArray, AnyArrayLike
-from .dtype import is_negative, log_no_flush, positive_subnormal, promote_integers
+from .dtype import (
+    exactly_zero,
+    is_negative,
+    log_no_flush,
+    positive_subnormal,
+    promote_integers,
+)
 
 
 @jax.custom_jvp
@@ -89,15 +95,24 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
     # not the caller's. A bfloat16 subnormal is a *float32* subnormal too --
     # the two share an exponent range -- so only float64 gives `log |x| ~ -87`
     # any room, and doing it in bfloat16 came out 36% wrong.
+    # The *default* float width, which is float64 only when x64 is enabled --
+    # with it off, this is float32 and the band costs ~30 ulp there. Either way
+    # it is wider than the caller's for the two narrow types, which is the
+    # point: a bfloat16 subnormal is a *float32* subnormal too, the two sharing
+    # an exponent range, so `log |x| ~ -87` has no room in a dtype whose
+    # spacing there is 0.5.
     wide = jnp.asarray(0.0).dtype
     reciprocal = jnp.exp(-log_no_flush(magnitude, dtype=wide)).astype(x_arr.dtype)
     signed = jnp.where(is_negative(x_arr), -reciprocal, reciprocal)
-    # Substituted only where upstream has no answer of its own, which is the
-    # entire justification for overriding a delegated value -- and is
-    # dtype-dependent in a way the first version assumed away.
-    # `jax.scipy.special.gamma` does *not* flush float16 subnormals, and is 60x
-    # more accurate than this branch there, so float16 keeps upstream's answer.
-    return jnp.where(positive_subnormal(magnitude) & ~jnp.isfinite(out), signed, out)
+    # Substituted across the whole subnormal band, upstream finite or not.
+    # Delegation is the default, and being *more accurate* is a reason to
+    # depart from it: measured against mpmath over all 767 float16 subnormals
+    # where `jax.scipy.special.gamma` returns a finite value, this branch is
+    # better at 690 of them and worse at 5, worst 4.8e-4 against upstream's
+    # 4.2e-3. An earlier version gated on `~isfinite(out)` to "keep upstream's
+    # answer where upstream has one", justified by a 60x figure that was
+    # measured backwards.
+    return jnp.where(positive_subnormal(magnitude), signed, out)
 
 
 @gamma.defjvp
@@ -129,5 +144,14 @@ def _gamma_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, Any
     #
     # A constant, because this is a genuine pole rather than a removable point:
     # every order diverges here, so no reformulation buys the next one.
-    diverges = positive_subnormal(jnp.abs(x_arr))
-    return g, jnp.where(diverges, -jnp.inf, g * digamma(x_arr)) * dx
+    # `| exactly_zero` because `positive_subnormal` tests `bits > 0`, which is
+    # False at the pole itself -- so the guard covered the whole band *except*
+    # the one point most likely to be evaluated, and `gamma(0)` fell through to
+    # `inf * digamma(0)` = `inf * nan`.
+    diverges = positive_subnormal(jnp.abs(x_arr)) | exactly_zero(x_arr)
+    # `digamma` is kept off the flushed argument rather than merely overridden.
+    # Left to evaluate, its `nan` transposes into the selected branch and
+    # reverse mode returns `nan` where forward mode returns the constant, so
+    # the two modes disagreed about the same point.
+    safe = jnp.where(diverges, jnp.ones_like(x_arr), x_arr)
+    return g, jnp.where(diverges, -jnp.inf, g * digamma(safe)) * dx

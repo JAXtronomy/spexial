@@ -277,3 +277,22 @@ def test_negative_subnormal_is_nan(z):
     """
     assert jnp.isnan(spence(z))
     assert np.isnan(scipy_spence(z))
+
+
+@pytest.mark.parametrize("z", [1e-310, 5e-324, 2.3e-308])
+def test_gradient_survives_the_subnormal_band(z):
+    """`log(z)` flushes, and `z == 0` is True for every subnormal.
+
+    Both faults were in one line: the pole guard added for the *complex* branch
+    fired across the whole band, and `jnp.log` reported `-inf` there anyway.
+    The true derivative is an ordinary number -- -713.8 at `z = 1e-310`.
+    """
+    with mp.workdps(60):
+        expected = float(mp.log(mp.mpf(z)) / (1 - mp.mpf(z)))
+    got = float(jax.grad(spence)(jnp.asarray(z)))
+    np.testing.assert_allclose(got, expected, rtol=1e-14)
+
+
+def test_the_pole_itself_is_still_minus_infinity():
+    """Only exact zero is the pole, and `exactly_zero` is what says so."""
+    assert jnp.isneginf(jax.grad(spence)(jnp.asarray(0.0)))
