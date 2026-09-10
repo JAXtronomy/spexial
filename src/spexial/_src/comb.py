@@ -146,7 +146,22 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # at `N = DBL_MAX`, integer and non-integer `k` alike.
     left, right = n_safe - k_safe + 1, k_safe + 1
     small, big = jnp.minimum(left, right), jnp.maximum(left, right)
-    flushed = small < big * jnp.finfo(compute_dtype).tiny
+    # The asymptotic is taken wherever it is *exact*, not merely where the
+    # subnormal flush forces it. `log B = lgamma(small) - small*log(big)` drops
+    # a correction of order `small*(small-1)/(2*big)`, so once that is below an
+    # eps the two forms agree bit for bit -- verified from `N = 1e16` up.
+    #
+    # Widening it that far is what makes the *derivative* right. Differentiating
+    # `betaln` inherits a defect in `jax.scipy.special.betaln`'s own gradient,
+    # which is exactly twice the truth from `a` of about 1e154 and `nan` above:
+    # `jax.grad(comb)(1e154, 1.0)` was `3.0` against a true `1.0`, and `nan`
+    # past that, while the value stayed correct to `DBL_MAX`. This branch has no
+    # `betaln` in it, so it differentiates cleanly, and it now covers the whole
+    # band where that defect lives.
+    eps = jnp.finfo(compute_dtype).eps
+    flushed = (small < big * jnp.finfo(compute_dtype).tiny) | (
+        small * (small - 1) < 2 * big * eps
+    )
     neg_log_beta = jnp.where(
         flushed, small * jnp.log(big) - gammaln(small), -betaln(left, right)
     )

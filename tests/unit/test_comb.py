@@ -234,3 +234,34 @@ def test_negative_subnormals_are_out_of_domain(bad):
     assert float(sp.comb(bad, 0.0)) == 0.0
     # `-0.0` is not negative for this purpose, and stays in the domain
     assert float(sp.comb(5.0, -0.0)) == 1.0
+
+
+@pytest.mark.parametrize("exponent", [2, 10, 16, 20, 100, 153, 154, 200, 300])
+def test_derivative_of_n_choose_one_is_one(exponent):
+    """``d/dN C(N, 1) == 1`` is an identity, so it needs no reference.
+
+    It is the cheapest probe of the derivative at large `N`, where
+    `jax.scipy.special.betaln`'s own gradient is exactly twice the truth from
+    `a` of about 1e154 and `nan` above. Through
+    ``comb = exp(-betaln(N, 2) - log(N + 1))`` that arrived as
+    ``C * (4/N - 1/N) = 3`` -- a silent 200% error while the value stayed
+    correct. The Beta branch's asymptotic form has no `betaln` in it and now
+    covers the whole band where that defect lives.
+    """
+    n = jnp.asarray(10.0**exponent)
+    one = jnp.asarray(1.0)
+    np.testing.assert_allclose(float(jax.grad(sp.comb, 0)(n, one)), 1.0, rtol=1e-12)
+    np.testing.assert_allclose(float(jax.jacfwd(sp.comb, 0)(n, one)), 1.0, rtol=1e-12)
+
+
+@pytest.mark.parametrize(("k", "exponent"), [(2, 103), (3, 78), (5, 52)])
+def test_derivative_is_finite_where_the_value_is(k, exponent):
+    """Value and gradient must agree about the domain.
+
+    The `nan` onset moved with `k` -- 1e154 at k = 1, 1e103 at 2, 1e77 at 3 --
+    so a caller guarding on `isnan(value)` was safe where one guarding on
+    `isnan(grad)` was not.
+    """
+    n, kk = jnp.asarray(10.0**exponent), jnp.asarray(float(k))
+    assert jnp.isfinite(sp.comb(n, kk))
+    assert jnp.isfinite(jax.grad(sp.comb, 0)(n, kk))

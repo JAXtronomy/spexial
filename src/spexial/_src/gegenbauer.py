@@ -170,7 +170,16 @@ def _C_n_plus_1(carry: _Carry, n: AnyArray) -> tuple[_Carry, AnyArray]:
     # `eval_gegenbauer` over 128 points. That is not a trade worth making for a
     # corner that needs `alpha` around 1e285 before the loss is even visible, so
     # orders from 2 up sit at the platform's floor and the docs say so.
-    accumulate = (2 * (n + alpha) * x * Cn - (n + 2 * alpha - 1) * Cn_minus_1) / (n + 1)
+    # `(n - 1) + 2a`, never `n + 2a - 1`. They are the same number and not the
+    # same computation: at n = 1 the second spells `1 + 2a - 1`, which
+    # annihilates `2a` entirely once it falls below an eps of 1, and the
+    # recurrence then carries the error up through every higher degree. At
+    # alpha = 1e-20 that took `C_3` to exactly 0 against a true -6.7e-21 and
+    # flipped the sign of `C_5`. Grouped this way the small term has nothing to
+    # cancel against; from n = 2 up it is a legitimate rounding, since there
+    # `2a` really is negligible beside `n - 1`.
+    coefficient = (n - 1) + 2 * alpha
+    accumulate = (2 * (n + alpha) * x * Cn - coefficient * Cn_minus_1) / (n + 1)
     return (alpha, x, accumulate, Cn), accumulate
 
 

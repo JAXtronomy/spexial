@@ -4,6 +4,7 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
+import mpmath as mp
 import numpy as np
 import pytest
 from scipy.special import eval_gegenbauer as scipy_eval_gegenbauer
@@ -223,4 +224,51 @@ def test_eval_gegenbauers_accepts_mixed_dtypes(alpha_dtype, x_dtype):
         np.asarray(got, dtype=np.float64),
         [1.0, 0.9, -0.825, -1.7775],
         rtol=32 * coarsest,
+    )
+
+
+@pytest.mark.parametrize("alpha", [1e-8, 1e-12, 1e-20])
+@pytest.mark.parametrize("n", [2, 3, 4, 5, 6])
+def test_small_alpha_survives_the_recurrence(n, alpha):
+    """`2*alpha` must not be annihilated by the coefficient's spelling.
+
+    Written `n + 2*alpha - 1`, the `2*alpha` is added to `n` and then `1` is
+    subtracted, so at `n = 1` it vanishes entirely once it falls below an eps
+    of 1 -- and the recurrence carries that up through every higher degree.
+    `C_3` came out exactly 0 against a true -6.7e-21, and `C_5` had the wrong
+    sign. Grouped as `(n - 1) + 2*alpha` the small term has nothing to cancel
+    against. Relative, not absolute: an absolute tolerance swallows a true
+    value of 1e-21 whole.
+
+    Against **mpmath**, not SciPy. Once the coefficient is grouped correctly
+    `spexial` is the more accurate of the two here -- 1.5e-16 against SciPy's
+    4.6e-8 at `n = 6, alpha = 1e-8` -- so a SciPy-parity test would assert the
+    wrong number. The reference is the three-term recurrence itself, which
+    needs a few hundred digits: at 60 dps mpmath loses `2*alpha` in exactly the
+    same way the buggy spelling did.
+    """
+    with mp.workdps(400):
+        a, x = mp.mpf(alpha), mp.mpf(0.5)
+        previous, current = mp.mpf(1), 2 * a * x
+        for degree in range(1, n):
+            previous, current = (
+                current,
+                (2 * (degree + a) * x * current - ((degree - 1) + 2 * a) * previous)
+                / (degree + 1),
+            )
+        expected = float(current)
+    got = float(sp.eval_gegenbauer(n, alpha, 0.5))
+    np.testing.assert_allclose(got, expected, rtol=1e-12)
+
+
+@pytest.mark.parametrize("n", [2, 3, 5])
+def test_both_entry_points_agree_at_small_alpha(n):
+    """`eval_gegenbauers` is documented as the scalar call plus lower degrees.
+
+    At `alpha = 1e-20` they disagreed in *sign*, because XLA associated the
+    lost term differently in the two.
+    """
+    every = sp.eval_gegenbauers(6, 1e-20, 0.5)
+    np.testing.assert_allclose(
+        float(every[n]), float(sp.eval_gegenbauer(n, 1e-20, 0.5)), rtol=1e-12
     )
