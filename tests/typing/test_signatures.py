@@ -72,6 +72,14 @@ def test_polylog_signature() -> None:
     assert value.shape == ()
 
 
+def test_incomplete_beta_signature() -> None:
+    """`incomplete_beta(a, b, z, /)` takes three array-likes, returns an Array."""
+    from_scalars: Out = sp.incomplete_beta(2.0, 1.5, 0.5)
+    from_array: Out = sp.incomplete_beta(2.0, 1.5, jnp.asarray([0.1, 0.5]))
+    assert from_scalars.shape == ()
+    assert from_array.shape == (2,)
+
+
 def test_gegenbauer_signatures() -> None:
     """`eval_gegenbauer(n, alpha, x, /)` and the plural form."""
     order: int = 3
