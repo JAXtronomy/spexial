@@ -23,12 +23,12 @@ Array([-1.    ,  0.4375, -0.    , -0.4375,  1.    ], dtype=float64)
 
 If you want `vmap` anyway — to map over an axis of a larger computation — it gives the same answer.
 
-## Evaluate `Li` over an array
+## Evaluate `polylog` over an array
 
-`Li` is the exception: it accepts only a scalar `z`, and an array argument raises a broadcasting `TypeError` rather than mapping elementwise. To evaluate it over an array, use `vmap`:
+`polylog` is the exception: it accepts only a scalar `z`, and an array argument raises a broadcasting `TypeError` rather than mapping elementwise. To evaluate it over an array, use `vmap`:
 
 ```pycon
->>> jax.vmap(lambda z: sp.Li(2, z))(jnp.array([0.25, 0.5]))
+>>> jax.vmap(lambda z: sp.polylog(2, z))(jnp.array([0.25, 0.5]))
 Array([0.26765264, 0.58224053], dtype=float64)
 
 ```

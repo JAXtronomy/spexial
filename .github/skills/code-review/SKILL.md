@@ -30,8 +30,8 @@ description: >
 ## scipy parity
 
 - A function that shares a name with `scipy.special` must match it: same argument order, same broadcasting, same branch/domain conventions, same return for edge inputs (`x = ±1`, `n = 0`, negative order). A signature that "improves on" scipy's is a divergence — it belongs behind a new name.
-- A function with _no_ `scipy.special` counterpart (`eval_gegenbauers`, `Li`) must be flagged as such in `__init__.py`'s `__all__` comment, the way the existing entries are, and needs a non-scipy reference for its expected values (mpmath is the established choice — it is a `test` group dependency for exactly this).
-- `K0`/`K1`/`K2` and friends deviate from scipy's `kn(n, x)` shape on purpose. A new function should follow the surrounding convention rather than invent a third one; if it must deviate, the docstring should say against what and why.
+- A function with _no_ `scipy.special` counterpart (`eval_gegenbauers`, `polylog`) must be flagged as such in `__init__.py`'s `__all__` comment, the way the existing entries are, and needs a non-scipy reference for its expected values (mpmath is the established choice — it is a `test` group dependency for exactly this).
+- `k0`/`k1`/`k2` and friends deviate from scipy's `kn(n, x)` shape on purpose. A new function should follow the surrounding convention rather than invent a third one; if it must deviate, the docstring should say against what and why.
 
 ## Numerics
 

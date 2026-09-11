@@ -31,13 +31,13 @@ def test_polylog_scalar(
 ) -> None:
     """Evaluate the polylogarithm of order 3 at a single point."""
     del regime  # only used to name the benchmark
-    benchmark(warm(lambda z: sp.Li(3, z), z))
+    benchmark(warm(lambda z: sp.polylog(3, z), z))
 
 
 @pytest.mark.parametrize("n", [3, 10])
 def test_polylog_vector(benchmark: BenchmarkFixture, n: int) -> None:
     """Evaluate the polylogarithm on 200 points."""
-    fn = jax.vmap(lambda z: sp.Li(n, z))
+    fn = jax.vmap(lambda z: sp.polylog(n, z))
     benchmark(warm(fn, Z_VECTOR))
 
 

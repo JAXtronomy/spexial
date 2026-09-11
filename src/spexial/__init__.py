@@ -6,12 +6,12 @@ exists the name, call signature and return values follow it.
 
 Two exports have **no** `scipy.special` counterpart:
 
-- `Li`, the polylogarithm :math:`\mathrm{Li}_n(z)` (compare `mpmath.polylog`).
+- `polylog`, the polylogarithm :math:`\mathrm{Li}_n(z)` (compare `mpmath.polylog`).
 - `eval_gegenbauers`, which returns the Gegenbauer polynomial of degree ``n``
   *and every lower degree*, as a by-product of the recurrence.
 
 The remaining exports do have one, but are not always drop-in replacements --
-`K0`/`K1`/`K2` are accurate to ~2e-7 rather than to machine precision, and
+`k0`/`k1`/`k2` are accurate to ~2e-7 rather than to machine precision, and
 `comb` is the ``exact=False`` variant, so it returns a float that is only
 close to the integer. Each docstring states its own domain and accuracy.
 
@@ -29,6 +29,8 @@ False
 """
 
 __all__ = [
+    # Deprecated uppercase spellings, kept working until their removal
+    # release. See `spexial._src.deprecated`.
     "K0",
     "K1",
     "K2",
@@ -41,6 +43,13 @@ __all__ = [
     "eval_gegenbauer",
     "eval_gegenbauers",
     "gamma",
+    "k0",
+    "k0e",
+    "k1",
+    "k1e",
+    "k2",
+    "k2e",
+    "polylog",
     "spence",
     "sph_harm_y",
     "sph_harm_y_cart",
@@ -56,8 +65,8 @@ with _install_import_hook("spexial"):
     from ._src.comb import comb
     from ._src.gamma import gamma
     from ._src.gegenbauer import eval_gegenbauer, eval_gegenbauers
-    from ._src.kn import K0, K1, K2, K0e, K1e, K2e
-    from ._src.polylog import Li
+    from ._src.kn import k0, k0e, k1, k1e, k2, k2e
+    from ._src.polylog import polylog
     from ._src.spence import spence
     from ._src.sph_harm import (
         sph_harm_y,
@@ -68,6 +77,11 @@ with _install_import_hook("spexial"):
     )
     from ._src.zeta import zeta
     from ._version import version as __version__
+
+# Outside the hook: these are assignments, not definitions, so jaxtyping has
+# nothing to instrument, and the objects they wrap were already instrumented
+# above.
+from ._src.deprecated import K0, K1, K2, K0e, K1e, K2e, Li
 
 # The hook is documented as living on `spexial.setup_package`, so it should not
 # also be reachable as `spexial.install_import_hook` -- a name users could come

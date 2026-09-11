@@ -24,7 +24,7 @@ Examples
 --------
 >>> from spexial.registry import REGISTRY, Status
 
->>> REGISTRY["K0"].status is Status.UNIQUE
+>>> REGISTRY["k0"].status is Status.UNIQUE
 True
 
 >>> REGISTRY["comb"].jax_since
@@ -93,7 +93,7 @@ class Cost:
 
     Memory is the column that usually decides. A custom JVP replaces a whole
     series' worth of saved intermediates with a single array, and the saving is
-    far larger than the speed-up: `K0` differentiates 1.5x faster but keeps 68x
+    far larger than the speed-up: `k0` differentiates 1.5x faster but keeps 68x
     less residual.
     """
 
@@ -167,14 +167,14 @@ JAX_FLOOR: Final = "0.7.2"
 
 _ROWS: Final = (
     Coverage(
-        name="K0",
+        name="k0",
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
         scipy_array_api=Support.VALUE,
         status=Status.UNIQUE,
         custom_jvp=True,
-        derivative="-K1(z)",
+        derivative="-k1(z)",
         cost=Cost(speed=0.674, memory=0.0146, against="differentiating our own series"),
         notes=(
             "JAX has no modified Bessel function of the second kind at any "
@@ -185,83 +185,83 @@ _ROWS: Final = (
         ),
     ),
     Coverage(
-        name="K1",
+        name="k1",
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
         scipy_array_api=Support.VALUE,
         status=Status.UNIQUE,
         custom_jvp=True,
-        derivative="-K0(z) - K1(z) / z",
+        derivative="-k0(z) - k1(z) / z",
         cost=Cost(speed=0.994, memory=0.333, against="differentiating our own series"),
         notes=(
-            "As `K0`. `K1` is a thin wrapper over `K1e`, whose own rule autodiff "
+            "As `k0`. `k1` is a thin wrapper over `k1e`, whose own rule autodiff "
             "already picks up, so the hand-written rule earns its place on the "
             "memory column -- 3x less residual at neutral wall-clock. "
-            "K1'(z) = -K0(z) - K1(z)/z."
+            "k1'(z) = -k0(z) - k1(z)/z."
         ),
     ),
     Coverage(
-        name="K2",
+        name="k2",
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
         scipy_array_api=Support.NONE,
         status=Status.UNIQUE,
         custom_jvp=True,
-        derivative="-K1(z) - (2/z) K2(z)",
+        derivative="-k1(z) - (2/z) k2(z)",
         cost=Cost(speed=0.989, memory=0.333, against="differentiating our own series"),
         notes=(
             "`scipy.special.kn` does not dispatch on JAX arrays at all, even "
-            "with the array API enabled. As `K1`, kept for the memory column. "
-            "K2'(z) = -K1(z) - (2/z) K2(z), summed in the scaled variables: "
-            "formed directly the `(2/z) K2` term is subnormal from z = 699 and "
+            "with the array API enabled. As `k1`, kept for the memory column. "
+            "k2'(z) = -k1(z) - (2/z) k2(z), summed in the scaled variables: "
+            "formed directly the `(2/z) k2` term is subnormal from z = 699 and "
             "XLA flushes it, which cost the derivative 0.29%."
         ),
     ),
     Coverage(
-        name="K0e",
+        name="k0e",
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
         scipy_array_api=Support.NONE,
         status=Status.UNIQUE,
         custom_jvp=True,
-        derivative="K0e(z) - K1e(z)",
+        derivative="k0e(z) - k1e(z)",
         cost=Cost(speed=0.573, memory=0.0146, against="differentiating our own series"),
         notes=(
-            "Exponentially scaled e^z K0(z), matching `scipy.special.k0e`. JAX "
+            "Exponentially scaled e^z k0(z), matching `scipy.special.k0e`. JAX "
             "has no scaled Bessel K at any version, and scipy's does not "
             "dispatch on JAX arrays. This is the only form that survives past "
-            "z = 705.5, where K0 itself is subnormal and XLA flushes it to 0."
+            "z = 705.5, where k0 itself is subnormal and XLA flushes it to 0."
         ),
     ),
     Coverage(
-        name="K1e",
+        name="k1e",
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
         scipy_array_api=Support.NONE,
         status=Status.UNIQUE,
         custom_jvp=True,
-        derivative="K1e(z) - K0e(z) - K1e(z) / z",
+        derivative="k1e(z) - k0e(z) - k1e(z) / z",
         cost=Cost(speed=0.875, memory=0.0755, against="differentiating our own series"),
-        notes="As `K0e`; matches `scipy.special.k1e`.",
+        notes="As `k0e`; matches `scipy.special.k1e`.",
     ),
     Coverage(
-        name="K2e",
+        name="k2e",
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
         scipy_array_api=Support.NONE,
         status=Status.UNIQUE,
         custom_jvp=True,
-        derivative="K2e(z) - K1e(z) - (2/z) K2e(z)",
+        derivative="k2e(z) - k1e(z) - (2/z) k2e(z)",
         cost=Cost(speed=0.982, memory=0.195, against="differentiating our own series"),
-        notes="As `K0e`; matches `scipy.special.kve(2, z)`.",
+        notes="As `k0e`; matches `scipy.special.kve(2, z)`.",
     ),
     Coverage(
-        name="Li",
+        name="polylog",
         jax_name=None,
         jax_since=None,
         jax_support=Support.NONE,
@@ -300,7 +300,7 @@ _ROWS: Final = (
             "wired up: `alpha` is traced too and dC/da has no closed form, so a "
             "rule supplying only the x-tangent would silently break `grad` with "
             "respect to `alpha`. The saving on offer is modest anyway -- 6 "
-            "residual leaves, against 29 for `Li`."
+            "residual leaves, against 29 for `polylog`."
         ),
     ),
     Coverage(

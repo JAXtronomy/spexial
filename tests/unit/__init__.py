@@ -13,5 +13,5 @@ What belongs here instead:
 - exact domain guards: `nan`, `inf`, exactly `0`, and raised exceptions, none of
   which a relative-tolerance comparison can assert;
 - regression tests naming a specific fixed bug;
-- cross-function identities that link two implementations (`Li(n, 1) == zeta(n)`).
+- cross-function identities that link two implementations (`polylog(n, 1) == zeta(n)`).
 """

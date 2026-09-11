@@ -1,6 +1,6 @@
 """Modified Bessel functions of the second kind, integer order."""
 
-__all__ = ["K0", "K1", "K2", "K0e", "K1e", "K2e"]
+__all__ = ["k0", "k0e", "k1", "k1e", "k2", "k2e"]
 
 from typing import Any, Final
 
@@ -20,7 +20,7 @@ _EULER_GAMMA: Final = 0.57721566490153286061
 """The Euler-Mascheroni constant."""
 
 _LN2: Final = 0.6931471805599453
-"""log(2), subtracted rather than dividing `z` by 2; see `_K0_small`."""
+"""log(2), subtracted rather than dividing `z` by 2; see `_k0_small`."""
 
 
 _SMALL_Z: Final = 9.0
@@ -45,8 +45,8 @@ _N_LARGE: Final = 10
 """Terms in the asymptotic series; enough for ~1e-8 relative accuracy at z > 9."""
 
 
-def _K0_small(z: AnyArray) -> AnyArray:
-    """Ascending series for `K0`; see Zhang & Jin, *Special Functions* (1996)."""
+def _k0_small(z: AnyArray) -> AnyArray:
+    """Ascending series for `k0`; see Zhang & Jin, *Special Functions* (1996)."""
     # `dtype=z.dtype`: a bare `arange(1.0, n)` is float64 whenever x64 is on, which
     # promoted the whole series and returned float64 from a float32 argument.
     k = jnp.arange(1.0, _N_SMALL + 1.0, dtype=z.dtype)
@@ -54,7 +54,7 @@ def _K0_small(z: AnyArray) -> AnyArray:
     # `log(z) - log(2)`, never `log(z / 2)`: halving a z that is merely small --
     # but perfectly normal -- lands in the subnormal range, which XLA on CPU
     # flushes to zero, and `log(0)` is `-inf`. That turned the whole finite band
-    # 2.2e-308 <= z < 4.45e-308 into `inf` (and `K1` into `nan`) where the true
+    # 2.2e-308 <= z < 4.45e-308 into `inf` (and `k1` into `nan`) where the true
     # values are ~708 and ~3e307. Subtracting instead touches no small number.
     log_half_z = _log_no_flush(z) - _LN2
     # `z[..., None]` sums over a *trailing* axis: without it `jnp.sum` collapses
@@ -65,7 +65,7 @@ def _K0_small(z: AnyArray) -> AnyArray:
     )
 
 
-def _K0e_large(z: AnyArray) -> AnyArray:
+def _k0e_large(z: AnyArray) -> AnyArray:
     """Asymptotic expansion for :math:`e^z K_0(z)`, via ``1 / (2 z I0e(z))``.
 
     Written against `jax.scipy.special.i0e` -- the exponentially scaled
@@ -92,12 +92,12 @@ def _K0e_large(z: AnyArray) -> AnyArray:
 def _two_over(z: AnyArray) -> AnyArray:
     """``2 / z``, with `-0.0` treated as the same pole as `+0.0`.
 
-    `2 / -0.0` is `-inf`, which turns `K2`'s `K0e + (2/z) K1e` into
+    `2 / -0.0` is `-inf`, which turns `k2`'s `k0e + (2/z) k1e` into
     `inf - inf == nan` -- at a point ordinary arithmetic reaches, since
     `jnp.asarray(0.0) * -1` is `-0.0`. Taking `abs` first is correct over the
     whole domain and costs nothing: for `z > 0` it is the identity, at either
     zero it gives `+inf`, and for `z < 0` -- the only place the sign could
-    matter -- `K0e` and `K1e` are already `nan`, so the result is `nan` either
+    matter -- `k0e` and `k1e` are already `nan`, so the result is `nan` either
     way.
     """
     return 2.0 / jnp.abs(z)
@@ -115,7 +115,7 @@ def _split(z: RealArrayLike) -> tuple[AnyArray, AnyArray, AnyArray, AnyArray]:
 
 
 @jax.custom_jvp
-def K0e(z: RealArrayLike, /) -> AnyArray:
+def k0e(z: RealArrayLike, /) -> AnyArray:
     r"""Compute the exponentially scaled :math:`e^z K_0(z)`.
 
     Equivalent to ``scipy.special.k0e(z)``, which has no JAX counterpart. This
@@ -144,28 +144,28 @@ def K0e(z: RealArrayLike, /) -> AnyArray:
     --------
     >>> import spexial as sp
 
-    >>> round(float(sp.K0e(1.0)), 8)
+    >>> round(float(sp.k0e(1.0)), 8)
     1.14446308
 
-    Where `K0` has underflowed to zero, the scaled form is still exact:
+    Where `k0` has underflowed to zero, the scaled form is still exact:
 
-    >>> float(sp.K0(800.0))
+    >>> float(sp.k0(800.0))
     0.0
-    >>> round(float(sp.K0e(800.0)), 10)
+    >>> round(float(sp.k0e(800.0)), 10)
     0.0443044275
 
     """
     _, small, z_small, z_large = _split(z)
-    out = jnp.where(small, _K0_small(z_small) * jnp.exp(z_small), _K0e_large(z_large))
+    out = jnp.where(small, _k0_small(z_small) * jnp.exp(z_small), _k0e_large(z_large))
     return _cast_like(out, z)
 
 
 @jax.custom_jvp
-def K1e(z: RealArrayLike, /) -> AnyArray:
+def k1e(z: RealArrayLike, /) -> AnyArray:
     r"""Compute the exponentially scaled :math:`e^z K_1(z)`.
 
     Equivalent to ``scipy.special.k1e(z)``, which has no JAX counterpart.
-    Obtained from `K0e` through the Wronskian
+    Obtained from `k0e` through the Wronskian
     :math:`I_0(z) K_1(z) + I_1(z) K_0(z) = 1/z`, in the scaled variables.
 
     Parameters
@@ -189,31 +189,31 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
     --------
     >>> import spexial as sp
 
-    >>> round(float(sp.K1e(1.0)), 8)
+    >>> round(float(sp.k1e(1.0)), 8)
     1.63615349
-    >>> round(float(sp.K1e(800.0)), 10)
+    >>> round(float(sp.k1e(800.0)), 10)
     0.0443321091
 
     """
     z_arr = _as_float(z)
-    # K1 diverges at 0, but the closed form evaluates to
-    # `1/0 - i1e(0) * K0e(0) == inf - 0 * inf == nan` there. At +inf it is
-    # `(0 - 0 * 0) / 0 == nan` for the same reason `K0e` needs a guard.
+    # k1 diverges at 0, but the closed form evaluates to
+    # `1/0 - i1e(0) * k0e(0) == inf - 0 * inf == nan` there. At +inf it is
+    # `(0 - 0 * 0) / 0 == nan` for the same reason `k0e` needs a guard.
     # Substitute both limits.
     at_inf = z_arr == jnp.inf
     # `z_arr` itself, not a substituted `z_safe`. The degenerate points are
     # overwritten by the `where` below, so the substitution bought nothing --
-    # and it cost a great deal: `K0e(z_safe)` is a *different* subgraph from the
-    # `K0e(z_arr)` its callers evaluate, so `K2`, `K2e` and every JVP that needs
+    # and it cost a great deal: `k0e(z_safe)` is a *different* subgraph from the
+    # `k0e(z_arr)` its callers evaluate, so `k2`, `k2e` and every JVP that needs
     # both ran the 30-term series twice with no CSE available.
     z_safe = z_arr
-    # The Wronskian gives `(1/z - i1e K0e) / i0e`; this is that identity with
+    # The Wronskian gives `(1/z - i1e k0e) / i0e`; this is that identity with
     # numerator and denominator both multiplied by z. Algebraically the same,
     # but every term stays normal: `1/z` alone goes subnormal above z = 4.5e307
-    # (as does `i1e * K0e`, which is also ~1/2z), and both flushed to zero, so
+    # (as does `i1e * k0e`, which is also ~1/2z), and both flushed to zero, so
     # the unmultiplied form returned exactly 0 from there up. Multiplied
     # through, the numerator tends to 1/2 and the denominator to sqrt(z/2pi).
-    k1e = (1.0 - z_safe * i1e(z_safe) * K0e(z_safe)) / (z_safe * i0e(z_safe))
+    k1e = (1.0 - z_safe * i1e(z_safe) * k0e(z_safe)) / (z_safe * i0e(z_safe))
     # Below `tiny` the denominator flushes to zero and the quotient is `inf`,
     # where the true value is `1/z` -- still representable for the factor of
     # about two between `tiny` and `1/max`, which in float32 is the reachable
@@ -225,7 +225,7 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
     # should own, and it behaves identically eager and under `jit`. Separating
     # the pole from the subnormals with a bit test does not survive XLA's
     # fusion -- `exactly_zero` is correct in isolation and wrong when the select
-    # is its only consumer, which is how `K1` came to return `inf` across the
+    # is its only consumer, which is how `k1` came to return `inf` across the
     # whole band under `jit` while eager was right. Nothing here needs the
     # distinction anyway: `e^z K_1(z) -> 1/z`, and `1/0` is the pole's `inf`.
     #
@@ -240,7 +240,7 @@ def K1e(z: RealArrayLike, /) -> AnyArray:
 
 
 @jax.custom_jvp
-def K2e(z: RealArrayLike, /) -> AnyArray:
+def k2e(z: RealArrayLike, /) -> AnyArray:
     r"""Compute the exponentially scaled :math:`e^z K_2(z)`.
 
     Equivalent to ``scipy.special.kve(2, z)``, which has no JAX counterpart.
@@ -268,18 +268,18 @@ def K2e(z: RealArrayLike, /) -> AnyArray:
     --------
     >>> import spexial as sp
 
-    >>> round(float(sp.K2e(1.0)), 8)
+    >>> round(float(sp.k2e(1.0)), 8)
     4.41677005
-    >>> round(float(sp.K2e(800.0)), 10)
+    >>> round(float(sp.k2e(800.0)), 10)
     0.0444152578
 
     """
     z_arr = _as_float(z)
-    return _cast_like(K0e(z_arr) + _two_over(z_arr) * K1e(z_arr), z)
+    return _cast_like(k0e(z_arr) + _two_over(z_arr) * k1e(z_arr), z)
 
 
 @jax.custom_jvp
-def K0(z: RealArrayLike, /) -> AnyArray:
+def k0(z: RealArrayLike, /) -> AnyArray:
     """Compute the modified Bessel function of the second kind of order 0.
 
     Equivalent to ``scipy.special.kn(0, z)``. See Zhang and Jin,
@@ -304,32 +304,32 @@ def K0(z: RealArrayLike, /) -> AnyArray:
         float32 and rounded back, so they get what their dtype can hold. Underflows to 0
         where the true value falls below the *dtype's* smallest normal, which is a
         different place in each: 705.3 in float64, 85.3 in float32,
-        85.2 in bfloat16 and 16.1 in float16. Use `K0e` above it.
+        85.2 in bfloat16 and 16.1 in float16. Use `k0e` above it.
 
     Examples
     --------
     >>> import jax.numpy as jnp
     >>> import spexial as sp
 
-    >>> round(float(sp.K0(1.0)), 8)
+    >>> round(float(sp.k0(1.0)), 8)
     0.42102444
 
     Array input is evaluated elementwise, spanning both branches:
 
-    >>> [round(float(k), 8) for k in sp.K0(jnp.asarray([0.5, 5.0, 20.0]))]
+    >>> [round(float(k), 8) for k in sp.k0(jnp.asarray([0.5, 5.0, 20.0]))]
     [0.92441907, 0.0036911, 0.0]
 
     """
     _, small, z_small, z_large = _split(z)
-    out = jnp.where(small, _K0_small(z_small), _K0e_large(z_large) * jnp.exp(-z_large))
+    out = jnp.where(small, _k0_small(z_small), _k0e_large(z_large) * jnp.exp(-z_large))
     return _cast_like(out, z)
 
 
 @jax.custom_jvp
-def K1(z: RealArrayLike, /) -> AnyArray:
+def k1(z: RealArrayLike, /) -> AnyArray:
     """Compute the modified Bessel function of the second kind of order 1.
 
-    Obtained from `K0` through the Wronskian
+    Obtained from `k0` through the Wronskian
     :math:`I_0(z) K_1(z) + I_1(z) K_0(z) = 1/z`.
 
     Parameters
@@ -350,26 +350,26 @@ def K1(z: RealArrayLike, /) -> AnyArray:
         float32 and rounded back, so they get what their dtype can hold. Underflows to 0
         where the true value falls below the *dtype's* smallest normal, which is a
         different place in each: 705.3 in float64, 85.3 in float32,
-        85.2 in bfloat16 and 16.2 in float16. Use `K1e` above it.
+        85.2 in bfloat16 and 16.2 in float16. Use `k1e` above it.
 
     Examples
     --------
     >>> import jax.numpy as jnp
     >>> import spexial as sp
 
-    >>> round(float(sp.K1(1.0)), 8)
+    >>> round(float(sp.k1(1.0)), 8)
     0.60190723
 
-    >>> [round(float(k), 8) for k in sp.K1(jnp.asarray([0.5, 5.0, 20.0]))]
+    >>> [round(float(k), 8) for k in sp.k1(jnp.asarray([0.5, 5.0, 20.0]))]
     [1.65644112, 0.00404461, 0.0]
 
     """
     z_arr = _as_float(z)
-    return _cast_like(K1e(z_arr) * jnp.exp(-z_arr), z)
+    return _cast_like(k1e(z_arr) * jnp.exp(-z_arr), z)
 
 
 @jax.custom_jvp
-def K2(z: RealArrayLike, /) -> AnyArray:
+def k2(z: RealArrayLike, /) -> AnyArray:
     """Compute the modified Bessel function of the second kind of order 2.
 
     Obtained from the recurrence :math:`K_2(z) = K_0(z) + (2/z) K_1(z)`.
@@ -392,28 +392,28 @@ def K2(z: RealArrayLike, /) -> AnyArray:
         float32 and rounded back, so they get what their dtype can hold. Underflows to 0
         where the true value falls below the *dtype's* smallest normal, which is a
         different place in each: 705.3 in float64, 85.4 in float32,
-        85.2 in bfloat16 and 16.3 in float16. Use `K2e` above it.
+        85.2 in bfloat16 and 16.3 in float16. Use `k2e` above it.
 
     Examples
     --------
     >>> import jax.numpy as jnp
     >>> import spexial as sp
 
-    >>> round(float(sp.K2(1.0)), 8)
+    >>> round(float(sp.k2(1.0)), 8)
     1.6248389
 
-    >>> [round(float(k), 8) for k in sp.K2(jnp.asarray([0.5, 5.0, 20.0]))]
+    >>> [round(float(k), 8) for k in sp.k2(jnp.asarray([0.5, 5.0, 20.0]))]
     [7.55018355, 0.00530894, 0.0]
 
     """
     # The recurrence is applied in the *scaled* variables and undone once.
-    # Evaluated directly, the `(2/z) K1` term drops into the subnormal range
+    # Evaluated directly, the `(2/z) k1` term drops into the subnormal range
     # around z = 699 -- where XLA on CPU flushes it to zero, silently losing a
     # 0.3% contribution (2850x the documented tolerance) while still returning a
-    # plausible number. `K0e` and `K1e` are order 1e-2 there, so the sum is
+    # plausible number. `k0e` and `k1e` are order 1e-2 there, so the sum is
     # formed entirely in normal arithmetic and only the result is scaled down.
     z_arr = _as_float(z)
-    return _cast_like(K2e(z_arr) * jnp.exp(-z_arr), z)
+    return _cast_like(k2e(z_arr) * jnp.exp(-z_arr), z)
 
 
 # Analytic derivatives. Letting JAX differentiate through the 30-term ascending
@@ -423,86 +423,86 @@ def K2(z: RealArrayLike, /) -> AnyArray:
 # ~1e-8, well inside these functions' own ~1e-6 accuracy.
 #
 # Standard recurrence Kv'(z) = -K_{v-1}(z) - (v/z) K_v(z), which at v = 0, 1, 2
-# gives K0' = -K1, K1' = -K0 - K1/z and K2' = -K1 - (2/z) K2. The scaled forms
+# gives k0' = -k1, k1' = -k0 - k1/z and k2' = -k1 - (2/z) k2. The scaled forms
 # pick up the extra `+ Kn e` term from differentiating the `e^z` factor.
 
 
 # Each rule returns `_cast_like(..., z)` for the primal *and* for the derivative
-# factor. Without it the two disagree: `_K2_jvp` narrowed only its primal, so
-# `grad(K2)` on a bfloat16 argument raised outright ("Custom JVP rule must
+# factor. Without it the two disagree: `_k2_jvp` narrowed only its primal, so
+# `grad(k2)` on a bfloat16 argument raised outright ("Custom JVP rule must
 # produce primal and tangent outputs with corresponding ... dtypes"), while the
 # other rules narrowed neither and quietly handed `jax.jvp` a wider primal than
 # the plain call returns.
 
 
-@K0.defjvp
-def _K0_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """K0'(z) = -K1(z)."""
+@k0.defjvp
+def _k0_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """k0'(z) = -k1(z)."""
     (z,), (dz,) = primals, tangents
-    return K0(z), _cast_like(-K1(z), z) * dz
+    return k0(z), _cast_like(-k1(z), z) * dz
 
 
 @jax.custom_jvp
-def _dK1(z: AnyArray) -> AnyArray:
-    """K1'(z) = -K0(z) - K1(z)/z, summed scaled.
+def _dk1(z: AnyArray) -> AnyArray:
+    """k1'(z) = -k0(z) - k1(z)/z, summed scaled.
 
     A named function with its own rule rather than an expression inside
-    `_K1_jvp`, so that differentiating it *again* also gets a scaled sum.
-    Left as raw arithmetic, `grad(grad(K1))` formed `d(1/z) * K1 * e^-z`, which
+    `_k1_jvp`, so that differentiating it *again* also gets a scaled sum.
+    Left as raw arithmetic, `grad(grad(k1))` formed `d(1/z) * k1 * e^-z`, which
     is ~4e-312 at z = 700 -- subnormal, so XLA flushed it and the second
     derivative came out 7.2e-4 low. Exactly the bug the first derivative was
     fixed for, one order up.
     """
-    return -(K0e(z) + 0.5 * _two_over(z) * K1e(z)) * jnp.exp(-z)
+    return -(k0e(z) + 0.5 * _two_over(z) * k1e(z)) * jnp.exp(-z)
 
 
-@_dK1.defjvp
-def _dK1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """K1''(z) = K1(z) + K0(z)/z + 2 K1(z)/z^2."""
+@_dk1.defjvp
+def _dk1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """k1''(z) = k1(z) + k0(z)/z + 2 k1(z)/z^2."""
     (z,), (dz,) = primals, tangents
     two_over = _two_over(z)
-    second = (K1e(z) + 0.5 * two_over * K0e(z) + 0.5 * two_over**2 * K1e(z)) * jnp.exp(
+    second = (k1e(z) + 0.5 * two_over * k0e(z) + 0.5 * two_over**2 * k1e(z)) * jnp.exp(
         -z
     )
-    return _dK1(z), second * dz
+    return _dk1(z), second * dz
 
 
 @jax.custom_jvp
-def _dK2(z: AnyArray) -> AnyArray:
-    """K2'(z) = -K1(z) - (2/z) K2(z), summed scaled. See `_dK1`."""
+def _dk2(z: AnyArray) -> AnyArray:
+    """k2'(z) = -k1(z) - (2/z) k2(z), summed scaled. See `_dk1`."""
     two_over = _two_over(z)
-    k0e, k1e = K0e(z), K1e(z)
-    return -(k1e + two_over * (k0e + two_over * k1e)) * jnp.exp(-z)
+    g0, g1 = k0e(z), k1e(z)
+    return -(g1 + two_over * (g0 + two_over * g1)) * jnp.exp(-z)
 
 
-@_dK2.defjvp
-def _dK2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """K2''(z) = K0(z) + 3 K1(z)/z + 6 K2(z)/z^2."""
+@_dk2.defjvp
+def _dk2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """k2''(z) = k0(z) + 3 k1(z)/z + 6 k2(z)/z^2."""
     (z,), (dz,) = primals, tangents
     two_over = _two_over(z)
-    second = (K0e(z) + 1.5 * two_over * K1e(z) + 1.5 * two_over**2 * K2e(z)) * jnp.exp(
+    second = (k0e(z) + 1.5 * two_over * k1e(z) + 1.5 * two_over**2 * k2e(z)) * jnp.exp(
         -z
     )
-    return _dK2(z), second * dz
+    return _dk2(z), second * dz
 
 
-@K1.defjvp
-def _K1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """K1'(z) = -K0(z) - K1(z) / z, summed scaled in `_dK1`."""
+@k1.defjvp
+def _k1_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """k1'(z) = -k0(z) - k1(z) / z, summed scaled in `_dk1`."""
     (z,), (dz,) = primals, tangents
-    return K1(z), _cast_like(_dK1(_as_float(z)), z) * dz
+    return k1(z), _cast_like(_dk1(_as_float(z)), z) * dz
 
 
-@K2.defjvp
-def _K2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """K2'(z) = -K1(z) - (2/z) K2(z), summed scaled in `_dK2`."""
+@k2.defjvp
+def _k2_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """k2'(z) = -k1(z) - (2/z) k2(z), summed scaled in `_dk2`."""
     (z,), (dz,) = primals, tangents
-    return K2(z), _cast_like(_dK2(_as_float(z)), z) * dz
+    return k2(z), _cast_like(_dk2(_as_float(z)), z) * dz
 
 
 # At z = 0 each of these is a difference of two infinities, so the closed form
 # gives `nan` where the true one-sided limit is `-inf` -- which is what the
-# unscaled `K0`/`K1`/`K2` rules already return, since theirs have a single
+# unscaled `k0`/`k1`/`k2` rules already return, since theirs have a single
 # divergent term. Substituted so the two families agree at the pole.
 
 
@@ -511,16 +511,16 @@ def _at_pole(z: AnyArray, deriv: AnyArray, limit: float = -jnp.inf) -> AnyArray:
 
     At ``z = 0`` each of these rules is a difference of two infinities. So is
     the whole band ``0 < z <~ 6.7e-155``, where the scaled values themselves
-    overflow to `inf` and `K2e - K1e - (2/z) K2e` becomes `inf - inf` -- a
-    guard on ``z == 0`` alone left `grad(K2e)` returning `nan` there while
-    `grad(K2)` and `grad(K1e)` both returned the true limit. Keyed on the
+    overflow to `inf` and `k2e - k1e - (2/z) k2e` becomes `inf - inf` -- a
+    guard on ``z == 0`` alone left `grad(k2e)` returning `nan` there while
+    `grad(k2)` and `grad(k1e)` both returned the true limit. Keyed on the
     result not being *finite* rather than on a magnitude threshold, so it
     cannot go stale. Negative `z` keeps its `nan`: that is outside the domain,
     not a pole, and so does a `nan` argument.
 
     Not-finite rather than `nan`, because which of the two an ``inf - inf``
     comes out as is a property of the graph and not of the arithmetic: XLA
-    reassociates the sum under `jit`, so ``jit(grad(grad(K2e)))`` was `-inf`
+    reassociates the sum under `jit`, so ``jit(grad(grad(k2e)))`` was `-inf`
     across ``3.2e-154 <~ z <~ 5.6e-103`` where eager was `nan` and the true
     limit is ``+inf`` -- the same value disagreeing with itself between the two
     modes, and with the sign flipped in the mode users actually run. Every
@@ -538,7 +538,7 @@ def _at_pole(z: AnyArray, deriv: AnyArray, limit: float = -jnp.inf) -> AnyArray:
     # value is `nan`. This function's own docstring says negative `z` keeps its
     # `nan`, and that is exactly what failed.
     # `~jnp.isnan(z)`, because a `nan` argument makes `deriv` `nan` too and so
-    # walked straight into the pole substitution: `grad(K0e)(nan)` was `-inf`
+    # walked straight into the pole substitution: `grad(k0e)(nan)` was `-inf`
     # and the second derivative `+inf`, for an argument whose *value* is `nan`
     # and which SciPy's `kve` also calls `nan`. Worse, `-nan` came back `nan`,
     # so the answer turned on a sign bit that carries no meaning.
@@ -547,76 +547,69 @@ def _at_pole(z: AnyArray, deriv: AnyArray, limit: float = -jnp.inf) -> AnyArray:
 
 
 @jax.custom_jvp
-def _dK0e(z: AnyArray) -> AnyArray:
-    """(e^z K0)' = e^z (K0 - K1). See `_dK1` for why this is a named function."""
-    return _at_pole(z, K0e(z) - K1e(z))
+def _dk0e(z: AnyArray) -> AnyArray:
+    """(e^z k0)' = e^z (k0 - k1). See `_dk1` for why this is a named function."""
+    return _at_pole(z, k0e(z) - k1e(z))
 
 
-@_dK0e.defjvp
-def _dK0e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """(e^z K0)'' = 2 e^z K0 - 2 e^z K1 + e^z K1 / z."""
+@_dk0e.defjvp
+def _dk0e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """(e^z k0)'' = 2 e^z k0 - 2 e^z k1 + e^z k1 / z."""
     (z,), (dz,) = primals, tangents
-    k0e, k1e = K0e(z), K1e(z)
-    second = 2.0 * k0e - 2.0 * k1e + 0.5 * _two_over(z) * k1e
-    return _dK0e(z), _at_pole(z, second, jnp.inf) * dz
+    g0, g1 = k0e(z), k1e(z)
+    second = 2.0 * g0 - 2.0 * g1 + 0.5 * _two_over(z) * g1
+    return _dk0e(z), _at_pole(z, second, jnp.inf) * dz
 
 
 @jax.custom_jvp
-def _dK1e(z: AnyArray) -> AnyArray:
-    """(e^z K1)' = e^z K1 - e^z K0 - e^z K1 / z."""
-    return _at_pole(z, K1e(z) - K0e(z) - 0.5 * _two_over(z) * K1e(z))
+def _dk1e(z: AnyArray) -> AnyArray:
+    """(e^z k1)' = e^z k1 - e^z k0 - e^z k1 / z."""
+    return _at_pole(z, k1e(z) - k0e(z) - 0.5 * _two_over(z) * k1e(z))
 
 
-@_dK1e.defjvp
-def _dK1e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """(e^z K1)'' = 2G1 - 2G0 - 2G1/z + G0/z + 2G1/z^2, with Gn = e^z K_n."""
+@_dk1e.defjvp
+def _dk1e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """(e^z k1)'' = 2G1 - 2G0 - 2G1/z + G0/z + 2G1/z^2, with Gn = e^z K_n."""
     (z,), (dz,) = primals, tangents
-    k0e, k1e, half = K0e(z), K1e(z), 0.5 * _two_over(z)
-    second = 2.0 * k1e - 2.0 * k0e - 2.0 * half * k1e + half * k0e + 2.0 * half**2 * k1e
-    return _dK1e(z), _at_pole(z, second, jnp.inf) * dz
+    g0, g1, half = k0e(z), k1e(z), 0.5 * _two_over(z)
+    second = 2.0 * g1 - 2.0 * g0 - 2.0 * half * g1 + half * g0 + 2.0 * half**2 * g1
+    return _dk1e(z), _at_pole(z, second, jnp.inf) * dz
 
 
 @jax.custom_jvp
-def _dK2e(z: AnyArray) -> AnyArray:
-    """(e^z K2)' = e^z K2 - e^z K1 - (2/z) e^z K2."""
-    return _at_pole(z, K2e(z) - K1e(z) - _two_over(z) * K2e(z))
+def _dk2e(z: AnyArray) -> AnyArray:
+    """(e^z k2)' = e^z k2 - e^z k1 - (2/z) e^z k2."""
+    return _at_pole(z, k2e(z) - k1e(z) - _two_over(z) * k2e(z))
 
 
-@_dK2e.defjvp
-def _dK2e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """(e^z K2)'' = G0 - 2G1 + G2 + 3G1/z - 4G2/z + 6G2/z^2."""
+@_dk2e.defjvp
+def _dk2e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """(e^z k2)'' = G0 - 2G1 + G2 + 3G1/z - 4G2/z + 6G2/z^2."""
     (z,), (dz,) = primals, tangents
-    k0e, k1e, k2e, half = K0e(z), K1e(z), K2e(z), 0.5 * _two_over(z)
-    second = (
-        k0e
-        - 2.0 * k1e
-        + k2e
-        + 3.0 * half * k1e
-        - 4.0 * half * k2e
-        + 6.0 * half**2 * k2e
-    )
-    return _dK2e(z), _at_pole(z, second, jnp.inf) * dz
+    g0, g1, g2, half = k0e(z), k1e(z), k2e(z), 0.5 * _two_over(z)
+    second = g0 - 2.0 * g1 + g2 + 3.0 * half * g1 - 4.0 * half * g2 + 6.0 * half**2 * g2
+    return _dk2e(z), _at_pole(z, second, jnp.inf) * dz
 
 
-@K0e.defjvp
-def _K0e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """(e^z K0)' = e^z (K0 - K1)."""
+@k0e.defjvp
+def _k0e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """(e^z k0)' = e^z (k0 - k1)."""
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    return _cast_like(K0e(z_arr), z), _cast_like(_dK0e(z_arr), z) * dz
+    return _cast_like(k0e(z_arr), z), _cast_like(_dk0e(z_arr), z) * dz
 
 
-@K1e.defjvp
-def _K1e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """(e^z K1)' = e^z K1 - e^z K0 - e^z K1 / z."""
+@k1e.defjvp
+def _k1e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """(e^z k1)' = e^z k1 - e^z k0 - e^z k1 / z."""
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    return _cast_like(K1e(z_arr), z), _cast_like(_dK1e(z_arr), z) * dz
+    return _cast_like(k1e(z_arr), z), _cast_like(_dk1e(z_arr), z) * dz
 
 
-@K2e.defjvp
-def _K2e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
-    """(e^z K2)' = e^z K2 - e^z K1 - (2/z) e^z K2."""
+@k2e.defjvp
+def _k2e_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    """(e^z k2)' = e^z k2 - e^z k1 - (2/z) e^z k2."""
     (z,), (dz,) = primals, tangents
     z_arr = _as_float(z)
-    return _cast_like(K2e(z_arr), z), _cast_like(_dK2e(z_arr), z) * dz
+    return _cast_like(k2e(z_arr), z), _cast_like(_dk2e(z_arr), z) * dz

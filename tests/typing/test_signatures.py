@@ -48,10 +48,10 @@ def test_gamma_signature() -> None:
 
 
 def test_bessel_signatures() -> None:
-    """`K0`/`K1`/`K2` each take one real array-like and return an Array."""
-    k0: Out = sp.K0(1.0)
-    k1: Out = sp.K1(jnp.asarray([1.0, 2.0]))
-    k2: Out = sp.K2(1.0)
+    """`k0`/`k1`/`k2` each take one real array-like and return an Array."""
+    k0: Out = sp.k0(1.0)
+    k1: Out = sp.k1(jnp.asarray([1.0, 2.0]))
+    k2: Out = sp.k2(1.0)
     assert k0.shape == ()
     assert k1.shape == (2,)
     assert k2.shape == ()
@@ -66,9 +66,9 @@ def test_zeta_signature() -> None:
 
 
 def test_polylog_signature() -> None:
-    """`Li(n, z, /)` takes a static `int` order and a scalar, returns an Array."""
+    """`polylog(n, z, /)` takes a static `int` order and a scalar, returns an Array."""
     order: int = 2
-    value: Out = sp.Li(order, 0.25)
+    value: Out = sp.polylog(order, 0.25)
     assert value.shape == ()
 
 

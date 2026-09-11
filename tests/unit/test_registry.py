@@ -22,31 +22,31 @@ from spexial.registry import JAX_FLOOR, REGISTRY, Status, Support
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# `Li` validates `n` in a plain wrapper and delegates to an inner core, so the
+# `polylog` validates `n` in a plain wrapper and delegates to an inner core, so the
 # `jax.custom_jvp` object is not the exported name. Everything else decorates
 # the export directly. These probes let the checks below stay strict rather than
 # being relaxed to accommodate the difference.
 _JVP_OBJECT = {
-    "K0": sp.K0,
-    "K1": sp.K1,
-    "K2": sp.K2,
-    "K0e": sp.K0e,
-    "K1e": sp.K1e,
-    "K2e": sp.K2e,
+    "k0": sp.k0,
+    "k1": sp.k1,
+    "k2": sp.k2,
+    "k0e": sp.k0e,
+    "k1e": sp.k1e,
+    "k2e": sp.k2e,
     "gamma": sp.gamma,
-    "Li": _li_core,
+    "polylog": _li_core,
     "spence": sp.spence,
 }
 
 _PROBES = {
-    "K0": (sp.K0, sp.K0.fun),
-    "K1": (sp.K1, sp.K1.fun),
-    "K2": (sp.K2, sp.K2.fun),
-    "K0e": (sp.K0e, sp.K0e.fun),
-    "K1e": (sp.K1e, sp.K1e.fun),
-    "K2e": (sp.K2e, sp.K2e.fun),
+    "k0": (sp.k0, sp.k0.fun),
+    "k1": (sp.k1, sp.k1.fun),
+    "k2": (sp.k2, sp.k2.fun),
+    "k0e": (sp.k0e, sp.k0e.fun),
+    "k1e": (sp.k1e, sp.k1e.fun),
+    "k2e": (sp.k2e, sp.k2e.fun),
     "gamma": (sp.gamma, sp.gamma.fun),
-    "Li": (
+    "polylog": (
         lambda z: jax.vmap(lambda t: _li_core(3, t))(z),
         lambda z: jax.vmap(lambda t: _li_core.fun(3, t))(z),
     ),
@@ -55,8 +55,14 @@ _PROBES = {
 
 
 def test_registry_covers_exactly_the_public_api():
-    """Every export has a row, and every row is an export."""
-    exported = {name for name in sp.__all__ if name != "__version__"}
+    """Every export has a row, and every row is an export.
+
+    The deprecated uppercase spellings are excluded: they are aliases of rows
+    that already exist, not coverage of their own, and giving them rows would
+    double every count the table reports.
+    """
+    aliases = {"K0", "K1", "K2", "K0e", "K1e", "K2e", "Li"}
+    exported = {n for n in sp.__all__ if n != "__version__" and n not in aliases}
     assert set(REGISTRY) == exported
 
 
@@ -238,11 +244,11 @@ def test_custom_jvp_really_saves_the_claimed_memory(name):
     """
     row = REGISTRY[name]
     custom, plain = _PROBES[name]
-    # `Li` only converges for |z| < 1 on its series branch; the others are happy
+    # `polylog` only converges for |z| < 1 on its series branch; the others are happy
     # anywhere positive.
     x = (
         jnp.linspace(0.05, 0.45, 2_000)
-        if name in {"Li", "spence"}
+        if name in {"polylog", "spence"}
         else jnp.linspace(0.6, 20.0, 10_000)
     )
     with_jvp = _residual_bytes(custom, x)
@@ -269,7 +275,7 @@ def test_custom_jvp_agrees_with_differentiating_the_implementation(name):
     custom, plain = _PROBES[name]
     x = (
         jnp.linspace(0.05, 0.45, 40)
-        if name in {"Li", "spence"}
+        if name in {"polylog", "spence"}
         else jnp.linspace(0.7, 12.0, 40)
     )
     analytic = jax.grad(lambda a: custom(a).sum())(x)

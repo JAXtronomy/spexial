@@ -10,7 +10,7 @@ built once, lazily, from exact `fractions.Fraction` arithmetic -- importing
 Using exact arithmetic is not gold-plating: `jax.scipy.special.bernoulli` (and
 `scipy.special.bernoulli`) evaluate the numbers by a numerically unstable route
 that loses ~7 digits on :math:`B_4` and ~6 on :math:`B_6`, which propagates
-straight into ``zeta(-3)`` and ``Li(4, ...)``.
+straight into ``zeta(-3)`` and ``polylog(4, ...)``.
 
 """
 

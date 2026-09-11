@@ -25,14 +25,14 @@ Z = jnp.linspace(0.5, 20.0, 1_000)
 N = jnp.linspace(2.0, 40.0, 1_000)
 
 
-@pytest.mark.parametrize("name", ["K0", "K1", "K2"])
+@pytest.mark.parametrize("name", ["k0", "k1", "k2"])
 def test_grad_bessel_custom_jvp(benchmark: BenchmarkFixture, name: str) -> None:
     """Gradient through the analytic derivative -- what ships."""
     fn = getattr(sp, name)
     benchmark(warm(jax.grad(lambda a: fn(a).sum()), Z))
 
 
-@pytest.mark.parametrize("name", ["K0", "K1", "K2"])
+@pytest.mark.parametrize("name", ["k0", "k1", "k2"])
 def test_grad_bessel_autodiff(benchmark: BenchmarkFixture, name: str) -> None:
     """Gradient through the series instead, for comparison.
 

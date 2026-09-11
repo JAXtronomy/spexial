@@ -1,6 +1,6 @@
 ---
 name: spexial
-description: Use when writing JAX code that needs special functions - gamma, zeta, polylog, modified Bessel (K0/K1/K2), Gegenbauer polynomials, or binomial coefficients - or when jax.scipy.special lacks a function or a domain you need. Covers which spexial function to reach for, where it goes beyond scipy.special, and the domains where it returns nan or loses precision.
+description: Use when writing JAX code that needs special functions - gamma, zeta, polylog, modified Bessel (k0/k1/k2), Gegenbauer polynomials, or binomial coefficients - or when jax.scipy.special lacks a function or a domain you need. Covers which spexial function to reach for, where it goes beyond scipy.special, and the domains where it returns nan or loses precision.
 ---
 
 # Using `spexial`
@@ -29,9 +29,9 @@ import spexial as sp
 | `gamma(x)` | `gamma` | JAX's value, plus an analytic derivative; complex on jax >= 0.10.2 |
 | `eval_gegenbauer(n, alpha, x)` | `eval_gegenbauer` | `n` is a static integer |
 | `eval_gegenbauers(n, alpha, x)` | -- | all orders `0..n` at once |
-| `K0(z)`, `K1(z)`, `K2(z)` | `k0`, `k1`, `kn` | modified Bessel, 2nd kind |
-| `K0e(z)`, `K1e(z)`, `K2e(z)` | `k0e`, `k1e`, `kve` | the same, scaled by `e^z`; **the only ones that work past `z = 705`** |
-| `Li(n, z)` | -- | polylogarithm; **scalar `z` only** |
+| `k0(z)`, `k1(z)`, `k2(z)` | `k0`, `k1`, `kn` | modified Bessel, 2nd kind |
+| `k0e(z)`, `k1e(z)`, `k2e(z)` | `k0e`, `k1e`, `kve` | the same, scaled by `e^z`; **the only ones that work past `z = 705`** |
+| `polylog(n, z)` | -- | polylogarithm; **scalar `z` only** |
 | `zeta(n)` | `zeta` | handles negative integers |
 
 ## Enable x64 before anything else
@@ -54,7 +54,7 @@ These are series and asymptotic expansions. In float32 the accuracy figures belo
 
 **`gamma` returns `nan` at the negative integers.** It delegates to `jax.scipy.special.gamma`, so `x = 0` gives `inf` but every negative integer gives `nan` — the two-sided limit does not exist, and this matches JAX and scipy from 1.18. Complex input works on jax >= 0.10.2. Accuracy is ~`4e-13` throughout, including close to the poles.
 
-**`Li` takes scalar `z` only.** It cannot broadcast. Use `jax.vmap`:
+**`polylog` takes scalar `z` only.** It cannot broadcast. Use `jax.vmap`:
 
 ```python
 import jax
@@ -63,14 +63,14 @@ import jax.numpy as jnp
 import spexial as sp
 
 zs = jnp.array([0.25, 0.5, 1.5])
-result = jax.vmap(lambda z: sp.Li(2, z))(zs)
+result = jax.vmap(lambda z: sp.polylog(2, z))(zs)
 ```
 
-`n` must be an integer `>= 1`. For `|z| >= 2` it is capped at **60** by the Bernoulli table the inversion formula needs, and the result is `nan` past that; smaller `|z|` has no ceiling at all (`Li(500, 1.5)` is exact).
+`n` must be an integer `>= 1`. For `|z| >= 2` it is capped at **60** by the Bernoulli table the inversion formula needs, and the result is `nan` past that; smaller `|z|` has no ceiling at all (`polylog(500, 1.5)` is exact).
 
-**`K0`/`K1`/`K2` are accurate to ~`1e-7`, not machine precision.** A 30-term ascending series meets a 10-term asymptotic expansion at `z = 9`; the worst relative error is `2.0e-7`, at `z = 8.9984` just below that cross-over. It improves in stages away from it: ~`8e-9` to `z = 15`, ~`1e-15` past `z = 30`. If you need full double precision from a modified Bessel function, this is not it.
+**`k0`/`k1`/`k2` are accurate to ~`1e-7`, not machine precision.** A 30-term ascending series meets a 10-term asymptotic expansion at `z = 9`; the worst relative error is `2.0e-7`, at `z = 8.9984` just below that cross-over. It improves in stages away from it: ~`8e-9` to `z = 15`, ~`1e-15` past `z = 30`. If you need full double precision from a modified Bessel function, this is not it.
 
-**Above `z = 705.3`, use `K0e`/`K1e`/`K2e`.** The unscaled functions underflow to 0 there — the true value is smaller than any normal double, and XLA on CPU flushes it. That ceiling belongs to the **dtype**, not the function: it is `z = 85.3` in float32, `85.2` in bfloat16 and `16.2` in float16. The scaled `e^z K_n(z)` decays only as `1/sqrt(z)` and stays exact to `DBL_MAX`.
+**Above `z = 705.3`, use `k0e`/`k1e`/`k2e`.** The unscaled functions underflow to 0 there — the true value is smaller than any normal double, and XLA on CPU flushes it. That ceiling belongs to the **dtype**, not the function: it is `z = 85.3` in float32, `85.2` in bfloat16 and `16.2` in float16. The scaled `e^z K_n(z)` decays only as `1/sqrt(z)` and stays exact to `DBL_MAX`.
 
 **In float32 the cross-over moves to `z = 4.65` and the worst error is `7.1e-3`** — about 2.5 digits. `float16`/`bfloat16` are computed in float32 and rounded back. Enable x64 if you need better.
 
@@ -83,9 +83,9 @@ Everything below assumes x64. Full detail, including how each was measured, is a
 | Function | Domain | Accurate to |
 | --- | --- | --- |
 | `comb` | `0 <= k <= N`, to `DBL_MAX` | `3.6e-12` |
-| `gamma` | real or complex, `\|x\| < 171` | `4e-13` |
-| `eval_gegenbauer` | `n <= 20`, `alpha > -0.5`, `\|x\| <= 1` | `1.8e-12` rtol; absolute error scales with the recurrence, up to `9e-5` at `n = 20, alpha = 10` |
-| `K0`/`K1`/`K2` | `0 < z < 705.3` (float64; 85.3 in float32, 16.2 in float16) | `2.0e-7` |
-| `K0e`/`K1e`/`K2e` | `z > 0`, no upper limit | `2.0e-7` |
-| `Li` | scalar `z`, `n >= 1` | `6e-13` |
+| `gamma` | real or complex, `\|x\| < 171` | `4.3e-13` |
+| `eval_gegenbauer` | `n <= 20`, `alpha > -0.5`, `\|x\| <= 1` | `2.1e-12` rtol; absolute error scales with the recurrence, up to `9e-5` at `n = 20, alpha = 10` |
+| `k0`/`k1`/`k2` | `0 < z < 705.3` (float64; 85.3 in float32, 16.2 in float16) | `2.0e-7` |
+| `k0e`/`k1e`/`k2e` | `z > 0`, no upper limit | `2.0e-7` |
+| `polylog` | scalar `z`, `n >= 1` | `7.7e-12` |
 | `zeta` | `n > 1`, or negative integer `> -60` | `7e-16` |

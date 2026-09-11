@@ -1,6 +1,6 @@
 # spexial — Agent Instructions
 
-`spexial` is special functions for JAX, following the `scipy.special` API. It fills gaps in `jax.scipy.special` — which has no modified Bessel `K` at any release, and returns `nan` for `zeta` on the negative line — and supplies analytic derivatives that cut backward-pass memory by up to 268x. It reaches past SciPy in two places: `K0e`/`K1e`/`K2e` stay accurate to `DBL_MAX` where `scipy.special.kve` returns `nan`, and complex `spence` is correct at `3 ± sqrt(3)` where SciPy loses every significant digit. Note both `scipy.special.gamma` and `scipy.special.zeta` already accept negative arguments, so those are _not_ extensions. Everything is written in JAX primitives, so it composes with `jit`, `grad` and `vmap`.
+`spexial` is special functions for JAX, following the `scipy.special` API. It fills gaps in `jax.scipy.special` — which has no modified Bessel `K` at any release, and returns `nan` for `zeta` on the negative line — and supplies analytic derivatives that cut backward-pass memory by up to 268x. It reaches past SciPy in two places: `k0e`/`k1e`/`k2e` stay accurate to `DBL_MAX` where `scipy.special.kve` returns `nan`, and complex `spence` is correct at `3 ± sqrt(3)` where SciPy loses every significant digit. Note both `scipy.special.gamma` and `scipy.special.zeta` already accept negative arguments, so those are _not_ extensions. Everything is written in JAX primitives, so it composes with `jit`, `grad` and `vmap`.
 
 For _using_ `spexial` correctly — which function to reach for, where it differs from SciPy, what is not supported — read [skills/spexial/SKILL.md](skills/spexial/SKILL.md). This file is for working _inside_ this repo.
 
@@ -46,14 +46,14 @@ The public namespace is deliberately **flat** — `spexial.gamma`, not `spexial.
 
 This is a numerics library. The interesting review question is never "does it run" — it is **"over what domain is this correct, and how do you know?"**
 
-- Every function has a parity test against `scipy.special`, or against `mpmath` where SciPy has no counterpart (`Li`).
-- **Never widen a tolerance to make a test pass.** The tolerances in `tests/parity/` are measured worst-case errors with modest headroom, and several are _not_ machine precision — `K0`/`K1`/`K2` assert rtol `1e-6` because a 30-term series meeting a 10-term asymptotic expansion at `z = 9` delivers `2.0e-7`, and no more — and that is the _float64_ figure; in float32 the cross-over moves to 4.65 and the worst is `7.1e-3`. Loosening one of these silently converts a regression into a pass.
+- Every function has a parity test against `scipy.special`, or against `mpmath` where SciPy has no counterpart (`polylog`).
+- **Never widen a tolerance to make a test pass.** The tolerances in `tests/parity/` are measured worst-case errors with modest headroom, and several are _not_ machine precision — `k0`/`k1`/`k2` assert rtol `1e-6` because a 30-term series meeting a 10-term asymptotic expansion at `z = 9` delivers `2.0e-7`, and no more — and that is the _float64_ figure; in float32 the cross-over moves to 4.65 and the worst is `7.1e-3`. Loosening one of these silently converts a regression into a pass.
 - Where a domain is genuinely unsupported, it is expressed as a domain restriction with a comment, or as an explicit test of the `nan`/degraded behaviour — not as a skip. Keep it that way.
 - Every documented domain and tolerance lives in [docs/reference/accuracy-and-domains.md](docs/reference/accuracy-and-domains.md). **A change to numerical behaviour must update that page in the same PR.**
 
 ## Guards at a removable singularity
 
-A `jnp.where` that substitutes a **constant** at a singular point makes the value right and every derivative wrong, because a constant differentiates to zero. The wrongness then reappears one order higher each time it is patched: `spence` at `z = 1` was reported three times this way — wrong first derivative, then second, then third — and `Li` at `z = 0` once.
+A `jnp.where` that substitutes a **constant** at a singular point makes the value right and every derivative wrong, because a constant differentiates to zero. The wrongness then reappears one order higher each time it is patched: `spence` at `z = 1` was reported three times this way — wrong first derivative, then second, then third — and `polylog` at `z = 0` once.
 
 **Where the function is analytic at the point, change the formula, not the value.** `log(z)/(1-z)` at `z = 1` and `Li_{n-1}(z)/z` at `z = 0` are both `0/0` in their closed forms and both have ordinary power series there, so each is now evaluated as its series — by Horner, `jnp.polyval`, not `sum(z**j * c_j)`, whose term-by-term derivative `j * z**(j-1)` is `0 * inf` at the origin for `j = 0`. Autodiff then differentiates a polynomial and every order is right at once.
 
@@ -67,7 +67,7 @@ When touching any of these, test the second _and_ third derivative at the guarde
 - `gamma`'s **second** derivative is unusable on the negative axis, from about `x = -7.5`. `Gamma''` routes through `jax.scipy.special.digamma`'s derivative, and JAX's trigamma is wrong there. It is upstream, not ours, and pinned by a test that fails if JAX fixes it.
 - Bugs found in SciPy and JAX themselves are tracked as issues on this repo, labelled `upstream`, each carrying a verified reproduction ready to submit to the project it belongs to: #24, #25, #26 (SciPy) and #27 (JAX). Only #27 is worked around in this codebase, in `comb`; the SciPy three are avoided rather than patched. Do not restate them in `docs/`, which is for people using `spexial`.
 - `zeta` covers the whole real line: `jax.scipy.special` above 1, a Borwein eta series on `-0.5 < n < 1`, the Bernoulli table at the integers it reaches, and the functional equation below. Worst accuracy is `6e-13`, at large `|n|` where `gammaln(1 - n)` carries the most magnitude; `1.2e-14` out to `|n| = 10`. Past `n ~ -260.2` the true value exceeds `DBL_MAX` and the answer is `±inf`, as it is in SciPy. `jax.grad` is an artefact at the tabulated integers `0 >= n >= -59` (the table reaches -59, not -60), at the negative even integers of any magnitude, and at `n >= 54` where the value is the constant 1.0; genuine everywhere else, including the odd integers past the table.
-- `Li` takes **scalar `z` only** — the middle branch builds a length-60 vector of powers of `log z`. `jax.vmap` is the supported workaround and is tested.
+- `polylog` takes **scalar `z` only** — the middle branch builds a length-60 vector of powers of `log z`. `jax.vmap` is the supported workaround and is tested.
 - `bernoulli.py` builds its table from exact `fractions.Fraction` arithmetic, **not** `jax.scipy.special.bernoulli`, which loses ~7 digits on `B4`. Do not "simplify" it back. Only the Python tuple is cached — caching the `jax.Array` leaks a tracer when the first call happens inside a `jit` trace.
 - `gegenbauer.C0` is written `jnp.asarray(x) * 0.0 + 1.0` rather than `ones_like` so weakly-typed input stays weak; `ones_like` changes the repr and breaks doctests.
 
@@ -82,7 +82,7 @@ This is the procedure the library is organised around, and it is driven entirely
 3. **As fast** to differentiate — `cost.speed >= 1.0`.
 4. **As lean** to differentiate — `cost.memory >= 1.0`.
 
-Points 3 and 4 are why `gamma` survived a floor at which it was otherwise redundant: JAX computes the value, but differentiating JAX's implementation costs 3x the residual memory of `Gamma'(x) = Gamma(x) psi(x)`, at **no** saving in time (measured 1.0x, i.e. parity — an earlier revision of this file claimed 4.3x faster, which was a measurement error). `gamma` is therefore the clearest case of the general rule: **memory is usually the deciding column, not speed** — a custom JVP replaces a whole series' worth of saved intermediates with one array, and for `K0` that is 68x less residual against a 1.5x speed-up. A row that wins on memory alone still earns its place; a row that wins on neither does not.
+Points 3 and 4 are why `gamma` survived a floor at which it was otherwise redundant: JAX computes the value, but differentiating JAX's implementation costs 3x the residual memory of `Gamma'(x) = Gamma(x) psi(x)`, at **no** saving in time (measured 1.0x, i.e. parity — an earlier revision of this file claimed 4.3x faster, which was a measurement error). `gamma` is therefore the clearest case of the general rule: **memory is usually the deciding column, not speed** — a custom JVP replaces a whole series' worth of saved intermediates with one array, and for `k0` that is 68x less residual against a 1.5x speed-up. A row that wins on memory alone still earns its place; a row that wins on neither does not.
 
 If a row fails only 3 or 4, it does not get removed — it becomes `Status.DELEGATES`: call upstream for the value so it cannot drift, and keep our `jax.custom_jvp`. That is strictly better than reimplementing.
 
@@ -138,7 +138,7 @@ Conventional commits + gitmoji, enforced by `commitizen` (`cz-conventional-gitmo
 ```
 ✨ feat(bessel): add K3 via the upward recurrence (#42)
 🐛 fix(comb): mask non-integer out-of-range pairs before gammaln (#41)
-📝 docs(accuracy): record the measured K0 cross-over error (#43)
+📝 docs(accuracy): record the measured k0 cross-over error (#43)
 ```
 
 No `CHANGELOG.md` — deliberate. GitHub Releases are the changelog, per [RELEASING.md](RELEASING.md).

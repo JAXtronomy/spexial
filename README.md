@@ -57,9 +57,9 @@ Array([-1.    ,  0.4375, -0.    , -0.4375,  1.    ], dtype=float64)
 | `gamma`             | `gamma` — JAX's value, plus an analytic derivative    |
 | `eval_gegenbauer`   | `eval_gegenbauer`                                     |
 | `eval_gegenbauers`  | -- returns every order up to `n`                      |
-| `K0`, `K1`, `K2`    | `k0`, `k1`, `kn`                                      |
-| `K0e`, `K1e`, `K2e` | `k0e`, `k1e`, `kve` — scaled by `e^z`, no upper limit |
-| `Li`                | -- the polylogarithm                                  |
+| `k0`, `k1`, `k2`    | `k0`, `k1`, `kn`                                      |
+| `k0e`, `k1e`, `k2e` | `k0e`, `k1e`, `kve` — scaled by `e^z`, no upper limit |
+| `polylog`           | -- the polylogarithm                                  |
 | `spence`            | `spence` — complex too, which JAX rejects             |
 | `zeta`              | `zeta` — negative integers, which JAX gives as `nan`  |
 

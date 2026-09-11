@@ -15,7 +15,7 @@ Z_SMALL = jnp.asarray(1.5)
 Z_LARGE = jnp.asarray(50.0)
 Z_VECTOR = jnp.linspace(0.1, 20.0, 500)
 
-FUNCTIONS = {"K0": sp.K0, "K1": sp.K1, "K2": sp.K2}
+FUNCTIONS = {"k0": sp.k0, "k1": sp.k1, "k2": sp.k2}
 
 
 @pytest.mark.parametrize("name", list(FUNCTIONS))
