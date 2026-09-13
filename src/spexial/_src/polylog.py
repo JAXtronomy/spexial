@@ -160,10 +160,17 @@ def _li_core(n: int, z: AnyArrayLike) -> AnyArray:
 
     def series(z: AnyArray) -> AnyArray:
         """Evaluate the defining series, for |z| <= 1/2."""
-        # `j` is a traced integer: `j ** n` would overflow int64 for n >= 12.
-        return lax.fori_loop(
-            1, _N_TERMS, lambda j, val: val + z**j / (j * 1.0) ** n, jnp.zeros_like(z)
-        )
+        # Summed over a trailing term axis rather than accumulated by
+        # `lax.fori_loop`: the loop is sequential in XLA and measured 3.3x
+        # slower than the reduction, for a difference of 5.6e-16 --
+        # reassociation at the last ulp, against a documented accuracy of
+        # ~1e-12. It costs a transient ``(..., 59)`` intermediate, which the
+        # `custom_jvp` keeps out of the backward pass.
+        #
+        # `j` is built as a float for the reason the loop spelled `(j * 1.0)`:
+        # an integer `j ** n` overflows int64 for n >= 12.
+        j = jnp.arange(1.0, _N_TERMS, dtype=z.dtype)
+        return jnp.sum(z[..., None] ** j / j**n, axis=-1)
 
     def expansion(z: AnyArray) -> AnyArray:
         """Evaluate the Hurwitz-zeta expansion in log(z), for 1/2 < |z| < 2."""
@@ -216,12 +223,10 @@ def _li_core(n: int, z: AnyArrayLike) -> AnyArray:
             # without this guard every order above the table reused B_ORDER and
             # returned a plausible, wrong number. `zeta` guards the same hazard.
             return jnp.full_like(jnp.real(z), jnp.nan)
-        recip = lax.fori_loop(
-            1,
-            _N_TERMS,
-            lambda j, val: val + (1 / z) ** j / (j * 1.0) ** n,
-            jnp.zeros_like(z),
-        )
+        # Summed over a trailing term axis rather than accumulated by
+        # `lax.fori_loop`; see `series` for the measurement and the tradeoff.
+        j = jnp.arange(1.0, _N_TERMS, dtype=z.dtype)
+        recip = jnp.sum((1 / z)[..., None] ** j / j**n, axis=-1)
         bern = _bernoulli_poly(n, jnp.log(z + 0j) / (2 * jnp.pi * 1j))
         return jnp.real(
             -((-1) ** n) * recip - (2 * jnp.pi * 1j) ** n / _jax_gamma(n + 1) * bern
