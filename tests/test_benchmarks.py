@@ -24,8 +24,8 @@ def test_gamma(benchmark, x):
 
 
 def test_k0(benchmark, x):
-    benchmark(sp.K0, x)
+    benchmark(sp.k0, x)
 
 
 def test_zeta(benchmark, x):
-    benchmark(sp.zeta, 2.0, x)
+    benchmark(sp.zeta, x)
