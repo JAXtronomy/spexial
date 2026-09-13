@@ -24,11 +24,17 @@ env:
 jobs:
   benchmarks:
     name: Run benchmarks
-    # Pinned, not `ubuntu-latest`. CodSpeed compares a PR against the base
-    # commit's measurements, and `ubuntu-latest` rolls to a new image on
-    # GitHub's schedule -- so a baseline recorded before the roll and a PR
-    # measured after it come from two different environments, which is what
-    # "Different runtime environments detected" reports. Bump this deliberately.
+    # Pinned, not `ubuntu-latest`, so an image roll cannot land mid-comparison:
+    # CodSpeed compares against the base commit's measurements, and a baseline
+    # recorded before a roll is not comparable with a PR measured after it. Bump
+    # this deliberately.
+    #
+    # This pin alone does not make runs comparable, and on its own it did not
+    # fix "Different runtime environments detected" -- the runs on either side of
+    # it already reported `Image: ubuntu-24.04` and Python 3.11.16. What actually
+    # varied was the runner's CPU and core count leaking into the measurement;
+    # that is pinned in `benchmarks/conftest.py`, which is the file to look at
+    # when a benchmark "regresses" in a commit that changed no source.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
