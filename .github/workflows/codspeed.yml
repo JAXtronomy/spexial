@@ -24,7 +24,12 @@ env:
 jobs:
   benchmarks:
     name: Run benchmarks
-    runs-on: ubuntu-latest
+    # Pinned, not `ubuntu-latest`. CodSpeed compares a PR against the base
+    # commit's measurements, and `ubuntu-latest` rolls to a new image on
+    # GitHub's schedule -- so a baseline recorded before the roll and a PR
+    # measured after it come from two different environments, which is what
+    # "Different runtime environments detected" reports. Bump this deliberately.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
