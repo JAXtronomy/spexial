@@ -3,7 +3,7 @@
 import jax.numpy as jnp
 import pytest
 
-import spexial
+import spexial as sp
 
 
 @pytest.fixture
@@ -12,20 +12,20 @@ def x():
 
 
 def test_gegenbauer(benchmark, x):
-    benchmark(spexial.eval_gegenbauer, 3, 1.5, x)
+    benchmark(sp.eval_gegenbauer, 3, 1.5, x)
 
 
 def test_comb(benchmark):
-    benchmark(spexial.comb, 10, 3)
+    benchmark(sp.comb, 10, 3)
 
 
 def test_gamma(benchmark, x):
-    benchmark(spexial.gamma, x)
+    benchmark(sp.gamma, x)
 
 
 def test_k0(benchmark, x):
-    benchmark(spexial.K0, x)
+    benchmark(sp.K0, x)
 
 
 def test_zeta(benchmark, x):
-    benchmark(spexial.zeta, 2.0, x)
+    benchmark(sp.zeta, 2.0, x)
