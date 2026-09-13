@@ -1,0 +1,154 @@
+# Coverage: what is here, and why
+
+`spexial` exists to fill gaps in `jax.scipy.special`. Which gaps those are is a moving target — JAX adds functions, and `scipy.special` has recently begun dispatching on JAX arrays — so this page is generated from a registry that lives in the package itself (`spexial.registry`), and a test fails if the two drift.
+
+It is also the roadmap. A function upstream covers everywhere `spexial` supports has no reason to stay: it becomes a re-export, then a deprecation, then a removal.
+
+## How to read it
+
+- **In JAX** — whether `jax.scipy.special` provides it, and from which release. `spexial`'s floor is `jax >= 0.7.2`, so `all >= 0.7.2` means every supported JAX has it and the row is redundant _today_; a specific version means the row is still needed below it.
+- **JAX autodiff** — whether the JAX version survives `jax.jvp` and `jax.vjp`.
+- **scipy on JAX arrays** — what `scipy.special` delivers on JAX arrays with `SCIPY_ARRAY_API=1`. This is opt-in: with the variable unset, scipy converts to NumPy and raises under `jit`. Verified against scipy 1.18.1; scipy 1.14.1 provides nothing for any row.
+- **Custom JVP** — `yes` where `spexial` defines an analytic derivative rather than differentiating through the series; `available` where the closed form is known and writing it is outstanding work.
+- **Status** — what should happen to the row.
+
+<!-- BEGIN GENERATED TABLE -->
+
+| Function | In JAX | JAX autodiff | scipy on JAX arrays | Custom JVP | Grad speed | Grad memory | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `k0` | -- | -- | value only | yes | 0.674x (1.5x better) | 0.0146x (68.5x better) | only here |
+| `k1` | -- | -- | value only | yes | 0.994x (1.0x better) | 0.333x (3.0x better) | only here |
+| `k2` | -- | -- | -- | yes | 0.989x (1.0x better) | 0.333x (3.0x better) | only here |
+| `k0e` | -- | -- | -- | yes | 0.573x (1.7x better) | 0.0146x (68.5x better) | only here |
+| `k1e` | -- | -- | -- | yes | 0.875x (1.1x better) | 0.0755x (13.2x better) | only here |
+| `k2e` | -- | -- | -- | yes | 0.982x (1.0x better) | 0.195x (5.1x better) | only here |
+| `polylog` | -- | -- | -- | yes | 1.29x (1.3x worse) | 0.00373x (268.0x better) | only here |
+| `eval_gegenbauer` | -- | -- | -- | available | -- | -- | only here |
+| `eval_gegenbauers` | -- | -- | -- | -- | -- | -- | only here |
+| `sph_legendre_p` | -- | -- | -- | -- | -- | -- | only here |
+| `sph_harm_y` | yes (all >= 0.7.2) | value + autodiff | -- | -- | -- | -- | extends upstream |
+| `sph_harm_y_cart` | -- | -- | -- | -- | -- | -- | only here |
+| `sph_harm_y_cart_all` | -- | -- | -- | -- | -- | -- | only here |
+| `sph_harm_y_cart_all_terms` | -- | -- | -- | -- | -- | -- | only here |
+| `incomplete_beta` | -- | -- | -- | yes | 0.007x (142.9x better) | 0.0144x (69.4x better) | only here |
+| `spence` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.2x (5.0x better) | 0.026x (38.5x better) | extends upstream |
+| `zeta` | yes (all >= 0.7.2) | value + autodiff | -- | -- | 1.08x (1.1x worse) | -- | extends upstream |
+| `comb` | yes (>= 0.10.2) | value + autodiff | -- | -- | 1.07x (1.1x worse) | -- | redundant above floor |
+| `gamma` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.998x (1.0x better) | 0.333x (3.0x better) | delegates + our JVP |
+
+## Per-function detail
+
+`k0`
+:   JAX has no modified Bessel function of the second kind at any version. scipy's `k0` returns a value under `jit` but raises under `grad`. `spexial` defines the analytic derivative, which measured 1.5x faster than differentiating the 30-term series, and keeps 68x less residual -- the column that actually decides.
+
+    Derivative: `-k1(z)`.
+
+    Gradient cost vs differentiating our own series: speed 0.674x (1.5x better), memory 0.0146x (68.5x better).
+
+`k1`
+:   As `k0`. `k1` is a thin wrapper over `k1e`, whose own rule autodiff already picks up, so the hand-written rule earns its place on the memory column -- 3x less residual at neutral wall-clock. k1'(z) = -k0(z) - k1(z)/z.
+
+    Derivative: `-k0(z) - k1(z) / z`.
+
+    Gradient cost vs differentiating our own series: speed 0.994x (1.0x better), memory 0.333x (3.0x better).
+
+`k2`
+:   `scipy.special.kn` does not dispatch on JAX arrays at all, even with the array API enabled. As `k1`, kept for the memory column. k2'(z) = -k1(z) - (2/z) k2(z), summed in the scaled variables: formed directly the `(2/z) k2` term is subnormal from z = 699 and XLA flushes it, which cost the derivative 0.29%.
+
+    Derivative: `-k1(z) - (2/z) k2(z)`.
+
+    Gradient cost vs differentiating our own series: speed 0.989x (1.0x better), memory 0.333x (3.0x better).
+
+`k0e`
+:   Exponentially scaled e^z k0(z), matching `scipy.special.k0e`. JAX has no scaled Bessel K at any version, and scipy's does not dispatch on JAX arrays. This is the only form that survives past z = 705.5, where k0 itself is subnormal and XLA flushes it to 0.
+
+    Derivative: `k0e(z) - k1e(z)`.
+
+    Gradient cost vs differentiating our own series: speed 0.573x (1.7x better), memory 0.0146x (68.5x better).
+
+`k1e`
+:   As `k0e`; matches `scipy.special.k1e`.
+
+    Derivative: `k1e(z) - k0e(z) - k1e(z) / z`.
+
+    Gradient cost vs differentiating our own series: speed 0.875x (1.1x better), memory 0.0755x (13.2x better).
+
+`k2e`
+:   As `k0e`; matches `scipy.special.kve(2, z)`.
+
+    Derivative: `k2e(z) - k1e(z) - (2/z) k2e(z)`.
+
+    Gradient cost vs differentiating our own series: speed 0.982x (1.0x better), memory 0.195x (5.1x better).
+
+`polylog`
+:   No general polylogarithm anywhere. `jax.scipy.special.spence` is the n = 2 case only, and scipy has no polylog. The custom JVP is the one row where the two cost columns disagree: it keeps 268x less residual (4.2 MB -> 16 kB over 2000 points) but runs 1.7x slower, because Li_{n-1} must be evaluated afresh rather than reusing saved intermediates. Kept for the memory, which is the binding constraint when vmapping over a large batch.
+
+    Derivative: `Li_{n-1}(z) / z`.
+
+    Gradient cost vs differentiating our own series: speed 1.29x (1.3x worse), memory 0.00373x (268.0x better).
+
+`eval_gegenbauer`
+:   Absent from JAX. scipy's does not dispatch on JAX arrays. The derivative in x is 2a C_{n-1}^{a+1}(x), but a custom JVP is *not* wired up: `alpha` is traced too and dC/da has no closed form, so a rule supplying only the x-tangent would silently break `grad` with respect to `alpha`. The saving on offer is modest anyway -- 6 residual leaves, against 29 for `polylog`.
+
+    Derivative: `2a C_{n-1}^{a+1}(x)`.
+
+`eval_gegenbauers`
+:   No counterpart anywhere: returns every order up to n in one pass, which is the point of it.
+
+`sph_legendre_p`
+:   Absent from JAX at any version -- the normalized Legendre function is reachable only through `jax.scipy.special.sph_harm_y`, and then only wrapped in a complex harmonic. scipy has had it since 1.15 but converts JAX arrays to NumPy, so it dies under `jit`. Computed from the *reduced* function P_l^m/(1-u^2)^(m/2), which is a polynomial, times an integer power of sin(theta); that is what makes the derivative finite at the poles, where upstream's sqrt(1 - cos^2) is not. The normalization is folded into the recurrence seed in log space, because p_m^m = (2m-1)!! overflows float64 near m = 90 and multiplying by a tiny N_lm afterwards is inf * 0. No custom JVP: the derivative identity in theta needs P_l^{m+1} as well, so it would buy a second recurrence, not save one.
+
+`sph_harm_y`
+:   The one row where upstream exists and returns *incorrect values* rather than merely covering less. `jax.scipy.special.sph_harm_y` indexes its Legendre table with `arange(len(n))`, so it pairs n[i] with theta[i] instead of broadcasting: a length-1 degree against a batch of angles is right at index 0 and wrong everywhere else, by up to 1.18 absolute for n <= 3, and 0-d input raises from `len()`. Its derivatives are also `nan` at both poles for every n >= 1. Here n and m are static Python ints, as for `eval_gegenbauer`, so there is no pairing to get wrong. `tests/unit/test_sph_harm.py` asserts both defects against upstream directly, so the row cannot rot: the day JAX fixes either, those tests fail and say so.
+
+`sph_harm_y_cart`
+:   No counterpart anywhere. Evaluates Y_n^m from a Cartesian unit direction as q_n^m(z) ((x + iy))^m, which is polynomial in x and y and therefore smooth on the z-axis -- where theta and phi are singular and the chain rule sends the Cartesian gradient of every m >= 1 term to exactly 0.0 against a non-zero true limit. That is a property of the coordinates, so it cannot be fixed in the (theta, phi) form at all, by us or by upstream. Deliberately does not normalize its argument: a zero vector is then finite and twice differentiable, which callers that floor the radius themselves depend on.
+
+`sph_harm_y_cart_all`
+:   Stands to `sph_harm_y_cart` as `eval_gegenbauers` does to `eval_gegenbauer`: the whole (l, m) table is a by-product of the recurrences any single entry already runs. Shape and index layout follow `scipy.special.sph_harm_y_all`, negative orders at the far end of the second axis included. Since l and m are static the saving is in *traced* operations -- a smaller HLO, so faster tracing and compiling, not faster execution, which XLA's fusion had already recovered. Measured on the equivalent code in `galax`: tracing 3-4.6x faster up to n = 20, run time flat.
+
+`sph_harm_y_cart_all_terms`
+:   `sph_harm_y_cart_all`'s values, same indexing and same layout, returned as a nested tuple of separate arrays instead of one stacked array. The container is the whole point: indexing a stacked table stops XLA folding each term into a caller's reduction as it is produced, so the table is materialized. Measured on a multipole expansion at n = 12 over a million directions, summing from the stacked form took 17.7 s against 10 ms from these terms. The only function here not wrapped in `jax.jit`, deliberately: a jitted function returning a pytree materializes each leaf at the call boundary, which is exactly the fusion this exists to preserve.
+
+`incomplete_beta`
+:   The *unregularized* B(a, b, z) of DLMF 8.17.1. Neither JAX nor scipy has one: their `betainc` is the regularized I_z(a, b), and reconstructing this as `beta(a, b) * betainc(a, b, z)` is `nan` for every b <= 0 -- B(a, b) has a pole there while the product does not, and b <= 0 is an ordinary slope in a double power-law density profile. `jax.scipy.special.hyp2f1` can express it via DLMF 8.17.7, but it is a `while_loop` whose trip count depends on its data, so under `vmap` every lane pays the worst lane's count and its derivative runs a second such loop. Two fixed-length series instead, switched at z = 1/2. The custom JVP is the strongest case in this table: by Leibniz the z-derivative is just the integrand at the endpoint, so it is exact and O(1) against 64 terms -- 143x faster on 70x less residual. `custom_jvp` rather than `custom_vjp` so `jacfwd(jacrev(...))` still composes. Contributed from `galax`.
+
+    Derivative: `z^(a-1) (1-z)^(b-1)`.
+
+    Gradient cost vs differentiating our own series: speed 0.007x (142.9x better), memory 0.0144x (69.4x better).
+
+`spence`
+:   JAX has had `spence` since before our floor, but it is real-only and raises on complex input; this accepts both, which is the reason the row exists. It also wins on both cost columns -- 5.0x faster on 38.5x less residual -- because the analytic derivative log(z)/(1-z) is simply the integrand of the definition. The custom JVP is not merely an optimisation here: `lax.select` evaluates every branch, so differentiating the implementation yields `nan` -- and JAX's own `spence` differentiates to `nan` across roughly 1 < x < 2, where ours is exact. Contributed by Colm Talbot, translated from scipy's Cython implementation.
+
+    Derivative: `log(z) / (1 - z)`.
+
+    Gradient cost vs jax.scipy.special.spence: speed 0.2x (5.0x better), memory 0.026x (38.5x better).
+
+`zeta`
+:   `jax.scipy.special.zeta` is the Hurwitz form and returns `nan` for negative arguments; `spexial` adds the negative integers via the functional equation. scipy raises `NotImplementedError` for the Riemann form on JAX arrays. No closed form for zeta', so no custom JVP.
+
+    Gradient cost vs jax.scipy.special.zeta, n > 1 only: speed 1.08x (1.1x worse), memory --.
+
+`comb`
+:   Added to JAX in 0.10.2, below which `spexial` is still needed. `jax.scipy.special.comb` agrees on every edge case `spexial` handles (k > N, k < 0, N < 0) and differentiates. Re-export once the floor reaches 0.10.2.
+
+    Gradient cost vs jax.scipy.special.comb: speed 1.07x (1.1x worse), memory --.
+
+`gamma`
+:   The value is `jax.scipy.special.gamma`, called directly, so it cannot drift. What `spexial` adds is the derivative: Gamma'(x) = Gamma(x) psi(x) keeps 3x less residual than differentiating JAX's implementation, at neutral wall-clock (1.03x, i.e. no measurable saving -- the row earns its place on memory alone). Complex input works from jax 0.10.2 -- the same release that added `comb`, and below it `jax.scipy.special.gamma` branches on `floor(x)` and raises. Delegating means inheriting that limit rather than papering over it; the test probes the capability instead of comparing versions.
+
+    Derivative: `gamma(x) psi(x)`.
+
+    Gradient cost vs jax.scipy.special.gamma: speed 0.998x (1.0x better), memory 0.333x (3.0x better).
+
+<!-- END GENERATED TABLE -->
+
+## Regenerating
+
+The table above is rendered from `spexial._src.registry`:
+
+```bash
+uv run scripts/gen_coverage_table.py
+```
+
+`tests/unit/test_registry.py` checks every `jax_*` claim against the installed JAX and fails if this page is stale, so neither the table nor the roadmap can go quietly out of date when upstream moves.

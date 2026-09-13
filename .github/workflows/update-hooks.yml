@@ -1,0 +1,52 @@
+name: Update hooks
+
+# Nothing else updates `.pre-commit-config.yaml`: Dependabot has no `pre-commit`
+# ecosystem (the schema accepts github-actions and uv, not this), and prek is
+# run locally and in CI rather than by the hosted pre-commit.ci service. Without
+# this job the hook revisions rot silently -- which is exactly what happened
+# here before the overhaul, where ruff sat on v0.6.9 for about a year.
+on:
+  schedule:
+    - cron: "0 0 1 * *" # Monthly, on the 1st at midnight UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: 3
+
+jobs:
+  prek-update:
+    name: prek update
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      # `--freeze` is required, not a preference: without it `prek update`
+      # rewrites every `rev` back from a SHA to a mutable tag, undoing the
+      # pinning on its first monthly run.
+      - name: Update hook revisions
+        run: uv run --no-default-groups --group lint prek update --freeze
+
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          commit-message: "👷 ci: update pre-commit hooks"
+          title: "👷 ci: update pre-commit hooks"
+          body: "Automated hook update via `prek update`."
+          branch: update-hooks
+          delete-branch: true
+          labels: dependencies

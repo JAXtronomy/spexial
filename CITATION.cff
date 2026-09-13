@@ -1,0 +1,66 @@
+# Citation metadata, in the Citation File Format (https://citation-file-format.org).
+# GitHub's "Cite this repository" button reads this file, as does Zenodo.
+#
+# Validated in CI by the Citation File Format project's own tool, against its
+# own schema -- see the `Validate CITATION.cff` step in ci.yml. Separately,
+# `tests/unit/test_citation.py` checks it against `pyproject.toml`: the title,
+# licence and URLs are stated in both files, and two copies of a fact drift.
+#
+# Two authors have no `orcid` -- neither could be verified, and a guessed
+# identifier is worse than an absent one, since it names a different real
+# person. Tracked in https://github.com/JAXtronomy/spexial/issues/32.
+#
+# `version` and `date-released` are deliberately absent between releases and
+# set at release time; the test asserts they match the package when present.
+
+cff-version: 1.2.0
+title: spexial
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Cara
+    family-names: Giovanetti
+    email: 52010580+cgiovanetti@users.noreply.github.com
+    affiliation: New York University
+  - given-names: Jacob
+    family-names: Nibauer
+    email: jnibauer@princeton.edu
+    affiliation: Princeton
+    orcid: "https://orcid.org/0000-0001-8042-5794"
+  - given-names: Nathaniel
+    family-names: Starkman
+    email: nstarman@users.noreply.github.com
+    affiliation: MIT
+    orcid: "https://orcid.org/0000-0003-3954-3291"
+  - given-names: Colm
+    family-names: Talbot
+    email: talbotcolm@gmail.com
+    affiliation: Princeton University
+    orcid: "https://orcid.org/0000-0003-2053-5582"
+repository-code: "https://github.com/JAXtronomy/spexial/"
+url: "https://jaxtronomy.github.io/spexial"
+repository-artifact: "https://pypi.org/project/spexial/"
+abstract: >-
+  spexial provides special functions for JAX, following the
+  scipy.special API. The implementations are written in terms
+  of JAX primitives, so they compose with jit compilation,
+  automatic differentiation and vectorisation, and run on CPU,
+  GPU and TPU. spexial fills gaps in jax.scipy.special, which
+  has no modified Bessel K functions at any release and returns
+  nan for zeta on the negative real line, and supplies analytic
+  derivatives that cut backward-pass memory by up to 268x. A few
+  routines also reach further than their scipy counterparts:
+  the exponentially scaled Bessel functions stay accurate to
+  DBL_MAX, where scipy.special.kve returns nan, and the complex
+  Spence function is correct at 3 +/- sqrt(3), where scipy loses
+  every significant digit. Several routines originate in the LINX
+  code, and the complex Spence function is translated from
+  scipy's Cython implementation.
+keywords:
+  - special-functions
+  - jax
+  - scipy
+  - scientific computing
+license: MIT

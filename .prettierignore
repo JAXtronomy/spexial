@@ -1,0 +1,4 @@
+# Generated from `spexial._src.registry` by scripts/gen_coverage_table.py.
+# Reformatting it here would make it differ from what the renderer produces,
+# which the sync test in tests/unit/test_registry.py checks for.
+docs/reference/coverage.md
