@@ -85,4 +85,4 @@ jobs:
         uses: CodSpeedHQ/action@v3
         with:
           run: uv run pytest tests/test_benchmarks.py --codspeed
-          token: ${{ secrets.CODSPEED_TOKEN }}
+          token: ${{ secrets.CODSPEED_TOKEN }} # optional for public repos with GitHub App installed
