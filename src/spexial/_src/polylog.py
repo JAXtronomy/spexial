@@ -12,7 +12,7 @@ from jax.scipy.special import gamma as _jax_gamma
 
 from .bernoulli import ORDER, bernoulli_numbers
 from .comb import comb
-from .custom_types import AnyArray, Scalar, ScalarLike
+from .custom_types import AnyArray, AnyArrayLike
 from .dtype import promote_integers
 from .zeta import zeta
 
@@ -65,7 +65,7 @@ def _bernoulli_poly(n: int, x: AnyArray) -> AnyArray:
     )
 
 
-def polylog(n: int, z: ScalarLike, /) -> Scalar:
+def polylog(n: int, z: AnyArrayLike, /) -> AnyArray:
     r"""Compute the polylogarithm :math:`\mathrm{Li}_n(z)`.
 
     There is no `scipy.special` counterpart; `mpmath.polylog` is the reference
@@ -83,9 +83,7 @@ def polylog(n: int, z: ScalarLike, /) -> Scalar:
         as ``polylog(2.0, z)`` -- is rejected by the runtime type checker with a
         `TypeError`; an integer below 1 raises `ValueError`.
     z
-        Real, **scalar** argument. The middle series is built from a
-        length-60 vector of powers of :math:`\log z`, so it cannot broadcast;
-        use ``jax.vmap(partial(polylog, n))`` for arrays.
+        Real argument, of any shape. Evaluated elementwise.
 
     Returns
     -------
@@ -157,7 +155,7 @@ def polylog(n: int, z: ScalarLike, /) -> Scalar:
 
 
 @partial(jax.custom_jvp, nondiff_argnums=(0,))
-def _li_core(n: int, z: ScalarLike) -> Scalar:
+def _li_core(n: int, z: AnyArrayLike) -> AnyArray:
     """Evaluate the polylogarithm; see `polylog`, which validates ``n`` first."""
 
     def series(z: AnyArray) -> AnyArray:
@@ -176,11 +174,19 @@ def _li_core(n: int, z: ScalarLike) -> Scalar:
         )
         log_z = jnp.log(z + 0j)
         # `log_z ** 0` would be `nan` at z == 1; spell the leading 1 out.
+        #
+        # The powers sit on a *trailing* axis and are summed over that one only,
+        # so an array argument broadcasts against them rather than colliding
+        # with them -- the shaping `zeta._by_eta` uses, for the same reason. As
+        # a bare length-60 vector this was what made `polylog` scalar-only: it
+        # collided with the caller's own axis, and a bare `jnp.sum` would have
+        # collapsed that axis along with the terms.
+        leading = jnp.ones((*jnp.shape(log_z), 1), dtype=log_z.dtype)
         powers = jnp.concatenate(
-            (jnp.ones(1, dtype=log_z.dtype), log_z ** jnp.arange(1, _N_TERMS))
+            (leading, log_z[..., None] ** jnp.arange(1, _N_TERMS)), axis=-1
         )
         zeta_series = jnp.sum(
-            zeta_ary * powers / _jax_gamma(jnp.arange(_N_TERMS) + 1.0)
+            zeta_ary * powers / _jax_gamma(jnp.arange(_N_TERMS) + 1.0), axis=-1
         )
 
         # Exact comparison, deliberately: `jnp.isclose` defaults to atol=1e-8,
@@ -240,7 +246,9 @@ def _li_core(n: int, z: ScalarLike) -> Scalar:
 
 
 @_li_core.defjvp
-def _li_jvp(n: int, primals: tuple[Any], tangents: tuple[Any]) -> tuple[Scalar, Scalar]:
+def _li_jvp(
+    n: int, primals: tuple[Any], tangents: tuple[Any]
+) -> tuple[AnyArray, AnyArray]:
     r"""Analytic derivative of the polylogarithm in ``z``.
 
     :math:`\mathrm{d}/\mathrm{d}z\,\mathrm{Li}_n(z) = \mathrm{Li}_{n-1}(z)/z`.

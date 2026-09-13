@@ -25,7 +25,15 @@ If you want `vmap` anyway — to map over an axis of a larger computation — it
 
 ## Evaluate `polylog` over an array
 
-`polylog` is the exception: it accepts only a scalar `z`, and an array argument raises a broadcasting `TypeError` rather than mapping elementwise. To evaluate it over an array, use `vmap`:
+`polylog` broadcasts over `z` like the rest of the library, so call it directly:
+
+```pycon
+>>> sp.polylog(2, jnp.array([0.25, 0.5]))
+Array([0.26765264, 0.58224053], dtype=float64)
+
+```
+
+`vmap` gives the same answer, to the last bit, if you want it for an axis of a larger computation:
 
 ```pycon
 >>> jax.vmap(lambda z: sp.polylog(2, z))(jnp.array([0.25, 0.5]))
@@ -33,7 +41,7 @@ Array([0.26765264, 0.58224053], dtype=float64)
 
 ```
 
-Do not reach for a Python loop here; `vmap` compiles to a single batched kernel. See [Accuracy and domains](../reference/accuracy-and-domains.md) for which functions carry restrictions.
+Do not reach for a Python loop here. See [Accuracy and domains](../reference/accuracy-and-domains.md) for which functions carry restrictions.
 
 ## Hold an integer parameter fixed
 
