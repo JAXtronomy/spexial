@@ -223,32 +223,6 @@ jobs:
       - name: Build docs
         run: uv run --frozen zensical build --clean --strict
 
-  benchmarks:
-    name: Benchmarks
-    # Pin to a specific runner so CodSpeed always sees the same runtime environment.
-    # ubuntu-latest is deliberately avoided: GitHub silently rolls the label to
-    # newer hardware, causing the "Different runtime environments detected" warning.
-    runs-on: ubuntu-22.04
-    needs: [lint]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          python-version: "3.12"
-
-      - name: Install
-        run: uv sync --no-default-groups --group bench --locked
-
-      - name: Run benchmarks
-        uses: CodSpeedHQ/action@v3
-        with:
-          run: uv run --frozen pytest benchmarks/ --codspeed
-          token: ${{ secrets.CODSPEED_TOKEN }} # optional for public repos with GitHub App installed
-
   ci-pass:
     name: CI Pass
     runs-on: ubuntu-latest
