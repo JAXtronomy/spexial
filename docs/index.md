@@ -2,7 +2,7 @@
 
 `scipy.special` in [JAX](https://docs.jax.dev).
 
-`spexial` implements special functions — Gegenbauer polynomials, the gamma function, modified Bessel functions, the Riemann zeta function, polylogarithms — as plain JAX functions. Because they are ordinary JAX code, they compose with `jax.jit`, `jax.vmap` and `jax.grad`, and run on CPU, GPU and TPU.
+`spexial` implements special functions — Gegenbauer polynomials, the gamma function, modified Bessel functions, the Riemann zeta function, polylogarithms, the incomplete beta function, spherical harmonics — as plain JAX functions. Because they are ordinary JAX code, they compose with `jax.jit`, `jax.vmap` and `jax.grad`, and run on CPU, GPU and TPU.
 
 Where a function has a `scipy.special` counterpart, `spexial` matches its name, its argument order and its convention. It exists to fill gaps in `jax.scipy.special` — `zeta` accepts negative integers where JAX returns `nan`, and `spence` accepts complex arguments where JAX is real-only. SciPy already covers both; the gap this library fills is on the JAX side, not the SciPy side.
 

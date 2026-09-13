@@ -51,17 +51,23 @@ Array([-1.    ,  0.4375, -0.    , -0.4375,  1.    ], dtype=float64)
 
 ## What is here
 
-| Function            | `scipy.special` counterpart                           |
-| ------------------- | ----------------------------------------------------- |
-| `comb`              | `comb` (the `exact=False` variant)                    |
-| `gamma`             | `gamma` — JAX's value, plus an analytic derivative    |
-| `eval_gegenbauer`   | `eval_gegenbauer`                                     |
-| `eval_gegenbauers`  | -- returns every order up to `n`                      |
-| `k0`, `k1`, `k2`    | `k0`, `k1`, `kn`                                      |
+| Function | `scipy.special` counterpart |
+| --- | --- |
+| `comb` | `comb` (the `exact=False` variant) |
+| `gamma` | `gamma` — JAX's value, plus an analytic derivative |
+| `eval_gegenbauer` | `eval_gegenbauer` |
+| `eval_gegenbauers` | -- returns every order up to `n` |
+| `incomplete_beta` | -- the _unregularized_ `B(a, b, z)`; `betainc` is the regularized form |
+| `k0`, `k1`, `k2` | `k0`, `k1`, `kn` |
 | `k0e`, `k1e`, `k2e` | `k0e`, `k1e`, `kve` — scaled by `e^z`, no upper limit |
-| `polylog`           | -- the polylogarithm                                  |
-| `spence`            | `spence` — complex too, which JAX rejects             |
-| `zeta`              | `zeta` — negative integers, which JAX gives as `nan`  |
+| `polylog` | -- the polylogarithm |
+| `spence` | `spence` — complex too, which JAX rejects |
+| `sph_legendre_p` | `sph_legendre_p` — absent from JAX at any version |
+| `sph_harm_y` | `sph_harm_y` — JAX's returns incorrect values for array degrees |
+| `sph_harm_y_cart` | -- from a Cartesian direction; correct gradients on the z-axis |
+| `sph_harm_y_cart_all` | `sph_harm_y_all` (layout only) — the whole `(l, m)` table in one pass |
+| `sph_harm_y_cart_all_terms` | -- as above, returned as separate arrays so reductions stay fused |
+| `zeta` | `zeta` — negative integers, which JAX gives as `nan` |
 
 **Read [Accuracy and domains](https://jaxtronomy.github.io/spexial/reference/accuracy-and-domains/) before relying on any of these.** It records, per function, the domain each is tested over and the tolerance it actually meets. Some are not machine-precision — the modified Bessel functions are accurate to about `1e-7`, and `zeta` does not implement the critical strip.
 
