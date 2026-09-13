@@ -246,7 +246,7 @@ jobs:
       - name: Run benchmarks
         uses: CodSpeedHQ/action@v3
         with:
-          run: uv run --frozen pytest tests/test_benchmarks.py --codspeed
+          run: uv run --frozen pytest benchmarks/ --codspeed
           token: ${{ secrets.CODSPEED_TOKEN }} # optional for public repos with GitHub App installed
 
   ci-pass:

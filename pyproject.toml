@@ -299,11 +299,21 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"docs/**"                 = ["A001", "INP001"]
-"noxfile.py"              = ["T20"]
-"scripts/**"              = ["INP001", "T20"]
+"benchmarks/**" = [
+  "ANN",
+  "D103",
+  "D401",
+  "E731",
+  "INP001",
+  "S101",
+  "SLF001",
+  "T20",
+]
+"docs/**" = ["A001", "INP001"]
+"noxfile.py" = ["T20"]
+"scripts/**" = ["INP001", "T20"]
 "src/spexial/_version.py" = ["SIM108"]
-"tests/**"                = ["ANN", "D103", "D401", "E731", "INP001", "S101", "SLF001", "T20"]
+"tests/**" = ["ANN", "D103", "D401", "E731", "INP001", "S101", "SLF001", "T20"]
 
 [tool.ruff.lint.flake8-import-conventions.aliases]
 "jax.numpy" = "jnp"
