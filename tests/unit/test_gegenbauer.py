@@ -195,6 +195,39 @@ def test_all_orders_at_infinity(alpha):
     assert got[0] == 1.0
 
 
+def test_infinite_entries_inside_a_batch_get_their_own_limit():
+    """The limit substitution is per-lane and per-order, not per-call.
+
+    `eval_gegenbauers` applies it with one select over the stacked table rather
+    than one call per order, so the row index has to carry the ``(-1)**n``
+    parity and has to leave order 0 alone -- `C_0` is 1 at an infinite ``x``,
+    not an infinity. A parity applied along the wrong axis, or an off-by-one
+    that swept order 0 in with the rest, would still pass the scalar
+    infinity tests above, where every lane is infinite and the whole table
+    shares one sign.
+
+    Both infinities sit in the *middle* of an otherwise finite ``x``, against a
+    column `alpha` that spans positive, negative and zero, and every entry is
+    checked against the singular `eval_gegenbauer` at that lane.
+    """
+    alpha = jnp.asarray([1.5, -0.25, 0.0])[:, None]
+    x = jnp.asarray([0.5, np.inf, -0.5, -np.inf, 0.0])
+    n = 5
+
+    got = np.asarray(sp.eval_gegenbauers(n, alpha, x))
+
+    assert got.shape == (n + 1, 3, 5)
+    for i in range(n + 1):
+        for j in range(3):
+            np.testing.assert_allclose(
+                got[i, j],
+                np.asarray(sp.eval_gegenbauer(i, alpha[j, 0], x)),
+                rtol=1e-13,
+            )
+    # The finite lanes stay finite: the substitution must not leak sideways.
+    assert np.isfinite(got[:, :, [0, 2, 4]]).all()
+
+
 @pytest.mark.parametrize(
     ("alpha_dtype", "x_dtype"),
     [
