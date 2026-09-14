@@ -68,9 +68,20 @@ def test_array_input_broadcasts():
 
 
 def test_vmap_agrees_with_broadcasting():
-    """`jax.vmap` and the broadcast path agree exactly, not merely closely."""
+    """`jax.vmap` and the broadcast path agree to the last ulp.
+
+    Not *exactly*, which this asserted until the two stopped being the same
+    arithmetic. `_term_sum` picks its summation by shape, and `jax.vmap` hides
+    the batch axis -- so a vmapped call takes the scalar loop while a direct
+    array call takes the batched reduction, and the two reassociate
+    differently. The gap is a couple of ulp (2.1e-16 measured), well inside
+    this function's documented ~1e-12, but it is not zero and asserting that it
+    was only held for the arguments that happened to be tried.
+    """
     z = jnp.asarray([0.1, 0.3, 0.9, 3.0])
-    np.testing.assert_array_equal(sp.polylog(2, z), jax.vmap(partial(sp.polylog, 2))(z))
+    np.testing.assert_allclose(
+        sp.polylog(2, z), jax.vmap(partial(sp.polylog, 2))(z), rtol=1e-13
+    )
 
 
 def test_jit():

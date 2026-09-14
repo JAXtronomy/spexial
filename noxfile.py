@@ -121,8 +121,23 @@ def pytest(s: nox.Session, /) -> None:
 
 @session(uv_groups=["bench"], reuse_venv=True)
 def pytest_benchmark(s: nox.Session, /) -> None:
-    """Run the benchmarks under CodSpeed."""
-    s.run("pytest", "tests/benchmark", "--codspeed", *s.posargs)
+    """Run the benchmarks under CodSpeed.
+
+    Mirrors the `Run benchmarks under CodSpeed` step of
+    ``.github/workflows/codspeed.yml`` -- see there for why ``-p no:env`` and an
+    explicit ``JAX_ENABLE_X64`` are needed rather than the ``[tool.pytest_env]``
+    defaults. Without them a local run measures the beartype-instrumented build
+    and is not comparable to what CI reports.
+    """
+    s.run(
+        "pytest",
+        "benchmarks",
+        "--codspeed",
+        "-p",
+        "no:env",
+        *s.posargs,
+        env={"JAX_ENABLE_X64": "True"},
+    )
 
 
 # =============================================================================
