@@ -31,7 +31,7 @@ import spexial as sp
 | `eval_gegenbauers(n, alpha, x)` | -- | all orders `0..n` at once |
 | `k0(z)`, `k1(z)`, `k2(z)` | `k0`, `k1`, `kn` | modified Bessel, 2nd kind |
 | `k0e(z)`, `k1e(z)`, `k2e(z)` | `k0e`, `k1e`, `kve` | the same, scaled by `e^z`; **the only ones that work past `z = 705`** |
-| `polylog(n, z)` | -- | polylogarithm; **scalar `z` only** |
+| `polylog(n, z)` | -- | polylogarithm |
 | `zeta(n)` | `zeta` | handles negative integers |
 
 ## Enable x64 before anything else
@@ -54,7 +54,7 @@ These are series and asymptotic expansions. In float32 the accuracy figures belo
 
 **`gamma` returns `nan` at the negative integers.** It delegates to `jax.scipy.special.gamma`, so `x = 0` gives `inf` but every negative integer gives `nan` — the two-sided limit does not exist, and this matches JAX and scipy from 1.18. Complex input works on jax >= 0.10.2. Accuracy is ~`4e-13` throughout, including close to the poles.
 
-**`polylog` takes scalar `z` only.** It cannot broadcast. Use `jax.vmap`:
+**`polylog` broadcasts over `z`.** Call it directly on an array; `jax.vmap` also works and agrees exactly:
 
 ```python
 import jax
@@ -87,5 +87,5 @@ Everything below assumes x64. Full detail, including how each was measured, is a
 | `eval_gegenbauer` | `n <= 20`, `alpha > -0.5`, `\|x\| <= 1` | `2.1e-12` rtol; absolute error scales with the recurrence, up to `9e-5` at `n = 20, alpha = 10` |
 | `k0`/`k1`/`k2` | `0 < z < 705.3` (float64; 85.3 in float32, 16.2 in float16) | `2.0e-7` |
 | `k0e`/`k1e`/`k2e` | `z > 0`, no upper limit | `2.0e-7` |
-| `polylog` | scalar `z`, `n >= 1` | `7.7e-12` |
+| `polylog` | `n >= 1` | `7.7e-12` |
 | `zeta` | `n > 1`, or negative integer `> -60` | `7e-16` |

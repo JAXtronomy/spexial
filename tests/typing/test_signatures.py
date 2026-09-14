@@ -66,10 +66,12 @@ def test_zeta_signature() -> None:
 
 
 def test_polylog_signature() -> None:
-    """`polylog(n, z, /)` takes a static `int` order and a scalar, returns an Array."""
+    """`polylog(n, z, /)` takes a static `int` order and an array-like `z`."""
     order: int = 2
-    value: Out = sp.polylog(order, 0.25)
-    assert value.shape == ()
+    from_scalar: Out = sp.polylog(order, 0.25)
+    from_array: Out = sp.polylog(order, jnp.asarray([0.25, 0.5]))
+    assert from_scalar.shape == ()
+    assert from_array.shape == (2,)
 
 
 def test_incomplete_beta_signature() -> None:

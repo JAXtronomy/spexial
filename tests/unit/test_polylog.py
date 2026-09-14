@@ -53,18 +53,24 @@ def test_non_positive_order_is_rejected(n):
         sp.polylog(n, 0.25)
 
 
-def test_array_input_is_rejected():
-    """`polylog` is documented as scalar-only; the type checker enforces it."""
-    with pytest.raises(Exception, match=r"(?i)typecheck"):
-        sp.polylog(2, jnp.asarray([0.1, 0.2]))
+def test_array_input_broadcasts():
+    """`polylog` maps elementwise over `z`, like the rest of the library.
 
-
-def test_vmap_is_the_supported_way_to_batch():
-    """`jax.vmap` gives the elementwise behaviour `polylog` itself does not."""
+    The middle branch once built its powers of ``log z`` as a bare length-60
+    vector, which collided with the caller's own axis and made an array
+    argument a broadcasting `TypeError`. ``z`` here straddles all three
+    branches, so a regression in any one of them shows up.
+    """
     z = jnp.asarray([0.1, 0.3, 0.9, 3.0])
-    got = jax.vmap(partial(sp.polylog, 2))(z)
+    got = sp.polylog(2, z)
     expected = [reference(2, float(v)) for v in z]
     np.testing.assert_allclose(got, expected, rtol=1e-11, atol=1e-12)
+
+
+def test_vmap_agrees_with_broadcasting():
+    """`jax.vmap` and the broadcast path agree exactly, not merely closely."""
+    z = jnp.asarray([0.1, 0.3, 0.9, 3.0])
+    np.testing.assert_array_equal(sp.polylog(2, z), jax.vmap(partial(sp.polylog, 2))(z))
 
 
 def test_jit():

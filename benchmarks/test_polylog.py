@@ -36,9 +36,12 @@ def test_polylog_scalar(
 
 @pytest.mark.parametrize("n", [3, 10])
 def test_polylog_vector(benchmark: BenchmarkFixture, n: int) -> None:
-    """Evaluate the polylogarithm on 200 points."""
-    fn = jax.vmap(lambda z: sp.polylog(n, z))
-    benchmark(warm(fn, Z_VECTOR))
+    """Evaluate the polylogarithm on 200 points.
+
+    Called directly rather than under ``jax.vmap``: ``polylog`` broadcasts over
+    ``z``, so this measures the path a caller actually takes.
+    """
+    benchmark(warm(lambda z: sp.polylog(n, z), Z_VECTOR))
 
 
 @pytest.mark.parametrize(("branch", "n"), [("series", 4.0), ("table", -7.0)])

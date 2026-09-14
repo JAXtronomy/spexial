@@ -22,7 +22,7 @@ What `spexial` raises, when, and what it deliberately does not raise. For the do
 | `k0`/`k1`/`k2`/`k0e`/`k1e`/`k2e` with complex `z` | `TypeError` | `lgamma does not accept dtype complex128` |
 | `zeta(n)` with complex `n` | `ValueError` | `Clip received a complex value` |
 
-The last four are raised by JAX, not by `spexial`, and their wording is therefore not ours to promise. They are listed because they are what you will actually see, and because each corresponds to a documented restriction: `polylog` takes a scalar `z`, `eval_gegenbauers` takes a scalar `x`, and the Bessel and zeta functions are real-only.
+The last four are raised by JAX, not by `spexial`, and their wording is therefore not ours to promise. They are listed because they are what you will actually see, and because each corresponds to a documented restriction: `eval_gegenbauers` takes a scalar `x`, and the Bessel and zeta functions are real-only.
 
 ### A non-integer order
 
