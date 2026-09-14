@@ -4,7 +4,9 @@
 
 `spexial` implements special functions — Gegenbauer polynomials, the gamma function, modified Bessel functions, the Riemann zeta function, polylogarithms, the incomplete beta function, spherical harmonics — as plain JAX functions. Because they are ordinary JAX code, they compose with `jax.jit`, `jax.vmap` and `jax.grad`, and run on CPU, GPU and TPU.
 
-Where a function has a `scipy.special` counterpart, `spexial` matches its name, its argument order and its convention. It exists to fill gaps in `jax.scipy.special` — `zeta` accepts negative integers where JAX returns `nan`, and `spence` accepts complex arguments where JAX is real-only. SciPy already covers both; the gap this library fills is on the JAX side, not the SciPy side.
+Where a function has a `scipy.special` counterpart, `spexial` matches its name, its argument order and its convention. It exists to fill gaps in `jax.scipy.special`, of three kinds: functions JAX does not have at any version (the modified Bessel `K` functions, the polylogarithm, the Gegenbauer polynomials, the unregularized incomplete beta, the Cartesian spherical harmonics); functions JAX has but gets wrong or supports over less (`zeta` returns `nan` for negative integers, `spence` rejects complex arguments, `sph_harm_y` returns incorrect values for array degrees); and functions whose _derivative_ is the problem, where writing the JVP out by hand is faster, cheaper in memory, or finite where differentiating the implementation gives `nan`.
+
+SciPy covers most of these already; the gap this library fills is on the JAX side, not the SciPy side. [Coverage](reference/coverage.md) states, per function, which gap it fills — and what would have to happen upstream for the row to be deleted.
 
 ## Installation
 

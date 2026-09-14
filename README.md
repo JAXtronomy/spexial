@@ -11,7 +11,13 @@
 
 `spexial` provides special functions for JAX, following the `scipy.special` API. The implementations are written in terms of JAX primitives, so they compose with `jit`, `grad` and `vmap`, and run on CPU, GPU and TPU.
 
-It exists to fill gaps in `jax.scipy.special`: `zeta` accepts negative integers where JAX returns `nan`, `spence` accepts complex arguments where JAX is real-only, and the modified Bessel `K`, Gegenbauer and polylogarithm functions have no JAX counterpart at any version. Where SciPy already covers a case, `spexial` matches it rather than claiming to exceed it.
+It exists to fill gaps in `jax.scipy.special`, of three kinds:
+
+- **Missing.** The modified Bessel `K` functions, the polylogarithm, the Gegenbauer polynomials, the normalized Legendre function, the unregularized incomplete beta and the Cartesian spherical harmonics have no JAX counterpart at any version.
+- **Wrong, or narrower.** `zeta` returns `nan` for negative integers; `spence` rejects complex arguments; `sph_harm_y` pairs each degree with one angle instead of broadcasting, so array degrees give incorrect values.
+- **Badly differentiated.** Where a closed form exists, the JVP is written out by hand instead of differentiating through the series. Sometimes that is faster (`incomplete_beta`, 143x), sometimes cheaper in memory (`polylog`, 268x less residual), and sometimes it is the difference between a number and `nan` — JAX's `spence` differentiates to `nan` across roughly 1 < x < 2, and its `sph_harm_y` at both poles.
+
+Where SciPy already covers a case, `spexial` matches it rather than claiming to exceed it. [Coverage](https://jaxtronomy.github.io/spexial/reference/coverage/) records, per function, which gap it fills, and what upstream would have to do for the row to be deleted.
 
 ## Installation
 
