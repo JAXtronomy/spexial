@@ -131,3 +131,18 @@ def test_sph_harm_y_cart_all_terms_signature() -> None:
     assert len(terms) == degree + 1
     assert len(terms[0]) == 2 * order + 1
     assert terms[degree][order].shape == ()
+
+
+def test_spherical_jn_signatures() -> None:
+    """`spherical_jn(n, z, derivative=False)` and the all-orders table form."""
+    order: int = 4
+    value: Out = sp.spherical_jn(order, 2.0)
+    slope: Out = sp.spherical_jn(order, jnp.asarray([1.0, 2.0]), derivative=True)
+    positional: Out = sp.spherical_jn(order, 2.0, True)  # noqa: FBT003 -- scipy's
+    table: Out = sp.spherical_jn_all(order, jnp.asarray([1.0, 2.0]))
+    table_slope: Out = sp.spherical_jn_all(order, 2.0, derivative=True)
+    assert value.shape == ()
+    assert slope.shape == (2,)
+    assert positional.shape == ()
+    assert table.shape == (order + 1, 2)
+    assert table_slope.shape == (order + 1,)

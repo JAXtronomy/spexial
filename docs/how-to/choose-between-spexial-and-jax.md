@@ -59,6 +59,8 @@ There is no decision to make for these — JAX has nothing at any version:
 | `sph_harm_y_cart` | spherical harmonic from a **Cartesian** direction: correct gradients on the z-axis, where the $(\theta, \phi)$ form gives exactly zero |
 | `sph_harm_y_cart_all` | the whole $(l, m)$ table in one sweep, laid out as `scipy.special.sph_harm_y_all` |
 | `sph_harm_y_cart_all_terms` | the same table unstacked, so a caller's reduction over it stays fused |
+| `spherical_jn` | spherical Bessel functions $j_n$ |
+| `spherical_jn_all` | every order up to `n` in one pass |
 
 `scipy.special` has most of these, but it does not help inside a JAX program: with `SCIPY_ARRAY_API=1` only `gamma` differentiates, `k0`/`k1` return a value but do not, and `kn`, `comb` and `eval_gegenbauer` do not dispatch on JAX arrays at all — they silently convert to NumPy, which breaks under `jit`.
 
@@ -73,9 +75,11 @@ The table above is generated from a registry that ships with the package, and it
 ['eval_gegenbauer', 'eval_gegenbauers', 'incomplete_beta', 'k0']
 >>> unique[4:9]
 ['k0e', 'k1', 'k1e', 'k2', 'k2e']
->>> unique[9:]
+>>> unique[9:14]
 ['polylog', 'sph_harm_y_cart', 'sph_harm_y_cart_all',
  'sph_harm_y_cart_all_terms', 'sph_legendre_p']
+>>> unique[14:]
+['spherical_jn', 'spherical_jn_all']
 
 ```
 

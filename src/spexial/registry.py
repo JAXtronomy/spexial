@@ -12,9 +12,11 @@ Examples
 ['eval_gegenbauer', 'eval_gegenbauers', 'incomplete_beta', 'k0']
 >>> unique[4:9]
 ['k0e', 'k1', 'k1e', 'k2', 'k2e']
->>> unique[9:]
+>>> unique[9:14]
 ['polylog', 'sph_harm_y_cart', 'sph_harm_y_cart_all',
  'sph_harm_y_cart_all_terms', 'sph_legendre_p']
+>>> unique[14:]
+['spherical_jn', 'spherical_jn_all']
 
 """
 

@@ -30,6 +30,8 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 | `sph_harm_y_cart` | -- | -- | -- | -- | -- | -- | only here |
 | `sph_harm_y_cart_all` | -- | -- | -- | -- | -- | -- | only here |
 | `sph_harm_y_cart_all_terms` | -- | -- | -- | -- | -- | -- | only here |
+| `spherical_jn` | -- | -- | -- | yes | -- | -- | only here |
+| `spherical_jn_all` | -- | -- | -- | yes | -- | -- | only here |
 | `incomplete_beta` | -- | -- | -- | yes | 0.007x (142.9x better) | 0.0144x (69.4x better) | only here |
 | `spence` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.2x (5.0x better) | 0.026x (38.5x better) | extends upstream |
 | `zeta` | yes (all >= 0.7.2) | value + autodiff | -- | -- | 1.08x (1.1x worse) | -- | extends upstream |
@@ -109,6 +111,16 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 
 `sph_harm_y_cart_all_terms`
 :   `sph_harm_y_cart_all`'s values, same indexing and same layout, returned as a nested tuple of separate arrays instead of one stacked array. The container is the whole point: indexing a stacked table stops XLA folding each term into a caller's reduction as it is produced, so the table is materialized. Measured on a multipole expansion at n = 12 over a million directions, summing from the stacked form took 17.7 s against 10 ms from these terms. The only function here not wrapped in `jax.jit`, deliberately: a jitted function returning a pytree materializes each leaf at the call boundary, which is exactly the fusion this exists to preserve.
+
+`spherical_jn`
+:   JAX has only the cylindrical `bessel_jn`, and scipy's does not dispatch on JAX arrays. Upward recurrence; below the turning point, values smaller than about 1e-6 of the peak are unreliable, and those far below it are set to zero. The derivative rule is regular at z = 0. Contributed from [ABCMB](https://github.com/TonyZhou729/ABCMB).
+
+    Derivative: `(n j_{n-1}(z) - (n+1) j_{n+1}(z)) / (2n+1)`.
+
+`spherical_jn_all`
+:   Every order up to n from one recurrence. Contributed from [ABCMB](https://github.com/TonyZhou729/ABCMB).
+
+    Derivative: `(l j_{l-1}(z) - (l+1) j_{l+1}(z)) / (2l+1)`.
 
 `incomplete_beta`
 :   The *unregularized* B(a, b, z) of DLMF 8.17.1. Neither JAX nor scipy has one: their `betainc` is the regularized I_z(a, b), and reconstructing this as `beta(a, b) * betainc(a, b, z)` is `nan` for every b <= 0 -- B(a, b) has a pole there while the product does not, and b <= 0 is an ordinary slope in a double power-law density profile. `jax.scipy.special.hyp2f1` can express it via DLMF 8.17.7, but it is a `while_loop` whose trip count depends on its data, so under `vmap` every lane pays the worst lane's count and its derivative runs a second such loop. Two fixed-length series instead, switched at z = 1/2. The custom JVP is the strongest case in this table: by Leibniz the z-derivative is just the integrand at the endpoint, so it is exact and O(1) against 64 terms -- 143x faster on 70x less residual. `custom_jvp` rather than `custom_vjp` so `jacfwd(jacrev(...))` still composes. Contributed from `galax`.

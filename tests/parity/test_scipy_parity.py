@@ -21,6 +21,8 @@ from scipy.special import (
     kn as scipy_kn,
     sph_harm_y as scipy_sph_harm_y,
     sph_legendre_p as scipy_sph_legendre_p,
+    spherical_jn as scipy_spherical_jn,
+    spherical_yn as scipy_spherical_yn,
     zeta as scipy_zeta,
 )
 
@@ -353,6 +355,53 @@ def test_incomplete_beta_against_the_regularized_form(a, b, z):
         rtol=1e-10,
         atol=1e-13,
     )
+
+
+# ---------------------------------------------------------------------------
+# spherical_jn
+#
+# Below the turning point |z| ~ n the error is absolute, so it is measured against
+# the peak of j_n; above it, against the envelope sqrt(j_n^2 + y_n^2).
+
+
+def _peak(n, *, derivative=False):
+    z = np.linspace(0.0, n + 3 * (n + 1) ** (1 / 3) + 3, 20_001)
+    return np.abs(scipy_spherical_jn(n, z, derivative)).max()
+
+
+def _envelope(n, z):
+    return np.hypot(scipy_spherical_jn(n, np.abs(z)), scipy_spherical_yn(n, np.abs(z)))
+
+
+@pytest.mark.parametrize("derivative", [False, True])
+@given(n=st.integers(min_value=0, max_value=60), z=floats(-150.0, 150.0))
+@example(n=0, z=0.0)
+@example(n=30, z=24.0)
+def test_spherical_jn(derivative, n, z):
+    """Measured worst case 3.5e-7 of the peak and 1.3e-14 of the envelope."""
+    # Below ~1e-200 scipy's j_n underflows to 0 and its derivative formula,
+    # j_{n-1} - (n+1) j_n / z, loses the second term: it returns 1 for j_1'
+    # where the true limit is 1/3, which is what the series here gives.
+    assume(not derivative or abs(z) > 1e-200)
+    got = float(sp.spherical_jn(n, z, derivative=derivative))
+    err = abs(got - scipy_spherical_jn(n, z, derivative))
+    assert err <= 5e-7 * _peak(n, derivative=derivative)
+    if abs(z) >= n:
+        assert err <= 5e-14 * _envelope(n, z)
+
+
+@pytest.mark.parametrize(
+    ("n", "peak_tol", "env_tol"), [(2000, 5e-7, 4e-13), (9000, 8e-7, 1e-12)]
+)
+def test_spherical_jn_high_order(n, peak_tol, env_tol):
+    """Measured 3.3e-7 / 1.9e-13 at n = 2000 and 5.7e-7 / 5.0e-13 at n = 9000."""
+    z = np.arange(0.0, 1.3 * n, 0.125)
+    err = np.abs(
+        np.asarray(sp.spherical_jn(n, jnp.asarray(z))) - scipy_spherical_jn(n, z)
+    )
+    assert err.max() <= peak_tol * _peak(n)
+    above = z >= n
+    assert np.max(err[above] / _envelope(n, z[above])) <= env_tol
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,8 @@ Every function is tested against a reference implementation — `scipy.special` 
 | `sph_harm_y_cart` | -- | as `sph_harm_y`, from a **unit** direction of shape $(\ldots, 3)$ | as `sph_harm_y` |
 | `sph_harm_y_cart_all` | `sph_harm_y_all` (layout only) | as `sph_harm_y_cart` | as `sph_harm_y`; agrees with the per-pair function to $10^{-13}$ relative |
 | `sph_harm_y_cart_all_terms` | -- | as `sph_harm_y_cart_all` | identical values; the two differ only in their container |
+| `spherical_jn` | `spherical_jn` | integer $n \ge 0$, real $z$; below the turning point $\lvert z \rvert \approx n$, values smaller than about $10^{-6}$ of the peak are unreliable in sign and magnitude, and those far below it are returned as 0 | for $\lvert z \rvert \ge n$, $10^{-12}$ of $\sqrt{j_n^2 + y_n^2}$; below it, absolute: $10^{-6}$ of $\max_z \lvert j_n \rvert$, $3\times10^{-6}$ of $\max_z \lvert j_n' \rvert$ for the derivative; measured to $n = 10^4$ |
+| `spherical_jn_all` | -- | as `spherical_jn`; returns all orders $0 \ldots n$ | as `spherical_jn` |
 | `spence` | `spence` | real or complex $z$ | rtol $10^{-12}$, atol $10^{-13}$ vs scipy; worst $1.6 \times 10^{-14}$ real, $4.9 \times 10^{-15}$ complex |
 | `zeta` | `zeta` | all real $n$, finite where $\lvert\zeta\rvert$ fits a double | rtol $10^{-12}$; worst $6\times10^{-13}$, at large $\lvert n\rvert$ |
 

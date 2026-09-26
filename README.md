@@ -68,6 +68,8 @@ Array([-1.    ,  0.4375, -0.    , -0.4375,  1.    ], dtype=float64)
 | `k0e`, `k1e`, `k2e` | `k0e`, `k1e`, `kve` — scaled by `e^z`, no upper limit |
 | `polylog` | -- the polylogarithm |
 | `spence` | `spence` — complex too, which JAX rejects |
+| `spherical_jn` | `spherical_jn` |
+| `spherical_jn_all` | -- every order up to `n` |
 | `sph_legendre_p` | `sph_legendre_p` — absent from JAX at any version |
 | `sph_harm_y` | `sph_harm_y` — JAX's returns incorrect values for array degrees |
 | `sph_harm_y_cart` | -- from a Cartesian direction; correct gradients on the z-axis |

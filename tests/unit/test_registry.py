@@ -18,6 +18,7 @@ import pytest
 
 import spexial as sp
 from spexial._src.polylog import _li_core
+from spexial._src.spherical_bessel import _band
 from spexial.registry import JAX_FLOOR, REGISTRY, Status, Support
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +38,8 @@ _JVP_OBJECT = {
     "incomplete_beta": sp.incomplete_beta,
     "polylog": _li_core,
     "spence": sp.spence,
+    "spherical_jn": _band,
+    "spherical_jn_all": _band,
 }
 
 # Functions whose domain is not the positive reals, so the shared probes below
@@ -64,6 +67,14 @@ _PROBES = {
         lambda z: jax.vmap(lambda t: _li_core.fun(3, t))(z),
     ),
     "spence": (sp.spence, sp.spence.fun),
+    "spherical_jn": (
+        lambda z: sp.spherical_jn(5, z),
+        lambda z: _band.fun(5, 5, z)[0],
+    ),
+    "spherical_jn_all": (
+        lambda z: sp.spherical_jn_all(5, z),
+        lambda z: _band.fun(0, 5, z),
+    ),
 }
 
 
