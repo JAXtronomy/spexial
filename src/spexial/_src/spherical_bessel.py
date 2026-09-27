@@ -21,6 +21,12 @@ _UNROLL: Final = 8
 """Recurrence steps per loop iteration. Against 1: 4-15x faster on an A100 and
 2-4x on CPU, for about 30% more compile time per ``n``."""
 
+_RESCALE_AT: Final = 2.0**40
+"""`_downward` rescales its carry once it passes this."""
+
+_SHIFT: Final = 100.0
+"""... by ``2**-_SHIFT``, exactly, keeping the exponent apart."""
+
 _Carry: TypeAlias = tuple[AnyArray, AnyArray]
 
 
@@ -54,7 +60,22 @@ def _j1(x: AnyArray, /) -> AnyArray:
 
 
 def _rows(lo: int, hi: int, x: AnyArray) -> AnyArray:
-    """Orders ``lo ... hi`` at finite ``x >= 0``, by upward recurrence."""
+    """Orders ``lo ... hi`` at finite ``x >= 0``.
+
+    Upward recurrence is stable above the turning point, and in float64 the
+    CLASS cutoff keeps its noise below it to ~1e-7 of the peak. That noise is
+    ``eps / _CUTOFF``, so in float32 it is ~600x the peak, and no cutoff fixes
+    it: one large enough zeroes most of `j_n` for ``n >~ 100``. Below the
+    turning point float32 therefore uses Miller's downward recurrence instead
+    (spexial#51), which is stable there.
+    """
+    if hi <= 1 or jnp.finfo(x.dtype).bits >= 64:
+        return _upward(lo, hi, x)
+    return jnp.where(x >= hi, _upward(lo, hi, x), _downward(lo, hi, x))
+
+
+def _upward(lo: int, hi: int, x: AnyArray) -> AnyArray:
+    """Orders ``lo ... hi`` by upward recurrence, zeroed below `_xmin`."""
     j0, j1 = _j0(x), _j1(x)
     if hi <= 1:
         return jnp.stack([j0, j1][lo : hi + 1])
@@ -82,6 +103,67 @@ def _rows(lo: int, hi: int, x: AnyArray) -> AnyArray:
             unroll=_UNROLL,
         )
     _, rows = lax.scan(step, carry, (orders[k:], xmin[k:]), unroll=_UNROLL)
+    if lo >= 2:
+        return rows
+    return jnp.concatenate([jnp.stack([j0, j1][lo:]), rows])
+
+
+def _downward(lo: int, hi: int, x: AnyArray) -> AnyArray:
+    """Orders ``lo ... hi``, ``hi >= 2``, by Miller's downward recurrence.
+
+    Starts from ``f_{N+1} = 0, f_N = 1`` far enough above ``max(hi, x)`` that
+    the seed has decayed below an eps by order ``hi``, recurs down to 0, and
+    normalises on whichever of `j_0` and `j_1` is larger, so a zero of either
+    costs nothing. The carry is rescaled by a power of two whenever it grows
+    past `_RESCALE_AT`, with the exponent kept apart, since ``j_0 / j_N``
+    overflows any float.
+    Accurate only for ``x < hi``; `_rows` takes `_upward` above that.
+    """
+    top = hi + int(6.0 * hi ** (1.0 / 3.0)) + 16  # past the turning point
+    first = max(lo, 2)  # j_0 and j_1 come from their closed forms
+    # Below this `j_2 ~ x^2 / 15` is under `tiny`, and `(2l + 1) / x` would
+    # overflow the carry.
+    floor = float(np.sqrt(15.0 * jnp.finfo(x.dtype).tiny))
+    inv_x = 1.0 / jnp.maximum(x, floor)
+
+    def step(
+        carry: tuple[AnyArray, AnyArray, AnyArray], order: AnyArray
+    ) -> tuple[tuple[AnyArray, AnyArray, AnyArray], _Carry]:
+        above, cur, exponent = carry  # f_{l+1}, f_l, both times 2**-exponent
+        below = (2.0 * order + 1.0) * inv_x * cur - above
+        # One step grows by at most `(2 top + 1) / floor`, under 2**87 for any
+        # n < 10**7, so a carry kept below 2**40 cannot overflow float32's
+        # 2**128. The factor
+        # is an `exp2` of a 0/1 flag, not a `where`: under `_UNROLL` XLA fuses
+        # the selects and recomputes them, which made this loop 7x slower.
+        shift = _SHIFT * (jnp.abs(below) > _RESCALE_AT).astype(x.dtype)
+        factor = jnp.exp2(-shift)
+        return (cur * factor, below * factor, exponent + shift), (cur, exponent)
+
+    def skip(
+        carry: tuple[AnyArray, AnyArray, AnyArray], order: AnyArray
+    ) -> tuple[tuple[AnyArray, AnyArray, AnyArray], None]:
+        return step(carry, order)[0], None
+
+    def orders(start: int, stop: int) -> AnyArray:
+        return jnp.arange(start, stop - 1, -1, dtype=x.dtype)
+
+    carry = (jnp.zeros_like(x), jnp.ones_like(x), jnp.zeros_like(x))
+    carry, _ = lax.scan(skip, carry, orders(top, hi + 1), unroll=_UNROLL)
+    carry, (rows, exponents) = lax.scan(step, carry, orders(hi, first), unroll=_UNROLL)
+    (f1, f0, e0), _ = lax.scan(skip, carry, orders(first - 1, 1), unroll=_UNROLL)
+
+    j0, j1 = _j0(x), _j1(x)
+    on_j0 = jnp.abs(j0) >= jnp.abs(j1)
+    # Both the rows and the normaliser can sit anywhere in [2**-60, 2**40], so
+    # fold their exponents into the one power of two. Otherwise `exp2` drops
+    # into the subnormals, which XLA flushes, before the mantissas lift it back.
+    mantissa, shift = jnp.frexp(jnp.where(on_j0, f0, f1))
+    scale = jnp.where(on_j0, j0, j1) / mantissa
+    row_mantissas, row_shifts = jnp.frexp(rows[::-1])
+    power = exponents[::-1] + row_shifts - e0 - shift
+    rows = row_mantissas * scale * jnp.exp2(power)
+    rows = jnp.where(x < floor, 0.0, rows)
     if lo >= 2:
         return rows
     return jnp.concatenate([jnp.stack([j0, j1][lo:]), rows])
@@ -148,6 +230,9 @@ def spherical_jn(
     smaller than about :math:`10^{-6}` of the peak (for :math:`n \le 10^4`,
     growing roughly as :math:`n^{5/6}` beyond) are unreliable in sign and
     magnitude, and those far enough below it are returned as exactly zero.
+    That describes float64. In float32 and narrower, the part below the turning
+    point comes from Miller's downward recurrence instead, which is stable
+    there: the error is below 1e-5 of the peak, with no noise band.
 
     Each ``n`` compiles separately. For many orders at the same ``z``, use
     `spherical_jn_all`, which computes them all at once.
@@ -169,7 +254,9 @@ def spherical_jn(
         :math:`n \le 10^4`, growing roughly as :math:`n` beyond. Below the turning
         point it is absolute: below 1e-6 of :math:`\max_z |j_n(z)|` for
         :math:`n \le 10^4`, and 3e-6 of :math:`\max_z |j_n'(z)|` for the
-        derivative.
+        derivative. In float32 the error is below 1e-5 of the peak below the
+        turning point, and above it grows roughly as :math:`10^{-7} n` of the
+        peak, from rounding accumulated over the recurrence.
 
     References
     ----------

@@ -404,6 +404,44 @@ def test_spherical_jn_high_order(n, peak_tol, env_tol):
     assert np.max(err[above] / _envelope(n, z[above])) <= env_tol
 
 
+@pytest.mark.parametrize("derivative", [False, True])
+@pytest.mark.parametrize("n", [2, 5, 10, 20, 100, 1000])
+def test_spherical_jn_float32(n, derivative):
+    """float32 takes Miller's recurrence below the turning point (spexial#51).
+
+    Upward recurrence there was 8-80x the peak out. Measured worst case now
+    6.7e-6 of the peak below the turning point, and 5e-5 *relative* down to
+    1e-30; above it the upward recurrence accumulates about ``n`` roundings,
+    5.5e-5 of the peak at ``n = 1000``.
+    """
+    z = np.concatenate([np.geomspace(1e-4, n, 2000), np.linspace(n, 3 * n + 30, 1000)])
+    got = sp.spherical_jn(n, jnp.asarray(z, jnp.float32), derivative=derivative)
+    assert got.dtype == jnp.float32
+    z = z.astype(np.float32).astype(np.float64)  # score the argument actually used
+    err = np.abs(np.asarray(got, np.float64) - scipy_spherical_jn(n, z, derivative))
+    peak = _peak(n, derivative=derivative)
+    assert err[z < n].max() <= 1e-5 * peak
+    assert err[z >= n].max() <= max(1e-5, 1e-7 * n) * peak
+    if not derivative:  # values near 1e-30 once flushed to 0 inside the rescale
+        want = scipy_spherical_jn(n, z)
+        tiny = (z < n) & (np.abs(want) > 1e-30)
+        assert np.max(err[tiny] / np.abs(want[tiny])) <= 1e-4
+
+
+def test_spherical_jn_all_float32():
+    """Every row of the float32 table, including rows below ``z`` but above ``l``."""
+    z = np.concatenate(
+        [np.geomspace(1e-4, 200.0, 1500), np.linspace(200.0, 700.0, 500)]
+    )
+    table = np.asarray(
+        sp.spherical_jn_all(200, jnp.asarray(z, jnp.float32)), np.float64
+    )
+    z = z.astype(np.float32).astype(np.float64)
+    for n in range(201):
+        err = np.abs(table[n] - scipy_spherical_jn(n, z)).max()
+        assert err <= 2e-5 * _peak(n), n
+
+
 # ---------------------------------------------------------------------------
 # zeta
 #
