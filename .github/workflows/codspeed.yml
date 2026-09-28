@@ -35,15 +35,28 @@ jobs:
     # varied was the runner's CPU and core count leaking into the measurement;
     # that is pinned in `benchmarks/conftest.py`, which is the file to look at
     # when a benchmark "regresses" in a commit that changed no source.
+    #
+    # What cannot be pinned here: GitHub rolls the image *version* under the
+    # same label (20260907 -> 20260920 between #50's base and PR runs, with a
+    # new glibc), and the pool mixes CPUs. A PR measured weeks after its base
+    # can still be flagged for that; only dedicated runners remove it.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # hatch-vcs needs the tags to derive a version
 
+      # uv is pinned because it picks the *interpreter*: each uv release embeds
+      # its own python-build-standalone build, so "3.11.16" is not one binary.
+      # Unpinned, the base run of #50 (uv 0.12.13) and its PR runs (0.12.19)
+      # got 3.11.16 built on different dates with different LTO flags, and
+      # CodSpeed flagged "Different runtime environments" -- on exactly the
+      # dispatch-bound scalar benchmarks, which are mostly interpreter. Bump
+      # this deliberately, and expect one run of environment changes when you do.
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
+          version: "0.12.19"
           python-version-file: ".python-version"
 
       - name: Install
@@ -66,5 +79,13 @@ jobs:
           JAX_ENABLE_X64: "True"
         with:
           mode: simulation
+          # Every benchmark shares one process, so each inherits the allocator
+          # state the previous ones left behind -- the likeliest cause, per
+          # CodSpeed's variance docs, of sibling benchmarks moving in opposite
+          # directions in an identical environment: on #52, which touched
+          # neither, `test_zeta_vector[negative]` went -62% and `[positive]`
+          # x2.1. What is measured here is JAX dispatch and XLA execution, not
+          # malloc, so allocator time is left out.
+          exclude-allocations: true
           run: uv run --frozen pytest benchmarks --codspeed -p no:env
           token: ${{ secrets.CODSPEED_TOKEN }}
