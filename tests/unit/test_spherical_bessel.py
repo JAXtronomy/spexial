@@ -78,7 +78,10 @@ def test_special_values():
 
 def test_upward_zeroes_small_values():
     """Upward recurrence alone sets values far below the turning point to 0."""
-    assert float(sp.spherical_jn(100, 10.0, recurrence=sp.Recurrence.UPWARD)) == 0.0
+    assert (
+        float(sp.spherical_jn(100, 10.0, recurrence=sp.SphericalJnRecurrence.UPWARD))
+        == 0.0
+    )
 
 
 def test_default_keeps_small_values():
@@ -101,24 +104,26 @@ def test_tiny_argument_is_finite(dtype):
 
 
 def test_downward_is_nan_above_the_turning_point():
-    """`Recurrence.DOWNWARD` cannot be right at ``|z| >= n``, and says so."""
+    """`SphericalJnRecurrence.DOWNWARD` cannot be right at ``|z| >= n``, and says so."""
     z = jnp.asarray([0.5, 9.9, 10.0, -10.0, 30.0])
-    got = np.asarray(sp.spherical_jn(10, z, recurrence=sp.Recurrence.DOWNWARD))
+    got = np.asarray(
+        sp.spherical_jn(10, z, recurrence=sp.SphericalJnRecurrence.DOWNWARD)
+    )
     np.testing.assert_array_equal(np.isnan(got), [False, False, True, True, True])
     both = np.asarray(sp.spherical_jn(10, z[:2]))
     np.testing.assert_allclose(got[:2], both, rtol=1e-14)
-    table = sp.spherical_jn_all(10, 12.0, recurrence=sp.Recurrence.DOWNWARD)
+    table = sp.spherical_jn_all(10, 12.0, recurrence=sp.SphericalJnRecurrence.DOWNWARD)
     assert np.all(np.isnan(table[2:]))
 
 
 def test_recurrence_accepts_its_string_values():
-    """``"upward"`` is `Recurrence.UPWARD`, and an unknown name raises."""
+    """``"upward"`` is `SphericalJnRecurrence.UPWARD`, and an unknown name raises."""
     z = jnp.linspace(0.1, 30.0, 7)
     np.testing.assert_array_equal(
         sp.spherical_jn(5, z, recurrence="upward"),
-        sp.spherical_jn(5, z, recurrence=sp.Recurrence.UPWARD),
+        sp.spherical_jn(5, z, recurrence=sp.SphericalJnRecurrence.UPWARD),
     )
-    # `ValueError` from `Recurrence(...)`, or `TypeError` first where the
+    # `ValueError` from `SphericalJnRecurrence(...)`, or `TypeError` first where the
     # runtime type checker is on, as it is under the test suite.
     with pytest.raises((ValueError, TypeError)):
         sp.spherical_jn(5, z, recurrence="sideways")

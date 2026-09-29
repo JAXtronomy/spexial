@@ -1,6 +1,6 @@
 """Spherical Bessel functions of the first kind."""
 
-__all__ = ["Recurrence", "spherical_jn", "spherical_jn_all"]
+__all__ = ["SphericalJnRecurrence", "spherical_jn", "spherical_jn_all"]
 
 import operator
 from enum import StrEnum
@@ -31,7 +31,7 @@ _SHIFT: Final = 100.0
 _Carry: TypeAlias = tuple[AnyArray, AnyArray]
 
 
-class Recurrence(StrEnum):
+class SphericalJnRecurrence(StrEnum):
     """Which recurrence `spherical_jn` and `spherical_jn_all` evaluate.
 
     Upward recurrence is stable above the turning point ``|z| ~ n`` and unstable
@@ -59,8 +59,10 @@ class Recurrence(StrEnum):
     """
 
 
-RecurrenceLike: TypeAlias = Recurrence | Literal["both", "upward", "downward"]
-"""A `Recurrence`, or its string value."""
+SphericalJnRecurrenceLike: TypeAlias = (
+    SphericalJnRecurrence | Literal["both", "upward", "downward"]
+)
+"""A `SphericalJnRecurrence`, or its string value."""
 
 
 def _xmin(orders: np.ndarray, cutoff: float) -> np.ndarray:
@@ -92,19 +94,19 @@ def _j1(x: AnyArray, /) -> AnyArray:
     return jnp.where(small, series, (jnp.sin(safe) / safe - jnp.cos(safe)) / safe)
 
 
-def _rows(lo: int, hi: int, recurrence: Recurrence, x: AnyArray) -> AnyArray:
+def _rows(lo: int, hi: int, recurrence: SphericalJnRecurrence, x: AnyArray) -> AnyArray:
     """Orders ``lo ... hi`` at finite ``x >= 0``.
 
     Upward recurrence is stable above the turning point. Below it, the CLASS
     cutoff keeps its noise to ``eps / _CUTOFF``: ~1e-7 of the peak in float64,
     and ~600x the peak in float32, which no cutoff fixes (spexial#51, #53).
-    Miller's downward recurrence is stable there instead, so `Recurrence.BOTH`
-    takes each on its own side of ``x = hi``.
+    Miller's downward recurrence is stable there instead, so
+    `SphericalJnRecurrence.BOTH` takes each on its own side of ``x = hi``.
     """
-    if hi <= 1 or recurrence is Recurrence.UPWARD:
+    if hi <= 1 or recurrence is SphericalJnRecurrence.UPWARD:
         return _upward(lo, hi, x)
     down = _downward(lo, hi, x)
-    if recurrence is Recurrence.DOWNWARD:
+    if recurrence is SphericalJnRecurrence.DOWNWARD:
         return jnp.where(x < hi, down, jnp.nan)
     return jnp.where(x >= hi, _upward(lo, hi, x), down)
 
@@ -237,7 +239,9 @@ def _downward(lo: int, hi: int, x: AnyArray) -> AnyArray:
 
 
 @partial(jax.custom_jvp, nondiff_argnums=(0, 1, 2))
-def _band(lo: int, hi: int, recurrence: Recurrence, z: AnyArrayLike) -> AnyArray:
+def _band(
+    lo: int, hi: int, recurrence: SphericalJnRecurrence, z: AnyArrayLike
+) -> AnyArray:
     """Orders ``lo ... hi`` at real ``z``, stacked on a leading axis."""
     z_arr = as_float(z)
     finite = jnp.isfinite(z_arr)
@@ -249,7 +253,7 @@ def _band(lo: int, hi: int, recurrence: Recurrence, z: AnyArrayLike) -> AnyArray
 
 
 def _derivative(
-    lo: int, hi: int, recurrence: Recurrence, z: AnyArrayLike
+    lo: int, hi: int, recurrence: SphericalJnRecurrence, z: AnyArrayLike
 ) -> tuple[AnyArray, AnyArray]:
     """Values and derivatives, ``j_l' = (l j_{l-1} - (l+1) j_{l+1}) / (2l+1)``."""
     wide = _band(max(lo - 1, 0), hi + 1, recurrence, z)
@@ -265,7 +269,7 @@ def _derivative(
 def _band_jvp(
     lo: int,
     hi: int,
-    recurrence: Recurrence,
+    recurrence: SphericalJnRecurrence,
     primals: tuple[Any],
     tangents: tuple[Any],
 ) -> tuple[AnyArray, AnyArray]:
@@ -276,7 +280,12 @@ def _band_jvp(
 
 @partial(jax.jit, static_argnums=(0, 1), static_argnames=("derivative", "recurrence"))
 def _evaluate(
-    lo: int, hi: int, z: AnyArrayLike, *, derivative: bool, recurrence: Recurrence
+    lo: int,
+    hi: int,
+    z: AnyArrayLike,
+    *,
+    derivative: bool,
+    recurrence: SphericalJnRecurrence,
 ) -> AnyArray:
     if derivative:
         return _derivative(lo, hi, recurrence, z)[1]
@@ -299,30 +308,32 @@ def spherical_jn(
     z: AnyArrayLike,
     derivative: bool = False,  # noqa: FBT001, FBT002 -- scipy's signature
     *,
-    recurrence: RecurrenceLike = Recurrence.BOTH,
+    recurrence: SphericalJnRecurrenceLike = SphericalJnRecurrence.BOTH,
 ) -> AnyArray:
     r"""Compute the spherical Bessel function of the first kind, :math:`j_n(z)`.
 
     Equivalent to ``scipy.special.spherical_jn`` for real ``z``. Computed by
     recurrence from :math:`j_0` and :math:`j_1`, and ``recurrence`` chooses
-    which (see `Recurrence`). Upward recurrence is stable above the turning
-    point :math:`|z| \approx n` and unstable below it; Miller's downward
-    recurrence is the reverse.
+    which (see `SphericalJnRecurrence`). Upward recurrence is stable above the
+    turning point :math:`|z| \approx n` and unstable below it; Miller's
+    downward recurrence is the reverse.
 
-    - `Recurrence.BOTH`, the default, runs each on its own side. It is right
-      everywhere, down to the smallest values, and is the choice unless you
-      know where your arguments are. It pays for that: on CPU it is 2-5x slower
-      than `Recurrence.UPWARD` and ~3x slower to compile.
-    - `Recurrence.UPWARD` is the fastest, and exact wherever :math:`|z| \ge n`.
-      Use it when every argument is above the turning point, or when only
-      values near the peak matter. Below the turning point it is noise: in
-      float64, values under ~1e-6 of the peak are wrong in sign and magnitude
-      or set to exactly zero, and in float32 the whole region is wrong, by up to
-      80x the peak.
-    - `Recurrence.DOWNWARD` is for arguments known to be below the turning
-      point, e.g. small :math:`kr` in a large multipole. It is as accurate as
-      `Recurrence.BOTH` there, skips the upward pass, and returns `nan` at
-      :math:`|z| \ge n` (:math:`|z| \ge n + 1` for the derivative).
+    - `SphericalJnRecurrence.BOTH`, the default, runs each on its own side. It
+      is right everywhere, down to the smallest values, and is the choice
+      unless you know where your arguments are. It pays for that: on CPU it is
+      2-5x slower than `SphericalJnRecurrence.UPWARD` and ~3x slower to
+      compile.
+    - `SphericalJnRecurrence.UPWARD` is the fastest, and exact wherever
+      :math:`|z| \ge n`. Use it when every argument is above the turning point,
+      or when only values near the peak matter. Below the turning point it is
+      noise: in float64, values under ~1e-6 of the peak are wrong in sign and
+      magnitude or set to exactly zero, and in float32 the whole region is
+      wrong, by up to 80x the peak.
+    - `SphericalJnRecurrence.DOWNWARD` is for arguments known to be below the
+      turning point, e.g. small :math:`kr` in a large multipole. It is as
+      accurate as `SphericalJnRecurrence.BOTH` there, skips the upward pass,
+      and returns `nan` at :math:`|z| \ge n` (:math:`|z| \ge n + 1` for the
+      derivative).
 
     Each ``n`` compiles separately, and so does each ``recurrence``. For many
     orders at the same ``z``, use `spherical_jn_all`, which computes them all at
@@ -337,7 +348,7 @@ def spherical_jn(
     derivative
         If `True`, return :math:`j_n'(z)` instead.
     recurrence
-        Which recurrence to run: a `Recurrence`, or its string value
+        Which recurrence to run: a `SphericalJnRecurrence`, or its string value
         (``"both"``, ``"upward"``, ``"downward"``). Static.
 
     Returns
@@ -347,9 +358,10 @@ def spherical_jn(
         error is below 1e-12 of :math:`\sqrt{j_n^2 + y_n^2}` for
         :math:`n \le 10^4`, growing roughly as :math:`n` beyond (in float32,
         :math:`\max(10^{-5}, 10^{-7} n)` of the peak). Below the turning point,
-        `Recurrence.BOTH` and `Recurrence.DOWNWARD` are accurate *relatively*:
-        to 5e-13 in float64 and 5e-5 in float32 for :math:`n \le 1000`, down to
-        the smallest representable values. `Recurrence.UPWARD` is accurate
+        `SphericalJnRecurrence.BOTH` and `SphericalJnRecurrence.DOWNWARD` are
+        accurate *relatively*: to 5e-13 in float64 and 5e-5 in float32 for
+        :math:`n \le 1000`, down to the smallest representable values.
+        `SphericalJnRecurrence.UPWARD` is accurate
         there only absolutely, to 1e-6 of :math:`\max_z |j_n(z)|` in float64
         for :math:`n \le 10^4` (3e-6 for the derivative).
 
@@ -374,13 +386,17 @@ def spherical_jn(
 
     >>> f"{float(sp.spherical_jn(5, 0.1)):.4e}"
     '9.6163e-10'
-    >>> float(sp.spherical_jn(5, 0.1, recurrence=sp.Recurrence.UPWARD)) < 0
+    >>> float(sp.spherical_jn(5, 0.1, recurrence=sp.SphericalJnRecurrence.UPWARD)) < 0
     True
 
     """
     n = _validate(n, z)
     return _evaluate(
-        n, n, z, derivative=bool(derivative), recurrence=Recurrence(recurrence)
+        n,
+        n,
+        z,
+        derivative=bool(derivative),
+        recurrence=SphericalJnRecurrence(recurrence),
     )[0]
 
 
@@ -389,16 +405,17 @@ def spherical_jn_all(
     z: AnyArrayLike,
     derivative: bool = False,  # noqa: FBT001, FBT002 -- as `spherical_jn`
     *,
-    recurrence: RecurrenceLike = Recurrence.BOTH,
+    recurrence: SphericalJnRecurrenceLike = SphericalJnRecurrence.BOTH,
 ) -> AnyArray:
     r"""Return :math:`j_l(z)` for every order ``l = 0 ... n``.
 
     There is no `scipy.special` counterpart. The orders come from the same
     recurrences as `spherical_jn`, chosen the same way by ``recurrence``, with
     the same accuracy and cost. Each order has its own turning point, and the
-    split is made at the highest one, ``|z| = n``: with `Recurrence.BOTH`, every
-    row at ``|z| < n`` comes from the downward recurrence, and
-    `Recurrence.DOWNWARD` is `nan` for the whole column at ``|z| >= n``.
+    split is made at the highest one, ``|z| = n``: with
+    `SphericalJnRecurrence.BOTH`, every row at ``|z| < n`` comes from the
+    downward recurrence, and `SphericalJnRecurrence.DOWNWARD` is `nan` for the
+    whole column at ``|z| >= n``.
 
     Parameters
     ----------
@@ -426,5 +443,9 @@ def spherical_jn_all(
     """
     n = _validate(n, z)
     return _evaluate(
-        0, n, z, derivative=bool(derivative), recurrence=Recurrence(recurrence)
+        0,
+        n,
+        z,
+        derivative=bool(derivative),
+        recurrence=SphericalJnRecurrence(recurrence),
     )

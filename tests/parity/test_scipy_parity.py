@@ -428,11 +428,11 @@ def test_spherical_jn_float32(n, derivative):
         assert np.max(err[tiny] / np.abs(want[tiny])) <= 1e-4
 
 
-@pytest.mark.parametrize("recurrence", list(sp.Recurrence))
+@pytest.mark.parametrize("recurrence", list(sp.SphericalJnRecurrence))
 @pytest.mark.parametrize("dtype", ["float64", "float32"])
 @pytest.mark.parametrize("n", [5, 100, 1000])
 def test_spherical_jn_recurrences(n, dtype, recurrence):
-    """Each `Recurrence` is right where its docstring says it is (spexial#53).
+    """Each `SphericalJnRecurrence` is right where its docstring says (spexial#53).
 
     Below the turning point, `BOTH` and `DOWNWARD` are accurate *relatively*,
     down to the smallest values: measured 4e-13 (float64) and 4e-5 (float32)
@@ -449,13 +449,13 @@ def test_spherical_jn_recurrences(n, dtype, recurrence):
     )
     want = scipy_spherical_jn(n, z)
     below = z < n
-    if recurrence is sp.Recurrence.DOWNWARD:
+    if recurrence is sp.SphericalJnRecurrence.DOWNWARD:
         assert np.all(np.isnan(got[~below]))
     else:
         peak = _peak(n)
         tol = 1e-12 * _envelope(n, z[~below]) if dtype == "float64" else 1e-4 * peak
         assert np.all(np.abs(got[~below] - want[~below]) <= tol)
-    if recurrence is not sp.Recurrence.UPWARD:
+    if recurrence is not sp.SphericalJnRecurrence.UPWARD:
         smallest = 1e-290 if dtype == "float64" else 1e-30
         kept = below & (np.abs(want) > smallest)
         rel = np.abs(got[kept] - want[kept]) / np.abs(want[kept])

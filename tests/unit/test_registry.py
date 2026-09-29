@@ -69,11 +69,11 @@ _PROBES = {
     "spence": (sp.spence, sp.spence.fun),
     "spherical_jn": (
         lambda z: sp.spherical_jn(5, z),
-        lambda z: _band.fun(5, 5, sp.Recurrence.BOTH, z)[0],
+        lambda z: _band.fun(5, 5, sp.SphericalJnRecurrence.BOTH, z)[0],
     ),
     "spherical_jn_all": (
         lambda z: sp.spherical_jn_all(5, z),
-        lambda z: _band.fun(0, 5, sp.Recurrence.BOTH, z),
+        lambda z: _band.fun(0, 5, sp.SphericalJnRecurrence.BOTH, z),
     ),
 }
 
@@ -84,7 +84,7 @@ def test_registry_covers_exactly_the_public_api():
     The deprecated uppercase spellings are excluded: they are aliases of rows
     that already exist, not coverage of their own, and giving them rows would
     double every count the table reports. So are exported *types*, such as
-    `Recurrence`: they are options to a function, not functions.
+    `SphericalJnRecurrence`: they are options to a function, not functions.
     """
     aliases = {"K0", "K1", "K2", "K0e", "K1e", "K2e", "Li"}
     exported = {
