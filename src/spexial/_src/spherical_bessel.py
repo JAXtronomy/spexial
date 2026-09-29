@@ -335,9 +335,11 @@ def spherical_jn(
 
     - `SphericalJnRecurrence.BOTH`, the default, runs each on its own side. It
       is right everywhere, down to the smallest values, and is the choice
-      unless you know where your arguments are. It pays for that: on CPU it is
-      2-5x slower than `SphericalJnRecurrence.UP` and ~3x slower to
-      compile.
+      unless you know where your arguments are. It runs only the recurrence a
+      batch needs, so a batch wholly on one side of the turning point costs
+      about what `UP` or `DOWN` alone would. A batch that straddles it pays
+      for both: on CPU, 2.5-5x `SphericalJnRecurrence.UP`. Either way it takes
+      ~2x as long as `UP` to compile.
     - `SphericalJnRecurrence.UP` is the fastest, and exact wherever
       :math:`|z| \ge n`. Use it when every argument is above the turning point,
       or when only values near the peak matter. Below the turning point it is
