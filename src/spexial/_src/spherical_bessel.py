@@ -188,7 +188,10 @@ def _downward(lo: int, hi: int, x: AnyArray) -> AnyArray:
     overflows any float.
     Accurate only for ``x < hi``; `_rows` takes `_upward` above that.
     """
-    top = hi + int(6.0 * hi ** (1.0 / 3.0)) + 16  # past the turning point
+    # Past the turning point. The `+ 16` is spare: `+ 2` already reaches full
+    # accuracy in both dtypes, and only `+ 0` costs float64 two digits
+    # (1.3e-12 relative) at small n.
+    top = hi + int(6.0 * hi ** (1.0 / 3.0)) + 16
     first = max(lo, 2)  # j_0 and j_1 come from their closed forms
     # Above this, one step grows the carry by at most `(2 top + 1) / x`, under
     # 2**80. Below it the leading term of the series is exact to rounding: the
@@ -270,14 +273,31 @@ def _band(
 def _derivative(
     lo: int, hi: int, recurrence: SphericalJnRecurrence, z: AnyArrayLike
 ) -> tuple[AnyArray, AnyArray]:
-    """Values and derivatives, ``j_l' = (l j_{l-1} - (l+1) j_{l+1}) / (2l+1)``."""
-    wide = _band(max(lo - 1, 0), hi + 1, recurrence, z)
+    """Values and derivatives, ``j_l' = (l j_{l-1} - (l+1) j_{l+1}) / (2l+1)``.
+
+    The rule needs order ``hi + 1``, one past the band, which under `DOWN`
+    moves the `nan` region out to ``|z| >= hi + 1``. Two consequences are
+    undone here: orders 0 and 1 -- closed forms, exact everywhere -- would
+    get a `nan` derivative from a downward order 2, so they take their
+    neighbour from `BOTH`; and for ``hi >= 2`` the value and derivative are
+    masked to `nan` from ``|z| >= hi``, where the value itself is `nan`, so
+    the two agree.
+    """
+    down = recurrence is SphericalJnRecurrence.DOWN
+    neighbours = SphericalJnRecurrence.BOTH if down and hi <= 1 else recurrence
+    wide = _band(max(lo - 1, 0), hi + 1, neighbours, z)
     if lo == 0:  # j_{-1} enters with coefficient l = 0
         wide = jnp.concatenate([jnp.zeros_like(wide[:1]), wide])
     order = jnp.arange(lo, hi + 1, dtype=wide.dtype)
     order = order.reshape((-1,) + (1,) * (wide.ndim - 1))
     deriv = (order * wide[:-2] - (order + 1.0) * wide[2:]) / (2.0 * order + 1.0)
-    return wide[1:-1], deriv
+    value = wide[1:-1]
+    if down and hi >= 2:
+        z_arr = as_float(z)
+        beyond = jnp.isfinite(z_arr) & (jnp.abs(z_arr) >= hi)
+        value = jnp.where(beyond, jnp.nan, value)
+        deriv = jnp.where(beyond, jnp.nan, deriv)
+    return value, deriv
 
 
 @_band.defjvp
@@ -337,12 +357,13 @@ def spherical_jn(
       is right everywhere, down to the smallest values, and is the choice
       unless you know where your arguments are. It runs only the recurrence a
       batch needs, so a batch wholly on one side of the turning point costs
-      what `UP` or `DOWN` alone would (within ~20%). Downward is the dearer
-      of the two, 1.5-4x upward for ``n >= 100`` on CPU, so a batch that
-      straddles the turning point costs 2.5-5x `SphericalJnRecurrence.UP`
+      what `UP` or `DOWN` alone would (within ~30%). Downward is the dearer
+      of the two, 1.7-4.6x upward for ``n >= 100`` on CPU, so a batch that
+      straddles the turning point costs 3-5.3x `SphericalJnRecurrence.UP`
       -- more at small ``n``, where upward is nearly free: 7x in float64 and
-      13x in float32 at ``n = 10``. It takes 2.5-3.5x as long as `UP` to
-      compile.
+      12x in float32 at ``n = 10``. Under `jax.vmap` every batch pays that
+      straddling price, as the check is made per element. It takes 2-3.5x as
+      long as `UP` to compile.
     - `SphericalJnRecurrence.UP` is the fastest, and exact wherever
       :math:`|z| \ge n`. Use it when every argument is above the turning point,
       or when only values near the peak matter. Below the turning point it is
@@ -352,8 +373,8 @@ def spherical_jn(
     - `SphericalJnRecurrence.DOWN` is for arguments known to be below the
       turning point, e.g. small :math:`kr` in a large multipole. It is as
       accurate as `SphericalJnRecurrence.BOTH` there, skips the upward pass,
-      and returns `nan` at :math:`|z| \ge n` (:math:`|z| \ge n + 1` for the
-      derivative).
+      and returns `nan` at :math:`|z| \ge n`, for the value and the
+      derivative alike. Orders 0 and 1 are closed forms, exact everywhere.
 
     Each ``n`` compiles separately, and so does each ``recurrence``. For many
     orders at the same ``z``, use `spherical_jn_all`, which computes them all at
@@ -379,11 +400,11 @@ def spherical_jn(
         :math:`n \le 10^4`, growing roughly as :math:`n` beyond (in float32,
         :math:`\max(10^{-5}, 10^{-7} n)` of the peak). Below the turning point,
         `SphericalJnRecurrence.BOTH` and `SphericalJnRecurrence.DOWN` are
-        accurate *relatively*: to 5e-13 in float64 and 5e-5 in float32 for
-        :math:`n \le 1000`, down to the smallest representable values.
-        `SphericalJnRecurrence.UP` is accurate
-        there only absolutely, to 1e-6 of :math:`\max_z |j_n(z)|` in float64
-        for :math:`n \le 10^4` (3e-6 for the derivative).
+        accurate *relatively*, down to the smallest representable values: for
+        :math:`n \le 1000`, 5e-13 in float64 (1e-12 for the derivative) and
+        5e-5 in float32. `SphericalJnRecurrence.UP` is accurate there only
+        absolutely, to 1e-6 of :math:`\max_z |j_n(z)|` in float64 for
+        :math:`n \le 10^4` (3e-6 for the derivative).
 
     References
     ----------
