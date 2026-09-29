@@ -234,6 +234,12 @@ def spherical_jn(
     point comes from Miller's downward recurrence instead, which is stable
     there: the error is below 1e-5 of the peak, with no noise band.
 
+    The two dtypes trade speed for reliability. float32 runs both recurrences
+    and keeps one per element, so on CPU it is 2-3x *slower* than float64 and
+    takes 1.3-2.6x as long to compile (similar on GPU). float64 keeps the
+    faster upward recurrence alone, and with it the unreliable small values
+    below the turning point.
+
     Each ``n`` compiles separately. For many orders at the same ``z``, use
     `spherical_jn_all`, which computes them all at once.
 
@@ -287,7 +293,9 @@ def spherical_jn_all(
     r"""Return :math:`j_l(z)` for every order ``l = 0 ... n``.
 
     There is no `scipy.special` counterpart. The orders come from the same
-    recurrence as `spherical_jn`, with the same accuracy.
+    recurrences as `spherical_jn`, with the same accuracy and the same float32
+    cost: Miller's downward recurrence below the turning point in float32,
+    which makes it 2-3x slower than float64.
 
     Parameters
     ----------
