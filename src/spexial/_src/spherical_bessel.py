@@ -42,7 +42,7 @@ class SphericalJnRecurrence(StrEnum):
     BOTH = "both"
     """Upward for ``|z| >= n``, downward below. Accurate for every ``z``."""
 
-    UPWARD = "upward"
+    UP = "up"
     """Upward only: the fastest, and exact above the turning point.
 
     Below it, values under ~1e-6 of the peak are noise in float64 -- wrong in
@@ -50,7 +50,7 @@ class SphericalJnRecurrence(StrEnum):
     wrong, by up to 80x the peak.
     """
 
-    DOWNWARD = "downward"
+    DOWN = "down"
     """Downward only, for arguments known to be below the turning point.
 
     Accurate, to the smallest values, wherever ``|z| < n``, and `nan` at
@@ -60,7 +60,7 @@ class SphericalJnRecurrence(StrEnum):
 
 
 SphericalJnRecurrenceLike: TypeAlias = (
-    SphericalJnRecurrence | Literal["both", "upward", "downward"]
+    SphericalJnRecurrence | Literal["both", "up", "down"]
 )
 """A `SphericalJnRecurrence`, or its string value."""
 
@@ -102,13 +102,28 @@ def _rows(lo: int, hi: int, recurrence: SphericalJnRecurrence, x: AnyArray) -> A
     and ~600x the peak in float32, which no cutoff fixes (spexial#51, #53).
     Miller's downward recurrence is stable there instead, so
     `SphericalJnRecurrence.BOTH` takes each on its own side of ``x = hi``.
+
+    Under `BOTH`, each recurrence sits in its own `lax.cond` and runs only if
+    some ``x`` needs it, so a batch wholly on one side pays for one: 1.4-3.6x
+    faster on CPU (``spherical_jn_all(500)`` above the turning point, 54 ->
+    15 ms). A mixed batch runs both, up to 14% slower than a plain `where`, as
+    the `cond` boundaries stop XLA fusing the select into the recurrences. One
+    `cond` each, not a three-way `lax.switch`: that compiled each recurrence
+    twice, and made every new ``n`` 55% slower to compile. Under `jax.vmap`
+    the predicates are batched, and JAX turns both into selects.
     """
-    if hi <= 1 or recurrence is SphericalJnRecurrence.UPWARD:
+    if hi <= 1 or recurrence is SphericalJnRecurrence.UP:
         return _upward(lo, hi, x)
-    down = _downward(lo, hi, x)
-    if recurrence is SphericalJnRecurrence.DOWNWARD:
-        return jnp.where(x < hi, down, jnp.nan)
-    return jnp.where(x >= hi, _upward(lo, hi, x), down)
+    if recurrence is SphericalJnRecurrence.DOWN:
+        return jnp.where(x < hi, _downward(lo, hi, x), jnp.nan)
+    above = x >= hi
+
+    def skipped(v: AnyArray) -> AnyArray:
+        return jnp.zeros((hi - lo + 1, *v.shape), v.dtype)
+
+    up = lax.cond(jnp.any(above), partial(_upward, lo, hi), skipped, x)
+    down = lax.cond(jnp.any(~above), partial(_downward, lo, hi), skipped, x)
+    return jnp.where(above, up, down)
 
 
 def _upward(lo: int, hi: int, x: AnyArray) -> AnyArray:
@@ -321,15 +336,15 @@ def spherical_jn(
     - `SphericalJnRecurrence.BOTH`, the default, runs each on its own side. It
       is right everywhere, down to the smallest values, and is the choice
       unless you know where your arguments are. It pays for that: on CPU it is
-      2-5x slower than `SphericalJnRecurrence.UPWARD` and ~3x slower to
+      2-5x slower than `SphericalJnRecurrence.UP` and ~3x slower to
       compile.
-    - `SphericalJnRecurrence.UPWARD` is the fastest, and exact wherever
+    - `SphericalJnRecurrence.UP` is the fastest, and exact wherever
       :math:`|z| \ge n`. Use it when every argument is above the turning point,
       or when only values near the peak matter. Below the turning point it is
       noise: in float64, values under ~1e-6 of the peak are wrong in sign and
       magnitude or set to exactly zero, and in float32 the whole region is
       wrong, by up to 80x the peak.
-    - `SphericalJnRecurrence.DOWNWARD` is for arguments known to be below the
+    - `SphericalJnRecurrence.DOWN` is for arguments known to be below the
       turning point, e.g. small :math:`kr` in a large multipole. It is as
       accurate as `SphericalJnRecurrence.BOTH` there, skips the upward pass,
       and returns `nan` at :math:`|z| \ge n` (:math:`|z| \ge n + 1` for the
@@ -349,7 +364,7 @@ def spherical_jn(
         If `True`, return :math:`j_n'(z)` instead.
     recurrence
         Which recurrence to run: a `SphericalJnRecurrence`, or its string value
-        (``"both"``, ``"upward"``, ``"downward"``). Static.
+        (``"both"``, ``"up"``, ``"down"``). Static.
 
     Returns
     -------
@@ -358,10 +373,10 @@ def spherical_jn(
         error is below 1e-12 of :math:`\sqrt{j_n^2 + y_n^2}` for
         :math:`n \le 10^4`, growing roughly as :math:`n` beyond (in float32,
         :math:`\max(10^{-5}, 10^{-7} n)` of the peak). Below the turning point,
-        `SphericalJnRecurrence.BOTH` and `SphericalJnRecurrence.DOWNWARD` are
+        `SphericalJnRecurrence.BOTH` and `SphericalJnRecurrence.DOWN` are
         accurate *relatively*: to 5e-13 in float64 and 5e-5 in float32 for
         :math:`n \le 1000`, down to the smallest representable values.
-        `SphericalJnRecurrence.UPWARD` is accurate
+        `SphericalJnRecurrence.UP` is accurate
         there only absolutely, to 1e-6 of :math:`\max_z |j_n(z)|` in float64
         for :math:`n \le 10^4` (3e-6 for the derivative).
 
@@ -386,7 +401,7 @@ def spherical_jn(
 
     >>> f"{float(sp.spherical_jn(5, 0.1)):.4e}"
     '9.6163e-10'
-    >>> float(sp.spherical_jn(5, 0.1, recurrence=sp.SphericalJnRecurrence.UPWARD)) < 0
+    >>> float(sp.spherical_jn(5, 0.1, recurrence=sp.SphericalJnRecurrence.UP)) < 0
     True
 
     """
@@ -414,7 +429,7 @@ def spherical_jn_all(
     the same accuracy and cost. Each order has its own turning point, and the
     split is made at the highest one, ``|z| = n``: with
     `SphericalJnRecurrence.BOTH`, every row at ``|z| < n`` comes from the
-    downward recurrence, and `SphericalJnRecurrence.DOWNWARD` is `nan` for the
+    downward recurrence, and `SphericalJnRecurrence.DOWN` is `nan` for the
     whole column at ``|z| >= n``.
 
     Parameters

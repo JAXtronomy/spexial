@@ -79,8 +79,7 @@ def test_special_values():
 def test_upward_zeroes_small_values():
     """Upward recurrence alone sets values far below the turning point to 0."""
     assert (
-        float(sp.spherical_jn(100, 10.0, recurrence=sp.SphericalJnRecurrence.UPWARD))
-        == 0.0
+        float(sp.spherical_jn(100, 10.0, recurrence=sp.SphericalJnRecurrence.UP)) == 0.0
     )
 
 
@@ -104,24 +103,46 @@ def test_tiny_argument_is_finite(dtype):
 
 
 def test_downward_is_nan_above_the_turning_point():
-    """`SphericalJnRecurrence.DOWNWARD` cannot be right at ``|z| >= n``, and says so."""
+    """`SphericalJnRecurrence.DOWN` cannot be right at ``|z| >= n``, and says so."""
     z = jnp.asarray([0.5, 9.9, 10.0, -10.0, 30.0])
-    got = np.asarray(
-        sp.spherical_jn(10, z, recurrence=sp.SphericalJnRecurrence.DOWNWARD)
-    )
+    got = np.asarray(sp.spherical_jn(10, z, recurrence=sp.SphericalJnRecurrence.DOWN))
     np.testing.assert_array_equal(np.isnan(got), [False, False, True, True, True])
     both = np.asarray(sp.spherical_jn(10, z[:2]))
     np.testing.assert_allclose(got[:2], both, rtol=1e-14)
-    table = sp.spherical_jn_all(10, 12.0, recurrence=sp.SphericalJnRecurrence.DOWNWARD)
+    table = sp.spherical_jn_all(10, 12.0, recurrence=sp.SphericalJnRecurrence.DOWN)
     assert np.all(np.isnan(table[2:]))
 
 
+@pytest.mark.parametrize("n", [7, 60])
+def test_one_sided_batches_match_a_mixed_one(n):
+    """A batch wholly above or below the turning point skips one recurrence.
+
+    It must still give what the same points give inside a mixed batch, which
+    runs both -- including through `jax.grad` and `jax.vmap`, which see the
+    `lax.cond` differently.
+    """
+    above = jnp.linspace(n + 1.0, 4.0 * n, 97)  # n + 1 keeps the derivative's
+    below = jnp.linspace(0.0, 0.9 * n, 97)  # order n + 1 on the same side
+    mixed = jnp.concatenate([below, above])
+    for f in (
+        lambda z: sp.spherical_jn(n, z),
+        lambda z: sp.spherical_jn(n, z, derivative=True),
+        lambda z: sp.spherical_jn_all(n, z),
+        jax.vmap(jax.grad(lambda t: sp.spherical_jn(n, t))),
+    ):
+        whole = np.asarray(f(mixed))
+        split = np.concatenate([np.asarray(f(below)), np.asarray(f(above))], -1)
+        np.testing.assert_allclose(split, whole, rtol=1e-13, atol=1e-16)
+    per_point = jax.vmap(lambda t: sp.spherical_jn(n, t))(above)
+    np.testing.assert_allclose(per_point, sp.spherical_jn(n, above), rtol=1e-13)
+
+
 def test_recurrence_accepts_its_string_values():
-    """``"upward"`` is `SphericalJnRecurrence.UPWARD`, and an unknown name raises."""
+    """``"up"`` is `SphericalJnRecurrence.UP`, and an unknown name raises."""
     z = jnp.linspace(0.1, 30.0, 7)
     np.testing.assert_array_equal(
-        sp.spherical_jn(5, z, recurrence="upward"),
-        sp.spherical_jn(5, z, recurrence=sp.SphericalJnRecurrence.UPWARD),
+        sp.spherical_jn(5, z, recurrence="up"),
+        sp.spherical_jn(5, z, recurrence=sp.SphericalJnRecurrence.UP),
     )
     # `ValueError` from `SphericalJnRecurrence(...)`, or `TypeError` first where the
     # runtime type checker is on, as it is under the test suite.

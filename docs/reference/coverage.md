@@ -113,7 +113,7 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 :   `sph_harm_y_cart_all`'s values, same indexing and same layout, returned as a nested tuple of separate arrays instead of one stacked array. The container is the whole point: indexing a stacked table stops XLA folding each term into a caller's reduction as it is produced, so the table is materialized. Measured on a multipole expansion at n = 12 over a million directions, summing from the stacked form took 17.7 s against 10 ms from these terms. The only function here not wrapped in `jax.jit`, deliberately: a jitted function returning a pytree materializes each leaf at the call boundary, which is exactly the fusion this exists to preserve.
 
 `spherical_jn`
-:   JAX has only the cylindrical `bessel_jn`, and scipy's does not dispatch on JAX arrays. `recurrence` chooses the algorithm: upward above the turning point and Miller's downward below it by default, which is accurate everywhere; `UPWARD` alone is faster and noise below the turning point, `DOWNWARD` alone is `nan` above it. The derivative rule is regular at z = 0. Upward recurrence contributed from [ABCMB](https://github.com/TonyZhou729/ABCMB).
+:   JAX has only the cylindrical `bessel_jn`, and scipy's does not dispatch on JAX arrays. `recurrence` chooses the algorithm: upward above the turning point and Miller's downward below it by default, which is accurate everywhere; `UP` alone is faster and noise below the turning point, `DOWN` alone is `nan` above it. The derivative rule is regular at z = 0. Upward recurrence contributed from [ABCMB](https://github.com/TonyZhou729/ABCMB).
 
     Derivative: `(n j_{n-1}(z) - (n+1) j_{n+1}(z)) / (2n+1)`.
 

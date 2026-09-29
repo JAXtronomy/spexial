@@ -434,11 +434,11 @@ def test_spherical_jn_float32(n, derivative):
 def test_spherical_jn_recurrences(n, dtype, recurrence):
     """Each `SphericalJnRecurrence` is right where its docstring says (spexial#53).
 
-    Below the turning point, `BOTH` and `DOWNWARD` are accurate *relatively*,
+    Below the turning point, `BOTH` and `DOWN` are accurate *relatively*,
     down to the smallest values: measured 4e-13 (float64) and 4e-5 (float32)
-    at n = 1000. `UPWARD` is not -- up to 20x relative in float64 -- which is
-    why it is not the default. Above it, `BOTH` and `UPWARD` agree with the
-    envelope, and `DOWNWARD` is `nan`.
+    at n = 1000. `UP` is not -- up to 20x relative in float64 -- which is
+    why it is not the default. Above it, `BOTH` and `UP` agree with the
+    envelope, and `DOWN` is `nan`.
     """
     z = np.concatenate(
         [np.geomspace(1e-3, 0.999 * n, 1500), np.linspace(n, 3 * n, 500)]
@@ -449,13 +449,13 @@ def test_spherical_jn_recurrences(n, dtype, recurrence):
     )
     want = scipy_spherical_jn(n, z)
     below = z < n
-    if recurrence is sp.SphericalJnRecurrence.DOWNWARD:
+    if recurrence is sp.SphericalJnRecurrence.DOWN:
         assert np.all(np.isnan(got[~below]))
     else:
         peak = _peak(n)
         tol = 1e-12 * _envelope(n, z[~below]) if dtype == "float64" else 1e-4 * peak
         assert np.all(np.abs(got[~below] - want[~below]) <= tol)
-    if recurrence is not sp.SphericalJnRecurrence.UPWARD:
+    if recurrence is not sp.SphericalJnRecurrence.UP:
         smallest = 1e-290 if dtype == "float64" else 1e-30
         kept = below & (np.abs(want) > smallest)
         rel = np.abs(got[kept] - want[kept]) / np.abs(want[kept])

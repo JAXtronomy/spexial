@@ -141,10 +141,8 @@ def test_spherical_jn_signatures() -> None:
     positional: Out = sp.spherical_jn(order, 2.0, True)  # noqa: FBT003 -- scipy's
     table: Out = sp.spherical_jn_all(order, jnp.asarray([1.0, 2.0]))
     table_slope: Out = sp.spherical_jn_all(order, 2.0, derivative=True)
-    upward: Out = sp.spherical_jn(
-        order, 2.0, recurrence=sp.SphericalJnRecurrence.UPWARD
-    )
-    by_name: Out = sp.spherical_jn_all(order, 2.0, recurrence="downward")
+    upward: Out = sp.spherical_jn(order, 2.0, recurrence=sp.SphericalJnRecurrence.UP)
+    by_name: Out = sp.spherical_jn_all(order, 2.0, recurrence="down")
     assert value.shape == ()
     assert upward.shape == ()
     assert by_name.shape == (order + 1,)

@@ -452,8 +452,8 @@ _ROWS: Final = (
             "JAX has only the cylindrical `bessel_jn`, and scipy's does not "
             "dispatch on JAX arrays. `recurrence` chooses the algorithm: upward "
             "above the turning point and Miller's downward below it by default, "
-            "which is accurate everywhere; `UPWARD` alone is faster and noise "
-            "below the turning point, `DOWNWARD` alone is `nan` above it. The "
+            "which is accurate everywhere; `UP` alone is faster and noise "
+            "below the turning point, `DOWN` alone is `nan` above it. The "
             "derivative rule is regular at z = 0. Upward recurrence contributed "
             "from [ABCMB](https://github.com/TonyZhou729/ABCMB)."
         ),
