@@ -450,10 +450,12 @@ _ROWS: Final = (
         cost=None,
         notes=(
             "JAX has only the cylindrical `bessel_jn`, and scipy's does not "
-            "dispatch on JAX arrays. Upward recurrence; below the turning point, "
-            "values smaller than about 1e-6 of the peak are unreliable, and those "
-            "far below it are set to zero. The derivative rule is regular at "
-            "z = 0. Contributed from [ABCMB](https://github.com/TonyZhou729/ABCMB)."
+            "dispatch on JAX arrays. `recurrence` chooses the algorithm: upward "
+            "above the turning point and Miller's downward below it by default, "
+            "which is accurate everywhere; `UPWARD` alone is faster and noise "
+            "below the turning point, `DOWNWARD` alone is `nan` above it. The "
+            "derivative rule is regular at z = 0. Upward recurrence contributed "
+            "from [ABCMB](https://github.com/TonyZhou729/ABCMB)."
         ),
     ),
     Coverage(
