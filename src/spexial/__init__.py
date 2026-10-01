@@ -38,6 +38,7 @@ __all__ = [
     "K1e",
     "K2e",
     "Li",
+    "SphericalJnRecurrence",
     "__version__",
     "comb",
     "eval_gegenbauer",
@@ -79,7 +80,11 @@ with _install_import_hook("spexial"):
         sph_harm_y_cart_all_terms,
         sph_legendre_p,
     )
-    from ._src.spherical_bessel import spherical_jn, spherical_jn_all
+    from ._src.spherical_bessel import (
+        SphericalJnRecurrence,
+        spherical_jn,
+        spherical_jn_all,
+    )
     from ._src.zeta import zeta
     from ._version import version as __version__
 
