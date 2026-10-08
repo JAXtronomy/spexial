@@ -18,7 +18,7 @@ from scipy.integrate import quad
 from scipy.special import beta as scipy_beta, betainc as scipy_betainc, hyp2f1
 
 import spexial as sp
-from spexial._src.beta import _EXPRL_BAND, _incomplete_beta_core
+from spexial._src.beta import _EXPRL_BAND, _incomplete_beta_core, _is_static_one
 
 # `a > 0` always. `b` is any real: the negative and zero values are the reason
 # this exists, and come up as ordinary slopes in double power-law profiles.
@@ -299,3 +299,89 @@ def test_a_eq_1_forward_and_reverse_agree():
         fwd = float(jax.jacfwd(f)(b))
         rev = float(jax.jacrev(f)(b))
         np.testing.assert_allclose(fwd, rev, rtol=1e-14)
+
+
+@pytest.mark.parametrize("b", [0.5, 1.0, 2.5, 300.0])
+def test_a_eq_1_at_z_eq_1(b):
+    """``B(1, b, 1) = 1/b`` for ``b > 0``, and ``d/db`` there is ``-1/b^2``.
+
+    The ``-L expm1(x)/x`` form is ``inf * 0`` here, since ``L = log(1-z) = -inf``.
+    Both differentiation modes are checked: the masked branch holds an infinity.
+    """
+    one = jnp.asarray(1.0)
+    np.testing.assert_allclose(
+        float(sp.incomplete_beta(1.0, b, one)), 1 / b, rtol=1e-15
+    )
+    for d in (jax.jacfwd, jax.jacrev):
+        got = float(d(lambda bb: sp.incomplete_beta(1.0, bb, one))(b))
+        np.testing.assert_allclose(got, -1 / b**2, rtol=1e-14)
+
+
+@pytest.mark.parametrize("b", [-2.5, -1e-300, 0.0])
+def test_a_eq_1_diverges_at_z_eq_1(b):
+    """For ``b <= 0`` the integral diverges at ``z = 1``: ``+inf``, not ``nan``.
+
+    ``b = 0`` is the case that needs care: ``b * log(1-z)`` is ``0 * -inf``.
+    """
+    assert float(sp.incomplete_beta(1.0, b, jnp.asarray(1.0))) == np.inf
+
+
+@pytest.mark.parametrize(
+    "z",
+    [
+        jnp.asarray([0.3, 0.9], jnp.float32),
+        jnp.asarray([0.3, 0.9], jnp.bfloat16),
+        jnp.asarray([0.3, 0.9], jnp.float16),
+        jnp.asarray([0.3, 0.9]),
+        0.3,
+    ],
+    ids=["float32", "bfloat16", "float16", "float64", "weak"],
+)
+def test_a_eq_1_keeps_the_input_dtype(z):
+    """The closed form returns what the series would: same dtype, same weak type.
+
+    Otherwise the output dtype would depend on whether ``a`` happens to be 1.
+    """
+    got, series = sp.incomplete_beta(1.0, 0.5, z), _incomplete_beta_core(1.0, 0.5, z)
+    assert (got.dtype, got.weak_type) == (series.dtype, series.weak_type)
+
+
+@pytest.mark.parametrize(
+    ("a", "expect"),
+    [
+        (1.0, True),
+        (1, True),
+        (np.float32(1), True),
+        (jnp.asarray(1.0), True),
+        (np.array([1.0]), False),
+        (1 + 1e-12, False),
+    ],
+)
+def test_static_one_dispatch(a, expect):
+    """Only a concrete real scalar exactly equal to 1 takes the closed form."""
+    assert _is_static_one(a) is expect
+
+
+@pytest.mark.parametrize(("b", "z"), [(20.0, 0.9), (2.5, 1 - 1e-10), (2.5, 0.999)])
+def test_a_eq_1_mixed_partial_where_exp_x_is_tiny(b, z):
+    """``d/dz d/db B = log(1-z) (1-z)^(b-1)``, even where ``exp(bL)`` is tiny.
+
+    JAX differentiates ``expm1(x)`` as ``expm1(x) + 1``, which is exactly zero
+    below ``x ~ -37`` -- so the far branch uses ``1 - exp(x)``, whose derivative
+    is ``exp(x)`` itself.
+    """
+    got = jax.grad(jax.grad(lambda bb, zz: sp.incomplete_beta(1.0, bb, zz), 0), 1)
+    expect = np.log1p(-z) * np.exp((b - 1) * np.log1p(-z))
+    np.testing.assert_allclose(float(got(b, jnp.asarray(z))), expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize("z", [1e-8, 1e-12])
+def test_a_eq_1_mixed_partial_at_small_z(z):
+    """``d/db d/dz B = log(1-z) (1-z)^(b-1)`` to full precision as ``z -> 0``.
+
+    The z-rule's ``b``-derivative must carry ``log1p(-z)``, not ``log(1 - z)``,
+    which keeps only ``1e-16 / z`` relative precision.
+    """
+    got = jax.grad(jax.grad(lambda bb, zz: sp.incomplete_beta(1.0, bb, zz), 1), 0)
+    expect = np.log1p(-z) * np.exp(-np.log1p(-z))
+    np.testing.assert_allclose(float(got(0.0, jnp.asarray(z))), expect, rtol=1e-14)

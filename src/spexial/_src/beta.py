@@ -196,11 +196,21 @@ its first three derivatives; below it, those derivatives cancel.
 """
 
 _EXPRL_COEFFS = tuple(1.0 / math.factorial(k + 1) for k in reversed(range(18)))
-"""Taylor coefficients of ``expm1(x) / x = sum_k x^k / (k+1)!``, for `jnp.polyval`.
+"""Taylor coefficients of ``expm1(x) / x = sum_k x^k / (k+1)!``, highest first.
 
-Highest power first. At ``|x| < 1/2`` the first omitted term is
-``0.5^18 / 19! ~ 3e-23``, far below float64 resolution.
+At ``|x| < 1/2`` the first omitted term is ``0.5^18 / 19! ~ 3e-23``, far below
+float64 resolution. Python floats, not an array, so that Horner's rule in
+`_a_eq_1` keeps the input's dtype and weak type rather than promoting both to
+the default float.
 """
+
+
+def _clamped_log1m(log1mz: AnyArray) -> AnyArray:
+    """``log(1 - z)``, with ``-inf`` (at ``z = 1``) raised to the dtype's minimum.
+
+    Python float, not a NumPy scalar, so the result keeps a weak type.
+    """
+    return jnp.maximum(log1mz, float(jnp.finfo(log1mz.dtype).min))
 
 
 def _a_eq_1(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
@@ -210,23 +220,36 @@ def _a_eq_1(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
 
         B(1, b, z) = \int_0^z (1-t)^{b-1}\,\mathrm{d}t
                    = \frac{1 - (1-z)^b}{b}
-                   = -L\,\frac{\operatorname{expm1}(bL)}{bL},
-        \qquad L = \ln(1-z)
+                   = \frac{1 - e^{x}}{b}
+                   = -L\,\frac{\operatorname{expm1}(x)}{x},
+        \qquad L = \ln(1-z),\ x = bL
 
-    with the removable singularity at $b = 0$ (where it is $-\ln(1-z)$) handled
-    by evaluating ``expm1(x) / x`` as its Taylor series near $x = 0$, by Horner.
-    That changes the *formula* there rather than substituting a value, so every
-    derivative in $b$ is right at $b = 0$ too, not just the value.
+    The removable singularity at $b = 0$ (where it is $-\ln(1-z)$) is handled
+    by evaluating ``expm1(x) / x`` as its Taylor series near $x = 0$, by
+    Horner. That changes the *formula* there rather than substituting a value,
+    so every derivative in $b$ is right at $b = 0$ too, not just the value.
+    Away from it, ``(1 - exp(x)) / b`` divides by $b$ rather than $x$, so that
+    at $z = 1$ -- where $L = -\infty$ -- it is exactly $1/b$ for $b > 0$ and
+    $+\infty$ for $b < 0$, instead of $\infty \cdot 0$. It is ``exp``, not
+    ``expm1``, there: with $\lvert x \rvert \ge 1/2$ nothing cancels, and JAX
+    differentiates ``expm1(x)`` as ``expm1(x) + 1``, which rounds $e^x$ to zero
+    below $x \approx -37$ and so zeroes the mixed derivative
+    $\partial_z \partial_b B$.
     """
     log1mz = jnp.log1p(-jnp.asarray(z))
-    x = b * log1mz
+    # Clamped only where it multiplies `b`: at z = 1 and b = 0, `b * L` would be
+    # `0 * -inf = nan`. With the clamp it is 0, the series branch is taken, and
+    # the result is `-L * 1 = +inf` -- the true limit -- from the unclamped `L`.
+    x = b * _clamped_log1m(log1mz)
     near = jnp.abs(x) < _EXPRL_BAND
-    x_far = jnp.where(near, 1.0, x)
+    # `|x| >= 1/2` implies `b != 0`, so these placeholders only keep the
+    # unselected branch finite, so that no `0 * inf` reaches a cotangent.
+    far = (1.0 - jnp.exp(jnp.where(near, 0.0, x))) / jnp.where(near, 1.0, b)
     x_near = jnp.where(near, x, 0.0)
-    ratio = jnp.where(
-        near, jnp.polyval(jnp.asarray(_EXPRL_COEFFS), x_near), jnp.expm1(x_far) / x_far
-    )
-    return -log1mz * ratio  # type: ignore[no-any-return]
+    series = _EXPRL_COEFFS[0]
+    for c in _EXPRL_COEFFS[1:]:
+        series = series * x_near + c
+    return jnp.where(near, -log1mz * series, far)  # type: ignore[no-any-return]
 
 
 @jax.custom_jvp
@@ -248,7 +271,18 @@ def _a_eq_1_jvp(
 
     # The integrand at the endpoint, as for the series -- here (1-z)^(b-1).
     if not isinstance(z_dot, SymbolicZero):
-        tangent_out = tangent_out + (1.0 - z) ** (b - 1.0) * z_dot
+        if isinstance(b, jax.core.Tracer):
+            # `b` may itself be differentiated, so write the power so that its
+            # `b`-derivative carries `log1p(-z)` rather than `log(1 - z)`, which
+            # loses digits as z -> 0. Clamped so `b = 1, z = 1` is `exp(0) = 1`
+            # rather than `0 * -inf`.
+            integrand = jnp.exp((b - 1.0) * _clamped_log1m(jnp.log1p(-z)))
+        else:
+            # A concrete `b` has no derivative to get wrong, and as a constant
+            # exponent XLA can simplify `pow` (to a reciprocal at b = 0, a square
+            # root at b = 3/2), which `exp(... log1p)` would hide from it.
+            integrand = (1.0 - z) ** (b - 1.0)
+        tangent_out = tangent_out + integrand * z_dot
 
     # Elementary, so autodiff of the closed form is cheap and exact; the series
     # near b = 0 keeps every order right at the removable singularity.
@@ -259,10 +293,13 @@ def _a_eq_1_jvp(
     return primal_out, tangent_out
 
 
-def _is_static_one(a: ScalarLike) -> bool:
+def _is_static_one(a: object) -> bool:
     """Whether ``a`` is a concrete scalar equal to 1, decidable at trace time."""
     return (
-        not isinstance(a, jax.core.Tracer) and np.ndim(a) == 0 and bool(np.equal(a, 1))
+        not isinstance(a, jax.core.Tracer)
+        and np.ndim(a) == 0
+        and np.isrealobj(a)
+        and bool(np.equal(a, 1))
     )
 
 
