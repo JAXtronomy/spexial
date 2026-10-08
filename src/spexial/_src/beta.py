@@ -186,15 +186,147 @@ def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     return _small_z(a, b, jnp.full_like(w, 0.5)) + total  # type: ignore[no-any-return]
 
 
-def _incomplete_beta_impl(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
-    r"""$B(a, b, z)$ for $a > 0$, any real $b$, and $z \in [0, 1]$."""
-    z = jnp.asarray(z)
+_CF_FROM = 10.0
+r"""Above this ``b``, `_large_b` replaces the two series.
+
+Both series expand :math:`(1-t)^{b-1}` binomially, and its coefficients
+:math:`(1-b)_k / k!` alternate and grow like :math:`b^k / k!`: at
+:math:`z = 1/2` the sum is a near-total cancellation, worst relative error
+:math:`2\times10^{-15}` at :math:`b = 10`, :math:`10^{-11}` at 30, and
+:math:`10^{7}` at 100. The continued fraction is :math:`5\times10^{-14}` from
+:math:`b = 0.1` up, so the switch can sit wherever the series is still exact.
+"""
+
+_CF_UNROLL = 1
+"""Not unrolled, unlike the series.
+
+`lax.cond` traces both branches, so this is compiled on every call, series or
+not. Unrolled 16-fold it made a second ``b``-derivative take 200 s to compile
+for no runtime gain (measured 39 vs 41 ms at 1e5 points); unrolled once, 11 s.
+"""
+
+_CF_STEPS = 32
+r"""Double steps of the continued fraction (each an even and an odd term).
+
+Measured against mpmath over :math:`a \in [0.25, 50]`: worst
+:math:`2\times10^{-13}` up to :math:`b = 100`, :math:`8\times10^{-12}` at
+:math:`10^3`--:math:`10^5`, inside the :math:`10^{-11}` the series is held to.
+64 steps buys :math:`2\times10^{-13}` at :math:`10^4` for twice the run and
+compile time; 16 is :math:`10^{-7}` at :math:`10^5`.
+"""
+
+
+def _continued_fraction(a: AnyArrayLike, b: AnyArrayLike, x: AnyArray) -> AnyArray:
+    r"""Evaluate the DLMF 8.17.22 continued fraction by the modified Lentz method.
+
+    .. math::
+
+        B(a, b, x) = \frac{x^a (1-x)^b}{a} \cdot
+            \cfrac{1}{1 + \cfrac{d_1}{1 + \cfrac{d_2}{1 + \cdots}}}
+
+    with :math:`d_{2m+1} = -\frac{(a+m)(a+b+m)x}{(a+2m)(a+2m+1)}` and
+    :math:`d_{2m} = \frac{m(b-m)x}{(a+2m-1)(a+2m)}`. Returns the fraction,
+    :math:`1/(1 + d_1/(1 + \cdots))`. It converges fast for
+    :math:`x < (a+1)/(a+b+2)`, and its terms are bounded for any :math:`b > 0`,
+    so -- unlike the series -- nothing cancels as :math:`b` grows. A fixed
+    number of steps, as for the series, so `vmap` lanes do not wait on each
+    other.
+    """
+    # Lentz's guard against a zero denominator: the dtype's smallest normal, as
+    # a Python float so that it does not promote the carry.
+    tiny = float(jnp.finfo(x.dtype).tiny)
+    guard = lambda v: jnp.where(jnp.abs(v) < tiny, tiny, v)  # noqa: E731
+
+    def step(
+        carry: tuple[AnyArray, AnyArray, AnyArray], m: ScalarLike
+    ) -> tuple[tuple[AnyArray, AnyArray, AnyArray], None]:
+        c, d, h = carry
+        even = m * (b - m) * x / ((a + 2.0 * m - 1.0) * (a + 2.0 * m))
+        odd = -(a + m) * (a + b + m) * x / ((a + 2.0 * m) * (a + 2.0 * m + 1.0))
+        for coeff in (even, odd):
+            d = 1.0 / guard(1.0 + coeff * d)
+            c = guard(1.0 + coeff / c)
+            h = h * d * c
+        return (c, d, h), None
+
+    d = 1.0 / guard(1.0 - (a + b) * x / (a + 1.0))
+    init = (jnp.ones_like(x), d, d)
+    (_, _, h), _ = jax.lax.scan(
+        step, init, jnp.arange(1, _CF_STEPS + 1), unroll=_CF_UNROLL
+    )
+    return h  # type: ignore[no-any-return]
+
+
+def _cf_direct(a: AnyArrayLike, b: AnyArrayLike, x: AnyArrayLike) -> AnyArray:
+    """$B(a, b, x)$ by `_continued_fraction`, for $x$ below its switch point.
+
+    ``x = 0`` gives exactly 0. It is a genuine zero of $x^a$ for every $a > 0$
+    -- not a removable singularity -- so its parameter derivatives are 0 too;
+    evaluating it directly would form ``0 * log(0)`` in them instead.
+    """
+    x = jnp.asarray(x)
+    at_0 = x == 0
+    xs = jnp.where(at_0, 0.5, x)
+    front = jnp.exp(a * jnp.log(xs) + b * jnp.log1p(-xs)) / a
+    return jnp.where(at_0, 0.0, front * _continued_fraction(a, b, xs))  # type: ignore[no-any-return]
+
+
+def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
+    r"""$B(a, b, z)$ for $b > 0$, by the continued fraction and reflection.
+
+    Below the switch point :math:`x_0 = (a+1)/(a+b+2)` the fraction converges
+    as it stands; above it, by the reflection
+    :math:`B(a, b, z) = B(a, b) - B(b, a, 1-z)`, where it converges for the
+    swapped arguments. The complete :math:`B(a, b)` is itself the sum of both
+    at :math:`x_0` -- two positive terms, so no cancellation -- rather than
+    ``exp(betaln(a, b))``: `jax.scipy.special.betaln` is only good to
+    :math:`3\times10^{-7}` at :math:`(a, b) = (8, 10)`.
+    """
+    x0 = (a + 1.0) / (a + b + 2.0)
+    swap = z >= x0
+    # One fraction per point, with the arguments swapped where reflected rather
+    # than both sides everywhere. The two terms of the complete B(a, b) ride
+    # along as two more points, so the whole thing is a single `scan`: each one
+    # is compiled, and differentiated, separately.
+    flat = jnp.ravel(z)
+    fs = jnp.ravel(swap)
+    x_all = jnp.concat([jnp.where(fs, 1.0 - flat, flat), jnp.stack([x0, 1.0 - x0])])
+    a_all = jnp.concat([jnp.where(fs, b, a), jnp.stack([a, b])])
+    b_all = jnp.concat([jnp.where(fs, a, b), jnp.stack([b, a])])
+    terms = _cf_direct(a_all, b_all, x_all.astype(flat.dtype))
+    direct = terms[:-2].reshape(z.shape)
+    complete = terms[-2] + terms[-1]
+    return jnp.where(swap, complete - direct, direct)  # type: ignore[no-any-return]
+
+
+def _series(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
+    """$B(a, b, z)$ by `_small_z` and `_large_z`, switched at $z = 1/2$."""
     # Both branches are evaluated, so clamp each one's input to the range where
     # it is well behaved; `where` then discards the unused value.
     return jnp.where(  # type: ignore[no-any-return]
         z <= 0.5,
         _small_z(a, b, jnp.minimum(z, 0.5)),
         _large_z(a, b, jnp.maximum(z, 0.5)),
+    )
+
+
+def _incomplete_beta_impl(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+    r"""$B(a, b, z)$ for $a > 0$, any real $b$, and $z \in [0, 1]$."""
+    z = jnp.asarray(z)
+    # A concrete `b` picks its branch now, so only that one is compiled; a
+    # traced one needs the `cond`, which compiles both.
+    if not isinstance(b, jax.core.Tracer):
+        return _large_b(a, b, z) if b > _CF_FROM else _series(a, b, z)
+    use_cf = b > _CF_FROM
+    # `b` is a scalar, so `cond` runs one branch. Under `vmap` over `b` it
+    # becomes a `select` that runs both, so each is handed a `b` it is safe for
+    # -- the series is wildly wrong for large `b`, and the reflection needs
+    # `b > 0` -- so that neither puts a non-finite value where autodiff would
+    # multiply it by the zero cotangent of the unselected side.
+    return jax.lax.cond(  # type: ignore[no-any-return]
+        use_cf,
+        lambda: _large_b(a, jnp.where(use_cf, b, 2.0 * _CF_FROM), z),
+        lambda: _series(a, jnp.where(use_cf, 1.0, b), z),
     )
 
 
@@ -239,7 +371,9 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     Notes
     -----
     Two fixed-length series, switched at :math:`z = 1/2`, each converging like
-    :math:`2^{-k}`; see `_small_z` and `_large_z`. The
+    :math:`2^{-k}`; see `_small_z` and `_large_z`. Above :math:`b = 10` their
+    alternating terms cancel, and a fixed-length continued fraction is used
+    instead; see `_large_b`. The
     :math:`z`-derivative is supplied by a `jax.custom_jvp` and is exact and
     O(1) -- by Leibniz it is just the integrand at the endpoint,
     :math:`z^{a-1}(1-z)^{b-1}` -- rather than differentiating through 64 terms.

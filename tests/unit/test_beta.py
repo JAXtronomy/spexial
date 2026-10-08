@@ -12,12 +12,14 @@ that is exactly where `beta(a, b) * betainc(a, b, z)` returns `nan`.
 import jax
 import jax.numpy as jnp
 import jax.scipy.special as jsp
+import mpmath as mp
 import numpy as np
 import pytest
 from scipy.integrate import quad
 from scipy.special import beta as scipy_beta, betainc as scipy_betainc, hyp2f1
 
 import spexial as sp
+from spexial._src.beta import _CF_FROM
 
 # `a > 0` always. `b` is any real: the negative and zero values are the reason
 # this exists, and come up as ordinary slopes in double power-law profiles.
@@ -227,3 +229,74 @@ def test_integer_arguments_are_promoted():
     got = sp.incomplete_beta(2, 1, jnp.asarray(1))
     assert jnp.issubdtype(got.dtype, jnp.floating)
     np.testing.assert_allclose(float(got), scipy_beta(2.0, 1.0), rtol=1e-12)
+
+
+# ============================================================================
+# Large b: the continued fraction (GH-64)
+
+LARGE_BS = [np.nextafter(10.0, 99), 20.0, 50.0, 100.0, 300.0, 1e3, 1e4]
+
+
+@pytest.mark.parametrize("a", AS)
+@pytest.mark.parametrize("b", LARGE_BS)
+def test_large_b_matches_the_regularized_form(a, b):
+    """REGRESSION: the series lost every digit above ``b ~ 50`` (GH-64).
+
+    Its coefficients ``(1-b)_k / k!`` alternate and grow like ``b^k / k!``: at
+    ``b = 300, z = 1/2`` it returned ``-1.1e44`` for ``1.1e-5``. Above
+    `_CF_FROM` the continued fraction takes over.
+
+    The reference is mpmath, not ``beta * betainc``: SciPy's regularized form
+    is itself only good to ~1e-11 at ``b = 1e4``.
+
+    Tolerances are the measured worst with headroom: 2e-13 up to ``b = 100``,
+    then 8e-12 out to ``b = 1e5``, where 32 steps of the fraction stop short of
+    full convergence (`_CF_STEPS`).
+    """
+    z = np.array([1e-8, *ZS[1:], 1.0])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    with mp.workdps(40):
+        expect = np.array([float(mp.betainc(a, b, 0, zi)) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=1e-12 if b <= 100 else 1e-11)
+
+
+@pytest.mark.parametrize("a", [0.5, 2.0, 8.0])
+def test_continuous_across_the_large_b_switch(a):
+    """Series below `_CF_FROM`, continued fraction above: they must meet."""
+    z = jnp.asarray([0.05, 0.5, 0.95])
+    below = sp.incomplete_beta(a, np.nextafter(_CF_FROM, 0), z)
+    above = sp.incomplete_beta(a, np.nextafter(_CF_FROM, 99), z)
+    np.testing.assert_allclose(np.asarray(below), np.asarray(above), rtol=1e-13)
+
+
+@pytest.mark.parametrize(("a", "b", "z"), [(2.0, 50.0, 0.01), (0.5, 300.0, 0.5)])
+def test_large_b_parameter_derivatives(a, b, z):
+    """``a``/``b`` tangents through the continued fraction, in both modes.
+
+    Against mpmath's derivative, not a finite difference: the ``b``-derivative
+    here is ~1e-4 of the value, so a difference quotient's own rounding is
+    already a 1e-6 relative error, where autodiff is good to 1e-15.
+    """
+    zz = jnp.asarray(z)
+    refs = (lambda t: mp.betainc(t, b, 0, z), lambda t: mp.betainc(a, t, 0, z))
+    for argnum, ref in enumerate(refs):
+        with mp.workdps(40):
+            expect = float(mp.diff(ref, (a, b)[argnum]))
+        for mode in (jax.jacfwd, jax.jacrev):
+            got = mode(sp.incomplete_beta, argnum)(a, b, zz)
+            np.testing.assert_allclose(float(got), expect, rtol=1e-12)
+
+
+def test_vmap_over_b_across_the_switch_has_finite_gradients():
+    """Under `vmap` the `cond` becomes a `select` and both branches run.
+
+    Each is handed a ``b`` it is safe for, so the unselected one -- the series
+    at ``b = 1e4``, or the reflection at ``b <= 0`` -- cannot put a non-finite
+    value where autodiff multiplies it by a zero cotangent.
+    """
+    bs = jnp.asarray([-2.0, 0.0, 5.0, 10.0, 10.5, 300.0, 1e4])
+    f = lambda b: sp.incomplete_beta(2.0, b, jnp.asarray(0.3))
+    batched = jax.vmap(f)(bs)
+    single = jnp.stack([f(b) for b in bs])
+    np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=1e-14)
+    assert bool(jnp.all(jnp.isfinite(jax.vmap(jax.grad(f))(bs))))
