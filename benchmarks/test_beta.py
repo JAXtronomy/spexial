@@ -6,6 +6,8 @@ series with the integrand evaluated at the endpoint, and it is the largest
 saving in the package.
 """
 
+from collections.abc import Callable
+
 import jax
 import jax.numpy as jnp
 import pytest
@@ -14,6 +16,7 @@ from pytest_codspeed import BenchmarkFixture
 from benchmarks.utils import warm
 
 import spexial as sp
+from spexial._src.beta import _incomplete_beta_core
 
 Z_SCALAR = jnp.asarray(0.3)
 Z_VECTOR = jnp.linspace(0.001, 0.999, 1_000)
@@ -51,6 +54,14 @@ def test_incomplete_beta_non_positive_b(benchmark: BenchmarkFixture, b: float) -
     benchmark(warm(lambda z: sp.incomplete_beta(A, b, z), Z_VECTOR))
 
 
+@pytest.mark.parametrize(
+    "fn", [sp.incomplete_beta, _incomplete_beta_core], ids=["closed_form", "series"]
+)
+def test_incomplete_beta_a_eq_1(benchmark: BenchmarkFixture, fn: Callable) -> None:
+    """A static ``a == 1`` is elementary; the pair is what skipping the series saves."""
+    benchmark(warm(lambda z: fn(1.0, B, z), Z_VECTOR))
+
+
 def test_grad_incomplete_beta_custom_jvp(benchmark: BenchmarkFixture) -> None:
     """Differentiate with respect to ``z`` through the analytic rule."""
     fn = jax.grad(lambda z: sp.incomplete_beta(A, B, z).sum())
@@ -60,11 +71,11 @@ def test_grad_incomplete_beta_custom_jvp(benchmark: BenchmarkFixture) -> None:
 def test_grad_incomplete_beta_autodiff(benchmark: BenchmarkFixture) -> None:
     """The same gradient, by differentiating the series the rule replaces.
 
-    `jax.custom_jvp` exposes the undecorated implementation as ``.fun``, so
+    The inner `jax.custom_jvp` exposes the undecorated implementation as ``.fun``, so
     this is the honest alternative rather than a proxy for it. The gap between
     this and the benchmark above is what the custom rule buys.
     """
-    fn = jax.grad(lambda z: sp.incomplete_beta.fun(A, B, z).sum())
+    fn = jax.grad(lambda z: _incomplete_beta_core.fun(A, B, z).sum())
     benchmark(warm(fn, Z_VECTOR))
 
 

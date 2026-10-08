@@ -17,13 +17,15 @@ import numpy as np
 import pytest
 
 import spexial as sp
+from spexial._src.beta import _incomplete_beta_core
 from spexial._src.polylog import _li_core
 from spexial._src.spherical_bessel import _band
 from spexial.registry import JAX_FLOOR, REGISTRY, Status, Support
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# `polylog` validates `n` in a plain wrapper and delegates to an inner core, so the
+# `polylog` validates `n`, and `incomplete_beta` dispatches a static ``a == 1`` to
+# a closed form, in a plain wrapper that delegates to an inner core, so the
 # `jax.custom_jvp` object is not the exported name. Everything else decorates
 # the export directly. These probes let the checks below stay strict rather than
 # being relaxed to accommodate the difference.
@@ -35,7 +37,7 @@ _JVP_OBJECT = {
     "k1e": sp.k1e,
     "k2e": sp.k2e,
     "gamma": sp.gamma,
-    "incomplete_beta": sp.incomplete_beta,
+    "incomplete_beta": _incomplete_beta_core,
     "polylog": _li_core,
     "spence": sp.spence,
     "spherical_jn": _band,
@@ -60,7 +62,7 @@ _PROBES = {
     # `b` are bound so the shared probe below can call it with one array.
     "incomplete_beta": (
         lambda z: sp.incomplete_beta(2.0, 1.5, z),
-        lambda z: sp.incomplete_beta.fun(2.0, 1.5, z),
+        lambda z: _incomplete_beta_core.fun(2.0, 1.5, z),
     ),
     "polylog": (
         lambda z: jax.vmap(lambda t: _li_core(3, t))(z),

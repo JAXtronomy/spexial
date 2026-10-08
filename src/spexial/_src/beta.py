@@ -41,9 +41,11 @@ was written for the Zhao (1996) family of density profiles (Eq. 43).
 __all__ = ["incomplete_beta"]
 
 import functools as ft
+import math
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.custom_derivatives import SymbolicZero
 
 from .custom_types import AnyArray, AnyArrayLike, ScalarLike
@@ -186,6 +188,84 @@ def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     return _small_z(a, b, jnp.full_like(w, 0.5)) + total  # type: ignore[no-any-return]
 
 
+_EXPRL_BAND = 0.5
+"""Below this ``|x|``, `_a_eq_1` sums ``expm1(x) / x`` as a series.
+
+Above it the direct quotient is accurate to working precision in value and in
+its first three derivatives; below it, those derivatives cancel.
+"""
+
+_EXPRL_COEFFS = tuple(1.0 / math.factorial(k + 1) for k in reversed(range(18)))
+"""Taylor coefficients of ``expm1(x) / x = sum_k x^k / (k+1)!``, for `jnp.polyval`.
+
+Highest power first. At ``|x| < 1/2`` the first omitted term is
+``0.5^18 / 19! ~ 3e-23``, far below float64 resolution.
+"""
+
+
+def _a_eq_1(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+    r"""$B(1, b, z)$, in closed form.
+
+    .. math::
+
+        B(1, b, z) = \int_0^z (1-t)^{b-1}\,\mathrm{d}t
+                   = \frac{1 - (1-z)^b}{b}
+                   = -L\,\frac{\operatorname{expm1}(bL)}{bL},
+        \qquad L = \ln(1-z)
+
+    with the removable singularity at $b = 0$ (where it is $-\ln(1-z)$) handled
+    by evaluating ``expm1(x) / x`` as its Taylor series near $x = 0$, by Horner.
+    That changes the *formula* there rather than substituting a value, so every
+    derivative in $b$ is right at $b = 0$ too, not just the value.
+    """
+    log1mz = jnp.log1p(-jnp.asarray(z))
+    x = b * log1mz
+    near = jnp.abs(x) < _EXPRL_BAND
+    x_far = jnp.where(near, 1.0, x)
+    x_near = jnp.where(near, x, 0.0)
+    ratio = jnp.where(
+        near, jnp.polyval(jnp.asarray(_EXPRL_COEFFS), x_near), jnp.expm1(x_far) / x_far
+    )
+    return -log1mz * ratio  # type: ignore[no-any-return]
+
+
+@jax.custom_jvp
+def _a_eq_1_core(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+    """`_a_eq_1`, with the same exact O(1) `z`-derivative as the series path."""
+    return _a_eq_1(b, z)
+
+
+@ft.partial(_a_eq_1_core.defjvp, symbolic_zeros=True)
+def _a_eq_1_jvp(
+    primals: tuple[ScalarLike, AnyArray],
+    tangents: tuple[ScalarLike | SymbolicZero, AnyArray | SymbolicZero],
+) -> tuple[AnyArray, AnyArray]:
+    b, z = primals
+    b_dot, z_dot = tangents
+
+    primal_out = _a_eq_1(b, z)
+    tangent_out = jnp.zeros_like(primal_out)
+
+    # The integrand at the endpoint, as for the series -- here (1-z)^(b-1).
+    if not isinstance(z_dot, SymbolicZero):
+        tangent_out = tangent_out + (1.0 - z) ** (b - 1.0) * z_dot
+
+    # Elementary, so autodiff of the closed form is cheap and exact; the series
+    # near b = 0 keeps every order right at the removable singularity.
+    if not isinstance(b_dot, SymbolicZero):
+        _, b_tangent = jax.jvp(lambda bb: _a_eq_1(bb, z), (b,), (b_dot,))
+        tangent_out = tangent_out + b_tangent
+
+    return primal_out, tangent_out
+
+
+def _is_static_one(a: ScalarLike) -> bool:
+    """Whether ``a`` is a concrete scalar equal to 1, decidable at trace time."""
+    return (
+        not isinstance(a, jax.core.Tracer) and np.ndim(a) == 0 and bool(np.equal(a, 1))
+    )
+
+
 def _incomplete_beta_impl(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     r"""$B(a, b, z)$ for $a > 0$, any real $b$, and $z \in [0, 1]$."""
     z = jnp.asarray(z)
@@ -198,7 +278,6 @@ def _incomplete_beta_impl(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyA
     )
 
 
-@jax.custom_jvp
 def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     r"""Unregularized incomplete beta function :math:`B(a, b, z)`.
 
@@ -246,6 +325,12 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     It is a `custom_jvp` rather than a `custom_vjp` so that `jax.hessian`'s
     ``jacfwd(jacrev(...))`` still composes.
 
+    When ``a`` is a concrete 1 (a Python or NumPy scalar, not a traced value)
+    the integral is elementary, :math:`(1 - (1-z)^b)/b`, and that closed form
+    replaces the series; see `_a_eq_1`. It carries the same exact
+    :math:`z`-derivative rule, and its ``b``-derivative is autodiff of the
+    closed form, which is elementary.
+
     Examples
     --------
     >>> import jax.numpy as jnp
@@ -272,11 +357,27 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     >>> bool(jnp.isnan(jsp.beta(2.0, 0.0) * jsp.betainc(2.0, 0.0, 0.5)))
     True
 
+    With ``a`` a literal 1 the integral is elementary, and that closed form is
+    used instead of the series:
+
+    >>> round(float(sp.incomplete_beta(1.0, 0.0, jnp.asarray(0.5))), 8)
+    0.69314718
+
     """
+    # Decided at trace time, so it costs nothing when it does not apply. A traced
+    # `a` -- e.g. one being differentiated or `vmap`ped -- takes the series.
+    if _is_static_one(a):
+        return _a_eq_1_core(b, z)
+    return _incomplete_beta_core(a, b, z)
+
+
+@jax.custom_jvp
+def _incomplete_beta_core(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+    """`incomplete_beta` by the series, with an exact O(1) `z`-derivative rule."""
     return _incomplete_beta_impl(a, b, z)
 
 
-@ft.partial(incomplete_beta.defjvp, symbolic_zeros=True)
+@ft.partial(_incomplete_beta_core.defjvp, symbolic_zeros=True)
 def _incomplete_beta_jvp(
     primals: tuple[ScalarLike, ScalarLike, AnyArray],
     tangents: tuple[

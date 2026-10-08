@@ -18,6 +18,7 @@ from scipy.integrate import quad
 from scipy.special import beta as scipy_beta, betainc as scipy_betainc, hyp2f1
 
 import spexial as sp
+from spexial._src.beta import _EXPRL_BAND, _incomplete_beta_core
 
 # `a > 0` always. `b` is any real: the negative and zero values are the reason
 # this exists, and come up as ordinary slopes in double power-law profiles.
@@ -135,7 +136,7 @@ def test_endpoints(a, b):
     np.testing.assert_allclose(float(got[1]), scipy_beta(a, b), rtol=1e-11)
 
 
-@pytest.mark.parametrize("a", [0.5, 2.0])
+@pytest.mark.parametrize("a", [0.5, 1.0, 2.0])
 @pytest.mark.parametrize("b", [-1.0, 0.0, 1.5])
 def test_z_derivative_is_the_integrand(a, b):
     """The custom JVP must equal ``z^(a-1) (1-z)^(b-1)``, exactly.
@@ -227,3 +228,74 @@ def test_integer_arguments_are_promoted():
     got = sp.incomplete_beta(2, 1, jnp.asarray(1))
     assert jnp.issubdtype(got.dtype, jnp.floating)
     np.testing.assert_allclose(float(got), scipy_beta(2.0, 1.0), rtol=1e-12)
+
+
+# ============================================================================
+# The a == 1 closed form
+
+
+@pytest.mark.parametrize("b", BS)
+def test_a_eq_1_closed_form_matches_the_series(b):
+    """A static ``a == 1`` takes `_a_eq_1`; it must agree with the series it skips."""
+    z = jnp.asarray(ZS)
+    np.testing.assert_allclose(
+        np.asarray(sp.incomplete_beta(1.0, b, z)),
+        np.asarray(_incomplete_beta_core(1.0, b, z)),
+        rtol=1e-11,
+    )
+
+
+def test_a_eq_1_traced_takes_the_series():
+    """A traced ``a`` cannot be inspected, so it takes the series -- same answer."""
+    z = jnp.asarray(ZS)
+    traced = jax.jit(lambda a: sp.incomplete_beta(a, -1.0, z))(1.0)
+    static = sp.incomplete_beta(1.0, -1.0, z)
+    np.testing.assert_allclose(np.asarray(traced), np.asarray(static), rtol=1e-11)
+
+
+@pytest.mark.parametrize("z", [0.1, 0.5, 0.9, 1 - 1e-6])
+def test_a_eq_1_b_derivatives_at_the_removable_singularity(z):
+    """``b = 0`` is removable; every order of the ``b``-derivative must be right.
+
+    ``B(1, b, z) = -L sum_k (bL)^k / (k+1)!`` with ``L = log(1-z)``, so the
+    n-th ``b``-derivative at ``b = 0`` is ``-L^(n+1) / (n+1)``. A `where` that
+    substituted ``-L`` at ``b = 0`` would get the value right and all of these
+    wrong.
+    """
+    L = np.log1p(-z)
+    f = lambda b: sp.incomplete_beta(1.0, b, jnp.asarray(z))
+    d1, d2, d3 = jax.grad(f), jax.grad(jax.grad(f)), jax.grad(jax.grad(jax.grad(f)))
+    np.testing.assert_allclose(float(f(0.0)), -L, rtol=1e-14)
+    np.testing.assert_allclose(float(d1(0.0)), -(L**2) / 2, rtol=1e-13)
+    np.testing.assert_allclose(float(d2(0.0)), -(L**3) / 3, rtol=1e-13)
+    np.testing.assert_allclose(float(d3(0.0)), -(L**4) / 4, rtol=1e-13)
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+def test_a_eq_1_continuous_across_the_series_band(side):
+    """Value and ``b``-derivative agree with the reference on both sides of the band.
+
+    `_a_eq_1` switches from the series to ``expm1(x) / x`` at
+    ``|x| = _EXPRL_BAND``; a step there would be invisible to tests that never
+    sample the seam.
+    """
+    z = 0.9
+    L = np.log1p(-z)
+    for x in (_EXPRL_BAND * (1 - 1e-9), _EXPRL_BAND * (1 + 1e-9)):
+        b = side * x / abs(L)
+        got = float(sp.incomplete_beta(1.0, b, jnp.asarray(z)))
+        np.testing.assert_allclose(got, -np.expm1(b * L) / b, rtol=1e-14)
+        grad = float(
+            jax.grad(lambda bb: sp.incomplete_beta(1.0, bb, jnp.asarray(z)))(b)
+        )
+        expect = (np.expm1(b * L) - b * L * np.exp(b * L)) / b**2
+        np.testing.assert_allclose(grad, expect, rtol=1e-12)
+
+
+def test_a_eq_1_forward_and_reverse_agree():
+    """The masked branches must not leak a ``0 * inf`` into either mode."""
+    f = lambda bb: sp.incomplete_beta(1.0, bb, jnp.asarray(0.7))
+    for b in (-1.0, 0.0, 1e-9, 0.3):
+        fwd = float(jax.jacfwd(f)(b))
+        rev = float(jax.jacrev(f)(b))
+        np.testing.assert_allclose(fwd, rev, rtol=1e-14)
