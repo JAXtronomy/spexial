@@ -105,7 +105,7 @@ def _upward(lo: int, hi: int, x: AnyArray) -> AnyArray:
     _, rows = lax.scan(step, carry, (orders[k:], xmin[k:]), unroll=_UNROLL)
     if lo >= 2:
         return rows
-    return jnp.concatenate([jnp.stack([j0, j1][lo:]), rows])
+    return jnp.concat([jnp.stack([j0, j1][lo:]), rows])
 
 
 def _downward(lo: int, hi: int, x: AnyArray) -> AnyArray:
@@ -166,7 +166,7 @@ def _downward(lo: int, hi: int, x: AnyArray) -> AnyArray:
     rows = jnp.where(x < floor, 0.0, rows)
     if lo >= 2:
         return rows
-    return jnp.concatenate([jnp.stack([j0, j1][lo:]), rows])
+    return jnp.concat([jnp.stack([j0, j1][lo:]), rows])
 
 
 @partial(jax.custom_jvp, nondiff_argnums=(0, 1))
@@ -185,7 +185,7 @@ def _derivative(lo: int, hi: int, z: AnyArrayLike) -> tuple[AnyArray, AnyArray]:
     """Values and derivatives, ``j_l' = (l j_{l-1} - (l+1) j_{l+1}) / (2l+1)``."""
     wide = _band(max(lo - 1, 0), hi + 1, z)
     if lo == 0:  # j_{-1} enters with coefficient l = 0
-        wide = jnp.concatenate([jnp.zeros_like(wide[:1]), wide])
+        wide = jnp.concat([jnp.zeros_like(wide[:1]), wide])
     order = jnp.arange(lo, hi + 1, dtype=wide.dtype)
     order = order.reshape((-1,) + (1,) * (wide.ndim - 1))
     deriv = (order * wide[:-2] - (order + 1.0) * wide[2:]) / (2.0 * order + 1.0)
