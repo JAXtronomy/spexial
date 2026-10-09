@@ -237,7 +237,7 @@ def test_integer_arguments_are_promoted():
 LARGE_BS = [np.nextafter(10.0, 99), 20.0, 50.0, 100.0, 300.0, 1e3, 1e4]
 
 
-@pytest.mark.parametrize("a", AS)
+@pytest.mark.parametrize("a", [*AS, 8.0, 50.0])
 @pytest.mark.parametrize("b", LARGE_BS)
 def test_large_b_matches_the_regularized_form(a, b):
     """REGRESSION: the series lost every digit above ``b ~ 50`` (GH-64).
@@ -248,6 +248,9 @@ def test_large_b_matches_the_regularized_form(a, b):
 
     The reference is mpmath, not ``beta * betainc``: SciPy's regularized form
     is itself only good to ~1e-11 at ``b = 1e4``.
+
+    ``a`` reaches 50, the top of the documented range for the continued
+    fraction and a regime where the series fails even at small ``b``.
 
     Tolerances are the measured worst with headroom: 2e-13 up to ``b = 100``,
     then 8e-12 out to ``b = 1e5``, where 32 steps of the fraction stop short of
