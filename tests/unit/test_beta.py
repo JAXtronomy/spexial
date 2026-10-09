@@ -19,7 +19,7 @@ from scipy.integrate import quad
 from scipy.special import beta as scipy_beta, betainc as scipy_betainc, hyp2f1
 
 import spexial as sp
-from spexial._src.beta import _CF_FROM
+from spexial._src.beta import _CF_FROM, _branch, _branch_index
 
 # `a > 0` always. `b` is any real: the negative and zero values are the reason
 # this exists, and come up as ordinary slopes in double power-law profiles.
@@ -388,24 +388,80 @@ def test_continuous_across_the_large_a_switch(b):
     np.testing.assert_allclose(np.asarray(below), np.asarray(above), rtol=1e-13)
 
 
-@pytest.mark.parametrize("b", [-2.5, -1.0, 0.0, 0.05])
-def test_large_a_small_b_is_degraded(b):
-    """KNOWN LIMIT: large ``a`` with ``b < 0.1`` stays on the series.
-
-    The continued fraction does not converge there, and its reflection needs
-    the complete ``B(a, b)``, which diverges at ``b <= 0`` and costs
-    ``log10(1/b)`` digits as ``b -> 0+``. At ``a = 24`` the series delivers
-    about 2e-9; this pins that, so a regression or a fix both show up.
-    """
-    a = 24.0
-    z = np.array([0.01, 0.3, 0.7, 0.9])
-    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+def _mp_hyp2f1_beta(a, b, z):
+    """``B(a, b, z)`` by DLMF 8.17.7 at 40 digits: valid for any real ``b``."""
     with mp.workdps(40):
-        expect = np.array(
-            [float(mp.mpf(zi) ** a / a * mp.hyp2f1(a, 1 - b, a + 1, zi)) for zi in z]
-        )
-    rel = np.max(np.abs(got - expect) / np.abs(expect))
-    assert 1e-12 < rel < 1e-7, rel
+        return float(mp.mpf(z) ** a / a * mp.hyp2f1(a, 1 - b, a + 1, z))
+
+
+@pytest.mark.parametrize("a", [12.0, 24.0, 50.0, 100.0])
+@pytest.mark.parametrize("b", [-50.0, -2.5, -1.0, -0.3, -1e-4, 0.0, 0.05, 0.099])
+def test_large_a_small_b(a, b):
+    """Large ``a`` with ``b < 0.1``, including ``b <= 0``: `_large_a`.
+
+    The series was 1e-9 off at ``a = 24`` and had no correct digits by 50; the
+    continued fraction's reflection needs ``B(a, b)``, which diverges at
+    ``b <= 0``. Measured worst here 8e-14.
+    """
+    z = np.array([0.01, 0.3, 0.5, 0.7, 0.9, 0.95, 0.99, 1 - 1e-6, 1 - 1e-12])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    expect = np.array([_mp_hyp2f1_beta(a, b, zi) for zi in z])
+    ok = np.isfinite(expect) & (expect != 0)
+    np.testing.assert_allclose(got[ok], expect[ok], rtol=5e-13)
+
+
+@pytest.mark.parametrize("b", [-2.5, -0.3, 0.0, 0.05])
+def test_continuous_across_the_large_a_switch_small_b(b):
+    """Series at or below ``a = 8``, `_large_a` above: they must meet."""
+    z = jnp.asarray([0.05, 0.5, 0.95, 0.999])
+    below = sp.incomplete_beta(8.0, b, z)
+    above = sp.incomplete_beta(np.nextafter(8.0, 99), b, z)
+    np.testing.assert_allclose(np.asarray(below), np.asarray(above), rtol=1e-13)
+
+
+@pytest.mark.parametrize("a", [2.0, 24.0])
+def test_pole_at_z_eq_1_large_and_small_a(a):
+    """``+inf`` at ``z = 1`` for ``b <= 0`` on the series and on `_large_a`."""
+    for b in (-2.5, -0.5, 0.0):
+        assert float(sp.incomplete_beta(a, b, jnp.asarray(1.0))) == np.inf
+
+
+@pytest.mark.parametrize("a", [2.0, 24.0])
+@pytest.mark.parametrize("b", [1e-6, 1e-4, 5e-4])
+def test_z_eq_1_with_tiny_positive_b(a, b):
+    """REGRESSION: ``B(a, b, 1)`` for ``0 < b < 1e-3`` was ``nan``.
+
+    ``b`` sits in the near-pole band, whose expansion carries ``log(1 - z)``;
+    at ``z = 1`` that is ``-inf``, though there is nothing to cancel there --
+    ``(1 - z)^b`` is 0 -- so the direct form is used.
+    """
+    with mp.workdps(40):
+        expect = float(mp.beta(a, b))
+    got = float(sp.incomplete_beta(a, b, jnp.asarray(1.0)))
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize("b", [-1e-4, -1 + 5e-4, 2e-4])
+def test_near_pole_expansion_close_to_z_eq_1(b):
+    """REGRESSION: the near-pole expansion truncates like ``s^K L^(K+1)``.
+
+    With 4 terms, ``b = -1e-4`` at ``z = 1 - 1e-15`` (``L ~ -35``) was 1.2e-12
+    off; with `_POLE_TERMS` = 8 the truncation is ~1e-25.
+    """
+    z = np.array([0.9, 1 - 1e-8, 1 - 1e-15])
+    got = np.asarray(sp.incomplete_beta(2.0, b, jnp.asarray(z)))
+    expect = np.array([_mp_hyp2f1_beta(2.0, b, zi) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=5e-14)
+
+
+def test_vmap_over_a_through_large_a_has_finite_gradients():
+    """Under `vmap` over ``a`` the `switch` runs every branch, on safe values."""
+    a_s = jnp.asarray([0.5, 4.0, 8.0, 8.5, 16.0, 50.0])
+    f = lambda a: sp.incomplete_beta(a, -0.5, jnp.asarray(0.97))
+    batched = jax.vmap(f)(a_s)
+    single = jnp.stack([f(a) for a in a_s])
+    np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=5e-14)
+    assert bool(jnp.all(jnp.isfinite(jax.vmap(jax.grad(f))(a_s))))
 
 
 def test_vmap_over_a_across_the_switch_has_finite_gradients():
@@ -534,3 +590,12 @@ def test_pole_at_z_eq_1_for_non_positive_b(b):
             jax.jacrev(lambda *ab: sp.incomplete_beta(*ab, z), argnum)(2.0, b)
         )
         assert np.all(np.isfinite(jac[:-1])), jac
+
+
+@pytest.mark.parametrize("a", [0.5, 8.0, np.nextafter(8.0, 99), 50.0])
+@pytest.mark.parametrize(
+    "b", [-1.0, 0.0, np.nextafter(0.1, 0), 0.1, 5.0, 10.0, np.nextafter(10.0, 99)]
+)
+def test_static_and_traced_branch_choice_agree(a, b):
+    """`_branch` (concrete, plain Python) mirrors `_branch_index` (traced)."""
+    assert _branch(a, b) == int(_branch_index(a, b))
