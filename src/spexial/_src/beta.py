@@ -310,23 +310,53 @@ def _series(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
     )
 
 
+_CF_A_FROM = 8.0
+r"""Above this ``a`` (with ``b >= _CF_A_B_MIN``), `_large_b` replaces the series too.
+
+`_large_z` expands :math:`(1-u)^{a-1}`, so the same cancellation that `_CF_FROM`
+avoids in :math:`b` happens in :math:`a`: measured worst over
+:math:`b \in [-2.5, 10]`, :math:`6\times10^{-14}` at :math:`a = 8`,
+:math:`4\times10^{-11}` at 16, :math:`2\times10^{-8}` at 24, and wrong from
+about 50. The continued fraction is :math:`5\times10^{-13}` or better there,
+up to :math:`a = 100`.
+"""
+
+_CF_A_B_MIN = 0.1
+r"""The smallest ``b`` for which large ``a`` is routed to `_large_b`.
+
+The reflection subtracts from the complete :math:`B(a, b) \sim 1/b`, so it
+loses about :math:`\log_{10}(1/b)` digits as :math:`b \to 0^+`: measured
+:math:`3\times10^{-12}` at :math:`b = 10^{-3}`, :math:`10^{-8}` at
+:math:`10^{-8}`. From 0.1 it is :math:`4\times10^{-13}` or better to
+:math:`a = 50`. Below it -- including all :math:`b \le 0`, where there is no
+reflection at all -- large ``a`` stays on the series, with its known limit.
+"""
+
+
+def _use_cf(a: ScalarLike, b: ScalarLike) -> ScalarLike:
+    """Whether `_large_b` rather than `_series` evaluates ``B(a, b, z)``."""
+    return (b > _CF_FROM) | ((a > _CF_A_FROM) & (b >= _CF_A_B_MIN))
+
+
 def _incomplete_beta_impl(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     r"""$B(a, b, z)$ for $a > 0$, any real $b$, and $z \in [0, 1]$."""
     z = jnp.asarray(z)
-    # A concrete `b` picks its branch now, so only that one is compiled; a
-    # traced one needs the `cond`, which compiles both.
-    if not isinstance(b, jax.core.Tracer):
-        return _large_b(a, b, z) if b > _CF_FROM else _series(a, b, z)
-    use_cf = b > _CF_FROM
-    # `b` is a scalar, so `cond` runs one branch. Under `vmap` over `b` it
-    # becomes a `select` that runs both, so each is handed a `b` it is safe for
-    # -- the series is wildly wrong for large `b`, and the reflection needs
+    # Concrete `a` and `b` pick the branch now, so only that one is compiled; if
+    # either is traced it needs the `cond`, which compiles both.
+    if not isinstance(a, jax.core.Tracer) and not isinstance(b, jax.core.Tracer):
+        return _large_b(a, b, z) if _use_cf(a, b) else _series(a, b, z)
+    use_cf = _use_cf(a, b)
+    # `a` and `b` are scalars, so `cond` runs one branch. Under `vmap` it becomes
+    # a `select` that runs both, so each is handed parameters it is safe for --
+    # the series is wildly wrong for large `a` or `b`, and the reflection needs
     # `b > 0` -- so that neither puts a non-finite value where autodiff would
     # multiply it by the zero cotangent of the unselected side.
     return jax.lax.cond(  # type: ignore[no-any-return]
         use_cf,
-        lambda: _large_b(a, jnp.where(use_cf, b, 2.0 * _CF_FROM), z),
-        lambda: _series(a, jnp.where(use_cf, 1.0, b), z),
+        lambda: _large_b(
+            jnp.where(use_cf, a, 1.0), jnp.where(use_cf, b, 2.0 * _CF_FROM), z
+        ),
+        lambda: _series(jnp.where(use_cf, 1.0, a), jnp.where(use_cf, 1.0, b), z),
     )
 
 
@@ -371,9 +401,9 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     Notes
     -----
     Two fixed-length series, switched at :math:`z = 1/2`, each converging like
-    :math:`2^{-k}`; see `_small_z` and `_large_z`. Above :math:`b = 10` their
-    alternating terms cancel, and a fixed-length continued fraction is used
-    instead; see `_large_b`. The
+    :math:`2^{-k}`; see `_small_z` and `_large_z`. Above :math:`b = 10`, or
+    above :math:`a = 8` with :math:`b \ge 0.1`, their alternating terms cancel,
+    and a fixed-length continued fraction is used instead; see `_large_b`. The
     :math:`z`-derivative is supplied by a `jax.custom_jvp` and is exact and
     O(1) -- by Leibniz it is just the integrand at the endpoint,
     :math:`z^{a-1}(1-z)^{b-1}` -- rather than differentiating through 64 terms.
@@ -420,33 +450,19 @@ def _incomplete_beta_jvp(
     a, b, z = primals
     a_dot, b_dot, z_dot = tangents
 
-    primal_out = _incomplete_beta_impl(a, b, z)
-    tangent_out = jnp.zeros_like(primal_out)
-
-    # d/dz B(a, b, z) = z^(a-1) (1-z)^(b-1): the integrand at the endpoint.
-    if not isinstance(z_dot, SymbolicZero):
-        if isinstance(b, jax.core.Tracer):
-            # `b` may itself be differentiated, so write (1-z)^(b-1) so that its
-            # `b`-derivative carries `log1p(-z)`, not `log(1 - z)` of a rounded
-            # `1 - z`, which keeps only ~1e-16 / z relative precision (GH-68).
-            # Clamped so `b = 1, z = 1` is `exp(0) = 1` rather than `0 * -inf`.
-            log1mz = jnp.log1p(-jnp.asarray(z))
-            log1mz = jnp.maximum(log1mz, float(jnp.finfo(log1mz.dtype).min))
-            one_minus_z_pow = jnp.exp((b - 1.0) * log1mz)
-        else:
-            # A concrete `b` has no derivative to get wrong, and as a constant
-            # exponent XLA can simplify `pow` (to a reciprocal at b = 0, a square
-            # root at b = 3/2), which `exp(... log1p)` would hide from it.
-            one_minus_z_pow = (1.0 - z) ** (b - 1.0)
-        tangent_out = tangent_out + z ** (a - 1.0) * one_minus_z_pow * z_dot
-
     # The a/b tangents are only needed when the parameters are themselves
     # differentiated; there is no cheap closed form, so fall back to autodiff of
-    # the series. Skipped entirely in the common case, where the differentiation
-    # is with respect to position at fixed a and b.
+    # the implementation. Skipped entirely in the common case, where the
+    # differentiation is with respect to position at fixed a and b. When it does
+    # run, the primal comes from the same `jvp`, not a second evaluation: with
+    # `b` traced the implementation is a `lax.cond`, and XLA cannot merge two
+    # copies of one, so a separate primal ran the whole thing twice (1.8x).
     a_zero, b_zero = isinstance(a_dot, SymbolicZero), isinstance(b_dot, SymbolicZero)
-    if not (a_zero and b_zero):
-        _, ab_tangent = jax.jvp(
+    if a_zero and b_zero:
+        primal_out = _incomplete_beta_impl(a, b, z)
+        tangent_out = jnp.zeros_like(primal_out)
+    else:
+        primal_out, tangent_out = jax.jvp(
             lambda aa, bb: _incomplete_beta_impl(aa, bb, z),
             (a, b),
             (
@@ -454,6 +470,27 @@ def _incomplete_beta_jvp(
                 jnp.zeros_like(b) if b_zero else b_dot,
             ),
         )
-        tangent_out = tangent_out + ab_tangent
+
+    # d/dz B(a, b, z) = z^(a-1) (1-z)^(b-1): the integrand at the endpoint.
+    if not isinstance(z_dot, SymbolicZero):
+        if isinstance(b, jax.core.Tracer):
+            # `b` may itself be differentiated, so write (1-z)^(b-1) so that its
+            # `b`-derivative carries `log1p(-z)`, not `log(1 - z)` of a rounded
+            # `1 - z`, which keeps only ~1e-16 / z relative precision (GH-68).
+            # At z = 1 itself `pow` takes over, by a double `where`: `log1p(-z)` is
+            # `-inf` there, and any clamp of it differentiates as `0 * -inf`,
+            # making the second and third z-derivatives `nan`. `pow` has exact
+            # derivatives at a zero base, as on the concrete path.
+            z_arr = jnp.asarray(z)
+            inside = z_arr < 1.0
+            z_in = jnp.where(inside, z_arr, 0.0)
+            via_log1p = jnp.exp((b - 1.0) * jnp.log1p(-z_in))
+            one_minus_z_pow = jnp.where(inside, via_log1p, (1.0 - z_arr) ** (b - 1.0))
+        else:
+            # A concrete `b` has no derivative to get wrong, and as a constant
+            # exponent XLA can simplify `pow` (to a reciprocal at b = 0, a square
+            # root at b = 3/2), which `exp(... log1p)` would hide from it.
+            one_minus_z_pow = (1.0 - z) ** (b - 1.0)
+        tangent_out = tangent_out + z ** (a - 1.0) * one_minus_z_pow * z_dot
 
     return primal_out, tangent_out

@@ -329,3 +329,81 @@ def test_z_derivative_with_traced_b_at_z_eq_1():
     assert float(dz(one, 1.0)) == 1.0
     assert float(dz(one, 2.0)) == 0.0
     assert float(dz(one, 0.5)) == np.inf
+
+
+# ============================================================================
+# Large a
+
+
+@pytest.mark.parametrize("a", [12.0, 16.0, 24.0, 50.0])
+@pytest.mark.parametrize("b", [0.1, 0.5, 4.0, 10.0])
+def test_large_a_matches_mpmath(a, b):
+    """Above ``a = 8`` with ``b >= 0.1`` the continued fraction takes over.
+
+    `_large_z` expands ``(1-u)^(a-1)``, whose coefficients cancel just as
+    ``(1-b)_k`` does for large ``b``: the series was 4e-11 at ``a = 16``,
+    2e-8 at ``24``, and wrong from about 50. Measured worst here 5e-13.
+    """
+    z = np.array([1e-6, 0.01, 0.3, 0.7, 0.9, 0.99, 1 - 1e-6])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    with mp.workdps(40):
+        expect = np.array([float(mp.betainc(a, b, 0, zi)) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize("b", [0.1, 1.0, 5.0])
+def test_continuous_across_the_large_a_switch(b):
+    """Series at or below ``a = 8``, continued fraction above: they must meet."""
+    z = jnp.asarray([0.05, 0.5, 0.95])
+    below = sp.incomplete_beta(8.0, b, z)
+    above = sp.incomplete_beta(np.nextafter(8.0, 99), b, z)
+    np.testing.assert_allclose(np.asarray(below), np.asarray(above), rtol=1e-13)
+
+
+@pytest.mark.parametrize("b", [-2.5, -1.0, 0.0, 0.05])
+def test_large_a_small_b_is_degraded(b):
+    """KNOWN LIMIT: large ``a`` with ``b < 0.1`` stays on the series.
+
+    The continued fraction does not converge there, and its reflection needs
+    the complete ``B(a, b)``, which diverges at ``b <= 0`` and costs
+    ``log10(1/b)`` digits as ``b -> 0+``. At ``a = 24`` the series delivers
+    about 2e-9; this pins that, so a regression or a fix both show up.
+    """
+    a = 24.0
+    z = np.array([0.01, 0.3, 0.7, 0.9])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    with mp.workdps(40):
+        expect = np.array(
+            [float(mp.mpf(zi) ** a / a * mp.hyp2f1(a, 1 - b, a + 1, zi)) for zi in z]
+        )
+    rel = np.max(np.abs(got - expect) / np.abs(expect))
+    assert 1e-12 < rel < 1e-7, rel
+
+
+def test_vmap_over_a_across_the_switch_has_finite_gradients():
+    """As for ``b``: under `vmap` over ``a`` both branches run, on safe values."""
+    a_s = jnp.asarray([0.5, 4.0, 8.0, 8.5, 16.0, 50.0])
+    f = lambda a: sp.incomplete_beta(a, 0.5, jnp.asarray(0.3))
+    batched = jax.vmap(f)(a_s)
+    single = jnp.stack([f(a) for a in a_s])
+    np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=1e-14)
+    assert bool(jnp.all(jnp.isfinite(jax.vmap(jax.grad(f))(a_s))))
+
+
+@pytest.mark.parametrize("b", [2.5, 3.0, 4.0])
+def test_higher_z_derivatives_at_z_eq_1_with_traced_b(b):
+    """Traced and concrete ``b`` agree at ``z = 1`` to the third z-derivative.
+
+    The traced path writes ``(1-z)^(b-1)`` through ``log1p(-z)`` (GH-68), which
+    is ``-inf`` at ``z = 1``. A clamp there differentiates as ``0 * -inf`` and
+    made the second and third derivatives ``nan``; `pow` takes the endpoint.
+    """
+    one = jnp.asarray(1.0)
+    f = lambda bb, zz: sp.incomplete_beta(2.0, bb, zz)
+    d1 = jax.grad(f, 1)
+    d2 = jax.grad(d1, 1)
+    d3 = jax.grad(d2, 1)
+    for d in (d1, d2, d3):
+        traced, concrete = float(jax.jit(d)(b, one)), float(d(b, one))
+        assert traced == concrete, (b, traced, concrete)
+        assert not np.isnan(traced)
