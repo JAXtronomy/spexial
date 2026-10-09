@@ -298,6 +298,9 @@ ignore = [
   "TD003",   # Missing issue link on the line following this TODO
 ]
 
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"jax.numpy.concatenate".msg = "Use `jnp.concat`, the Array API spelling (GH-69)."
+
 [tool.ruff.lint.per-file-ignores]
 "docs/**"                 = ["A001", "INP001"]
 "noxfile.py"              = ["T20"]

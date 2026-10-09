@@ -307,7 +307,7 @@ def eval_gegenbauers(n: int, alpha: AnyArrayLike, x: AnyArrayLike, /) -> AnyArra
     n_values = jnp.arange(1, n)  # starts at 1: 0 is already initialized above
     _, C_values = jax.lax.scan(_C_n_plus_1, carry, n_values)
 
-    orders = jnp.concatenate([C0_val[None], C1_val[None], C_values], axis=0)
+    orders = jnp.concat([C0_val[None], C1_val[None], C_values], axis=0)
     # Every order from 3 up is `inf - inf` when `x` is infinite; substitute each
     # one's limit. `C_0` is already 1 there, so it is the one order held back.
     #
