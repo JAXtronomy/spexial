@@ -205,14 +205,16 @@ not. Unrolled 16-fold it made a second ``b``-derivative take 200 s to compile
 for no runtime gain (measured 39 vs 41 ms at 1e5 points); unrolled once, 11 s.
 """
 
-_CF_STEPS = 32
+_CF_STEPS = 64
 r"""Double steps of the continued fraction (each an even and an odd term).
 
-Measured against mpmath over :math:`a \in [0.25, 50]`: worst
-:math:`2\times10^{-13}` up to :math:`b = 100`, :math:`8\times10^{-12}` at
-:math:`10^3`--:math:`10^5`, inside the :math:`10^{-11}` the series is held to.
-64 steps buys :math:`2\times10^{-13}` at :math:`10^4` for twice the run and
-compile time; 16 is :math:`10^{-7}` at :math:`10^5`.
+The slowest case is the reflected fraction -- large first parameter -- just
+above its switch point, at small ``a``: at :math:`a = 0.1, b = 10^3` it is
+:math:`10^{-11}` at 32 steps, :math:`5\times10^{-14}` at 48 and
+:math:`6\times10^{-15}` at 64, past which nothing changes. What remains is
+rounding, growing like :math:`b\,\epsilon`: worst over
+:math:`a \in [0.1, 50]`, :math:`4\times10^{-12}` at :math:`b = 10^5`,
+:math:`5\times10^{-10}` at :math:`10^7`.
 """
 
 
@@ -257,18 +259,27 @@ def _continued_fraction(a: AnyArrayLike, b: AnyArrayLike, x: AnyArray) -> AnyArr
     return h  # type: ignore[no-any-return]
 
 
-def _cf_direct(a: AnyArrayLike, b: AnyArrayLike, x: AnyArrayLike) -> AnyArray:
-    """$B(a, b, x)$ by `_continued_fraction`, for $x$ below its switch point.
+def _complete_beta(a: ScalarLike, b: ScalarLike) -> AnyArray:
+    r"""$\log B(a, b)$ for $a, b > 0$, as the two fractions at the switch point.
 
-    ``x = 0`` gives exactly 0. It is a genuine zero of $x^a$ for every $a > 0$
-    -- not a removable singularity -- so its parameter derivatives are 0 too;
-    evaluating it directly would form ``0 * log(0)`` in them instead.
+    :math:`B(a, b) = B(a, b, x_0) + B(b, a, 1 - x_0)`, two positive terms, so no
+    cancellation. Not ``betaln``: `jax.scipy.special.betaln` is only good to
+    :math:`3\times10^{-7}` at :math:`(a, b) = (8, 10)`. Returned as a logarithm,
+    so that a complete beta function far below the smallest normal number --
+    :math:`B(301, 1000) \approx 4\times10^{-307}` -- does not round to zero before
+    it is used. Computed once per call, not per point, so `vmap` over ``z`` does
+    not repeat it.
     """
-    x = jnp.asarray(x)
-    at_0 = x == 0
-    xs = jnp.where(at_0, 0.5, x)
-    front = jnp.exp(a * jnp.log(xs) + b * jnp.log1p(-xs)) / a
-    return jnp.where(at_0, 0.0, front * _continued_fraction(a, b, xs))  # type: ignore[no-any-return]
+    x0 = (a + 1.0) / (a + b + 2.0)
+    # The front factor x^a (1-x)^b is the same for both terms, and is formed from
+    # x0 itself: `log1p(-x0)`, not `log` of a rounded `1 - x0` scaled by b.
+    log_front = a * jnp.log(x0) + b * jnp.log1p(-x0)
+    h = _continued_fraction(
+        jnp.stack([a, b]),
+        jnp.stack([b, a]),
+        jnp.stack([x0, 1.0 - x0]),
+    )
+    return log_front + jnp.log(h[0] / a + h[1] / b)  # type: ignore[no-any-return]
 
 
 def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
@@ -277,26 +288,39 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
     Below the switch point :math:`x_0 = (a+1)/(a+b+2)` the fraction converges
     as it stands; above it, by the reflection
     :math:`B(a, b, z) = B(a, b) - B(b, a, 1-z)`, where it converges for the
-    swapped arguments. The complete :math:`B(a, b)` is itself the sum of both
-    at :math:`x_0` -- two positive terms, so no cancellation -- rather than
-    ``exp(betaln(a, b))``: `jax.scipy.special.betaln` is only good to
-    :math:`3\times10^{-7}` at :math:`(a, b) = (8, 10)`.
+    swapped arguments. One fraction per point, with the arguments swapped where
+    reflected; the complete :math:`B(a, b)` comes from `_complete_beta`.
+
+    Each term is :math:`\exp(\log(\text{front}) + \log(h / p))`, with
+    :math:`p` the fraction's first parameter: the front factor
+    :math:`z^a (1-z)^b` is the same either way round and is formed from ``z``,
+    never from a rounded ``1 - z`` scaled by ``b``; and the fraction is folded
+    into the exponent, so a front factor below the smallest normal number does
+    not flush to zero while the term itself is representable.
     """
+    if jnp.dtype(z.dtype).itemsize < 4:
+        # Half precision has too few bits for Lentz's recurrence to settle; work
+        # in float32 and round the result once.
+        return _large_b(a, b, z.astype(jnp.float32)).astype(z.dtype)
     x0 = (a + 1.0) / (a + b + 2.0)
     swap = z >= x0
-    # One fraction per point, with the arguments swapped where reflected rather
-    # than both sides everywhere. The two terms of the complete B(a, b) ride
-    # along as two more points, so the whole thing is a single `scan`: each one
-    # is compiled, and differentiated, separately.
-    flat = jnp.ravel(z)
-    fs = jnp.ravel(swap)
-    x_all = jnp.concat([jnp.where(fs, 1.0 - flat, flat), jnp.stack([x0, 1.0 - x0])])
-    a_all = jnp.concat([jnp.where(fs, b, a), jnp.stack([a, b])])
-    b_all = jnp.concat([jnp.where(fs, a, b), jnp.stack([b, a])])
-    terms = _cf_direct(a_all, b_all, x_all.astype(flat.dtype))
-    direct = terms[:-2].reshape(z.shape)
-    complete = terms[-2] + terms[-1]
-    return jnp.where(swap, complete - direct, direct)  # type: ignore[no-any-return]
+    # z = 0 and z = 1 make the term exactly zero (the direct one at 0, the
+    # reflected one at 1). Evaluated, `log(0)` would put `0 * -inf` into the
+    # a- and b-derivatives; it is a genuine zero for every a, b > 0, so its
+    # parameter derivatives are zero too.
+    endpoint = (z == 0) | (z == 1)
+    zs = jnp.where(endpoint, 0.5, z)
+    log_front = a * jnp.log(zs) + b * jnp.log1p(-zs)
+    first = jnp.where(swap, b, a)
+    h = _continued_fraction(first, jnp.where(swap, a, b), jnp.where(swap, 1.0 - zs, zs))
+    term = jnp.where(endpoint, 0.0, jnp.exp(log_front + jnp.log(h / first)))
+    reflected = jnp.exp(_complete_beta(a, b)) - term
+    out = jnp.where(swap, reflected, term)
+    # Past b ~ 1/eps the switch point x0 is below eps, `1 - x0` rounds to 1, and
+    # the reflected fraction's first denominator is exactly zero. Long before
+    # that the b*eps rounding has taken every digit (0.1 relative by b ~ 1e15),
+    # so say so with `nan` rather than return a confident `inf` or `0`.
+    return jnp.where(1.0 - x0 == 1.0, jnp.nan, out)  # type: ignore[no-any-return]
 
 
 def _series(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
@@ -338,29 +362,63 @@ def _use_cf(a: ScalarLike, b: ScalarLike) -> ScalarLike:
     return (b > _CF_FROM) | ((a > _CF_A_FROM) & (b >= _CF_A_B_MIN))
 
 
-def _incomplete_beta_impl(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+_SERIES, _CONTINUED_FRACTION, _EITHER = 0, 1, 2
+"""Which evaluation `_incomplete_beta_core` runs; static, so it is compiled alone.
+
+`_EITHER` is for a traced ``a`` or ``b``, whose branch is only known at run time.
+"""
+
+
+def _branch(a: ScalarLike, b: ScalarLike) -> int:
+    """Pick the static branch for concrete ``a`` and ``b``, else `_EITHER`.
+
+    Decided in the public wrapper, before `jax.custom_jvp` lifts every argument
+    to a tracer: inside it, even a literal ``b`` is traced under `jit`, so a
+    choice made there would always compile both branches.
+    """
+    if isinstance(a, jax.core.Tracer) or isinstance(b, jax.core.Tracer):
+        return _EITHER
+    return _CONTINUED_FRACTION if bool(_use_cf(a, b)) else _SERIES
+
+
+def _incomplete_beta_impl(
+    a: ScalarLike, b: ScalarLike, z: AnyArrayLike, branch: int
+) -> AnyArray:
     r"""$B(a, b, z)$ for $a > 0$, any real $b$, and $z \in [0, 1]$."""
     z = jnp.asarray(z)
-    # Concrete `a` and `b` pick the branch now, so only that one is compiled; if
-    # either is traced it needs the `cond`, which compiles both.
-    if not isinstance(a, jax.core.Tracer) and not isinstance(b, jax.core.Tracer):
-        return _large_b(a, b, z) if _use_cf(a, b) else _series(a, b, z)
+    if not jnp.issubdtype(z.dtype, jnp.inexact):
+        # An integer `z` would otherwise carry its dtype into the continued
+        # fraction's switch point, (a+1)/(a+b+2), and truncate it to zero.
+        z = z.astype(jnp.promote_types(z.dtype, float))
+    if branch == _SERIES:
+        return _series(a, b, z)
+    if branch == _CONTINUED_FRACTION:
+        return _large_b(a, b, z)
     use_cf = _use_cf(a, b)
     # `a` and `b` are scalars, so `cond` runs one branch. Under `vmap` it becomes
     # a `select` that runs both, so each is handed parameters it is safe for --
     # the series is wildly wrong for large `a` or `b`, and the reflection needs
     # `b > 0` -- so that neither puts a non-finite value where autodiff would
     # multiply it by the zero cotangent of the unselected side.
+    #
+    # Each branch is checkpointed. Reverse-mode through a `cond` makes both
+    # branches emit the same set of residuals, zero-filling the other's, so the
+    # series branch would allocate the continued fraction's per-step carries
+    # (64 x the points) just to discard them. Checkpointed, a branch's residuals
+    # are its inputs. Measured on the a/b gradient at 1e5 points, b = 1.5: 63 ->
+    # 46 ms (main, with no `cond`: 40), and the second-derivative compile 4.9 ->
+    # 3.4 s.
     return jax.lax.cond(  # type: ignore[no-any-return]
         use_cf,
-        lambda: _large_b(
+        lambda: jax.checkpoint(_large_b)(
             jnp.where(use_cf, a, 1.0), jnp.where(use_cf, b, 2.0 * _CF_FROM), z
         ),
-        lambda: _series(jnp.where(use_cf, 1.0, a), jnp.where(use_cf, 1.0, b), z),
+        lambda: jax.checkpoint(_series)(
+            jnp.where(use_cf, 1.0, a), jnp.where(use_cf, 1.0, b), z
+        ),
     )
 
 
-@jax.custom_jvp
 def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     r"""Unregularized incomplete beta function :math:`B(a, b, z)`.
 
@@ -437,11 +495,20 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     True
 
     """
-    return _incomplete_beta_impl(a, b, z)
+    return _incomplete_beta_core(a, b, z, _branch(a, b))
 
 
-@ft.partial(incomplete_beta.defjvp, symbolic_zeros=True)
+@ft.partial(jax.custom_jvp, nondiff_argnums=(3,))
+def _incomplete_beta_core(
+    a: ScalarLike, b: ScalarLike, z: AnyArrayLike, branch: int
+) -> AnyArray:
+    """`incomplete_beta` for a given static branch, with its derivative rule."""
+    return _incomplete_beta_impl(a, b, z, branch)
+
+
+@ft.partial(_incomplete_beta_core.defjvp, symbolic_zeros=True)
 def _incomplete_beta_jvp(
+    branch: int,
     primals: tuple[ScalarLike, ScalarLike, AnyArray],
     tangents: tuple[
         ScalarLike | SymbolicZero, ScalarLike | SymbolicZero, AnyArray | SymbolicZero
@@ -459,11 +526,11 @@ def _incomplete_beta_jvp(
     # copies of one, so a separate primal ran the whole thing twice (1.8x).
     a_zero, b_zero = isinstance(a_dot, SymbolicZero), isinstance(b_dot, SymbolicZero)
     if a_zero and b_zero:
-        primal_out = _incomplete_beta_impl(a, b, z)
+        primal_out = _incomplete_beta_impl(a, b, z, branch)
         tangent_out = jnp.zeros_like(primal_out)
     else:
         primal_out, tangent_out = jax.jvp(
-            lambda aa, bb: _incomplete_beta_impl(aa, bb, z),
+            lambda aa, bb: _incomplete_beta_impl(aa, bb, z, branch),
             (a, b),
             (
                 jnp.zeros_like(a) if a_zero else a_dot,

@@ -224,11 +224,16 @@ def test_jit_and_vmap_compose():
     np.testing.assert_allclose(np.asarray(mapped), np.asarray(direct), rtol=1e-14)
 
 
-def test_integer_arguments_are_promoted():
-    """Integer ``a``/``b``/``z`` promote to float, as everywhere else here."""
-    got = sp.incomplete_beta(2, 1, jnp.asarray(1))
+@pytest.mark.parametrize("b", [1, 20])
+def test_integer_arguments_are_promoted(b):
+    """Integer ``a``/``b``/``z`` promote to float, as everywhere else here.
+
+    ``b = 20`` takes the continued fraction, where an integer ``z`` once carried
+    its dtype into the switch point and truncated it to zero: the answer was 0.
+    """
+    got = sp.incomplete_beta(2, b, jnp.asarray(1))
     assert jnp.issubdtype(got.dtype, jnp.floating)
-    np.testing.assert_allclose(float(got), scipy_beta(2.0, 1.0), rtol=1e-12)
+    np.testing.assert_allclose(float(got), scipy_beta(2.0, b), rtol=1e-12)
 
 
 # ============================================================================
@@ -239,7 +244,7 @@ LARGE_BS = [np.nextafter(10.0, 99), 20.0, 50.0, 100.0, 300.0, 1e3, 1e4]
 
 @pytest.mark.parametrize("a", [*AS, 8.0, 50.0])
 @pytest.mark.parametrize("b", LARGE_BS)
-def test_large_b_matches_the_regularized_form(a, b):
+def test_large_b_matches_mpmath(a, b):
     """REGRESSION: the series lost every digit above ``b ~ 50`` (GH-64).
 
     Its coefficients ``(1-b)_k / k!`` alternate and grow like ``b^k / k!``: at
@@ -301,7 +306,12 @@ def test_vmap_over_b_across_the_switch_has_finite_gradients():
     f = lambda b: sp.incomplete_beta(2.0, b, jnp.asarray(0.3))
     batched = jax.vmap(f)(bs)
     single = jnp.stack([f(b) for b in bs])
-    np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=1e-14)
+    # Batched, `b` is traced and takes the `cond`; one at a time it is concrete
+    # and takes its branch statically -- two compilations of the same
+    # arithmetic, which XLA fuses differently: 2.1e-14 apart at b = 1e4, well
+    # inside the accuracy bound. Not a measure of accuracy, which is tested
+    # against mpmath elsewhere.
+    np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=5e-14)
     assert bool(jnp.all(jnp.isfinite(jax.vmap(jax.grad(f))(bs))))
 
 
@@ -407,3 +417,63 @@ def test_higher_z_derivatives_at_z_eq_1_with_traced_b(b):
         traced, concrete = float(jax.jit(d)(b, one)), float(d(b, one))
         assert traced == concrete, (b, traced, concrete)
         assert not np.isnan(traced)
+
+
+@pytest.mark.parametrize("b", [1e3, 1e4, 1e5])
+def test_large_b_small_a(b):
+    """``a = 0.1``: the complete beta's second fraction converges slowest here.
+
+    At 32 steps it was 1e-11 off; it has its own 64 (`_CF_COMPLETE_STEPS`).
+    """
+    a = 0.1
+    z = np.array(
+        [1e-6, 0.5 * (a + 1) / (a + b + 2), 2 * (a + 1) / (a + b + 2), 0.5, 1.0]
+    )
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    with mp.workdps(40):
+        expect = np.array([float(mp.betainc(a, b, 0, zi)) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize(("a", "b"), [(301.0, 1000.0), (300.0, 1000.0), (50.0, 2000.0)])
+def test_large_b_no_premature_underflow(a, b):
+    """A tiny front factor must not flush to zero while the value is normal.
+
+    ``B(301, 1000) ~ 3.9e-307``: the front factor alone underflows, and was
+    multiplied by the fraction after the fact, so this returned 0.
+    """
+    with mp.workdps(40):
+        expect = float(mp.beta(a, b))
+    got = float(sp.incomplete_beta(a, b, jnp.asarray(1.0)))
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize("z", [0.0, 1.0])
+def test_large_b_parameter_gradients_at_the_endpoints(z):
+    """``a``/``b`` gradients at ``z = 0`` and ``z = 1``, with ``b > 10``.
+
+    The endpoint term is a genuine zero; evaluated, ``log(0)`` puts
+    ``0 * -inf = nan`` into its parameter derivatives.
+    """
+    a, b = 2.0, 50.0
+    zz = jnp.asarray(z)
+    refs = (lambda t: mp.beta(t, b), lambda t: mp.beta(a, t))
+    for argnum, ref in enumerate(refs):
+        got = float(jax.grad(sp.incomplete_beta, argnum)(a, b, zz))
+        if z == 0.0:
+            expect = 0.0
+        else:
+            with mp.workdps(40):
+                expect = float(mp.diff(ref, (a, b)[argnum]))
+        np.testing.assert_allclose(got, expect, rtol=1e-11, atol=1e-300)
+
+
+def test_large_b_float32():
+    """The continued fraction in float32: about float32 precision, still float32."""
+    z = jnp.asarray([1e-3, 0.01, 0.3, 0.9], jnp.float32)
+    for b in (50.0, 1e4):
+        got = sp.incomplete_beta(2.0, b, z)
+        assert got.dtype == jnp.float32
+        with mp.workdps(40):
+            expect = np.array([float(mp.betainc(2, b, 0, float(zi))) for zi in z])
+        np.testing.assert_allclose(np.asarray(got, np.float64), expect, rtol=5e-6)
