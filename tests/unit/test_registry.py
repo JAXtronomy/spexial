@@ -63,8 +63,8 @@ _PROBES = {
         lambda z: sp.incomplete_beta.fun(2.0, 1.5, z),
     ),
     "polylog": (
-        lambda z: jax.vmap(lambda t: _li_core(3, t))(z),
-        lambda z: jax.vmap(lambda t: _li_core.fun(3, t))(z),
+        jax.vmap(lambda t: _li_core(3, t)),
+        jax.vmap(lambda t: _li_core.fun(3, t)),
     ),
     "spence": (sp.spence, sp.spence.fun),
     "spherical_jn": (
