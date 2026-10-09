@@ -236,6 +236,21 @@ def test_integer_arguments_are_promoted(b):
     np.testing.assert_allclose(float(got), scipy_beta(2.0, b), rtol=1e-12)
 
 
+def _mp_incomplete_beta(a, b, z):
+    """Unregularized ``B(a, b, z)`` by mpmath, robust for large ``b > 0``.
+
+    ``mp.betainc`` sums a hypergeometric series that converges too slowly for
+    large ``b`` above the switch point -- mpmath 1.3.0, the supported floor,
+    raises `NoConvergence` at ``a = 0.1, b = 1e5``. There the complement
+    ``B(a, b) - B(b, a, 1 - z)`` converges fast, as it does for the code under
+    test.
+    """
+    a, b, z = mp.mpf(a), mp.mpf(b), mp.mpf(z)
+    if b > 0 and z >= (a + 1) / (a + b + 2):
+        return mp.beta(a, b) - mp.betainc(b, a, 0, 1 - z)
+    return mp.betainc(a, b, 0, z)
+
+
 # ============================================================================
 # Large b: the continued fraction (GH-64)
 
@@ -264,7 +279,7 @@ def test_large_b_matches_mpmath(a, b):
     z = np.array([1e-8, *ZS[1:], 1.0])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
     with mp.workdps(40):
-        expect = np.array([float(mp.betainc(a, b, 0, zi)) for zi in z])
+        expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
     np.testing.assert_allclose(got, expect, rtol=1e-12 if b <= 100 else 1e-11)
 
 
@@ -286,7 +301,10 @@ def test_large_b_parameter_derivatives(a, b, z):
     already a 1e-6 relative error, where autodiff is good to 1e-15.
     """
     zz = jnp.asarray(z)
-    refs = (lambda t: mp.betainc(t, b, 0, z), lambda t: mp.betainc(a, t, 0, z))
+    refs = (
+        lambda t: _mp_incomplete_beta(t, b, z),
+        lambda t: _mp_incomplete_beta(a, t, z),
+    )
     for argnum, ref in enumerate(refs):
         with mp.workdps(40):
             expect = float(mp.diff(ref, (a, b)[argnum]))
@@ -357,7 +375,7 @@ def test_large_a_matches_mpmath(a, b):
     z = np.array([1e-6, 0.01, 0.3, 0.7, 0.9, 0.99, 1 - 1e-6])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
     with mp.workdps(40):
-        expect = np.array([float(mp.betainc(a, b, 0, zi)) for zi in z])
+        expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
     np.testing.assert_allclose(got, expect, rtol=1e-12)
 
 
@@ -431,7 +449,7 @@ def test_large_b_small_a(b):
     )
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
     with mp.workdps(40):
-        expect = np.array([float(mp.betainc(a, b, 0, zi)) for zi in z])
+        expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
     np.testing.assert_allclose(got, expect, rtol=1e-12)
 
 
@@ -475,5 +493,5 @@ def test_large_b_float32():
         got = sp.incomplete_beta(2.0, b, z)
         assert got.dtype == jnp.float32
         with mp.workdps(40):
-            expect = np.array([float(mp.betainc(2, b, 0, float(zi))) for zi in z])
+            expect = np.array([float(_mp_incomplete_beta(2, b, float(zi))) for zi in z])
         np.testing.assert_allclose(np.asarray(got, np.float64), expect, rtol=5e-6)
