@@ -325,13 +325,20 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
 
 def _series(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
     """$B(a, b, z)$ by `_small_z` and `_large_z`, switched at $z = 1/2$."""
+    # For b <= 0 the integral diverges at z = 1: a genuine pole, +inf (GH-67).
+    # `_large_z` cannot see it -- at w = 1 - z = 0 its expansion is `inf - inf`
+    # -- so the pole is returned directly, and the series is handed a harmless
+    # z there, so that its `nan` cannot reach a cotangent through the `where`.
+    pole = (z == 1.0) & (b <= 0)
+    z = jnp.where(pole, 0.5, z)
     # Both branches are evaluated, so clamp each one's input to the range where
     # it is well behaved; `where` then discards the unused value.
-    return jnp.where(  # type: ignore[no-any-return]
+    value = jnp.where(
         z <= 0.5,
         _small_z(a, b, jnp.minimum(z, 0.5)),
         _large_z(a, b, jnp.maximum(z, 0.5)),
     )
+    return jnp.where(pole, jnp.inf, value)  # type: ignore[no-any-return]
 
 
 _CF_A_FROM = 8.0
@@ -390,6 +397,14 @@ def _incomplete_beta_impl(
         # An integer `z` would otherwise carry its dtype into the continued
         # fraction's switch point, (a+1)/(a+b+2), and truncate it to zero.
         z = z.astype(jnp.promote_types(z.dtype, float))
+    # Promote `z` to the common type of all three, as any elementwise op would
+    # (GH-66): a float32 `z` with a strong float64 `b` otherwise starts a `scan`
+    # carry in float32 that the first step promotes to float64, which `scan`
+    # rejects. Weak (Python) scalars do not promote, so the common case keeps
+    # `z`'s own dtype and weak type.
+    dtype = jnp.result_type(a, b, z)
+    if dtype != z.dtype:
+        z = z.astype(dtype)
     if branch == _SERIES:
         return _series(a, b, z)
     if branch == _CONTINUED_FRACTION:

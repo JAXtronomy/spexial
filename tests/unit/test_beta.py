@@ -495,3 +495,42 @@ def test_large_b_float32():
         with mp.workdps(40):
             expect = np.array([float(_mp_incomplete_beta(2, b, float(zi))) for zi in z])
         np.testing.assert_allclose(np.asarray(got, np.float64), expect, rtol=5e-6)
+
+
+@pytest.mark.parametrize("b", [1.5, 50.0])
+@pytest.mark.parametrize("wrap", [np.float64, jnp.float64], ids=["numpy", "jax"])
+def test_float32_z_with_strong_float64_b(b, wrap):
+    """REGRESSION (GH-66): float32 ``z`` with a strong float64 ``b``.
+
+    The `scan` carry started in float32 and the first step promoted it to
+    float64, which `scan` rejects with a `TypeError`. ``z`` now promotes to the
+    common type, as in any elementwise op -- on both the series (b = 1.5) and
+    the continued fraction (b = 50).
+    """
+    z = jnp.asarray([0.3, 0.9], jnp.float32)
+    eager = sp.incomplete_beta(2.0, wrap(b), z)
+    jitted = jax.jit(lambda bb: sp.incomplete_beta(2.0, bb, z))(wrap(b))
+    expect = sp.incomplete_beta(2.0, b, jnp.asarray(z, jnp.float64))
+    for got in (eager, jitted):
+        assert got.dtype == jnp.float64
+        np.testing.assert_allclose(np.asarray(got), np.asarray(expect), rtol=1e-14)
+    # A weak (Python) b does not promote.
+    assert sp.incomplete_beta(2.0, b, z).dtype == jnp.float32
+
+
+@pytest.mark.parametrize("b", [-2.5, -1.0, -0.3, 0.0])
+def test_pole_at_z_eq_1_for_non_positive_b(b):
+    """REGRESSION (GH-67): ``B(a, b, 1) = +inf`` for ``b <= 0``, not ``nan``.
+
+    And the series must not leak its ``nan`` there into the gradients of the
+    other points through the `where` that picks the pole.
+    """
+    z = jnp.asarray([0.3, 0.9, 1.0])
+    got = np.asarray(sp.incomplete_beta(2.0, b, z))
+    assert got[-1] == np.inf
+    assert np.all(np.isfinite(got[:-1]))
+    for argnum in (0, 1):
+        jac = np.asarray(
+            jax.jacrev(lambda *ab: sp.incomplete_beta(*ab, z), argnum)(2.0, b)
+        )
+        assert np.all(np.isfinite(jac[:-1])), jac
