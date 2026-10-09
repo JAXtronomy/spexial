@@ -385,3 +385,85 @@ def test_a_eq_1_mixed_partial_at_small_z(z):
     got = jax.grad(jax.grad(lambda bb, zz: sp.incomplete_beta(1.0, bb, zz), 1), 0)
     expect = np.log1p(-z) * np.exp(-np.log1p(-z))
     np.testing.assert_allclose(float(got(0.0, jnp.asarray(z))), expect, rtol=1e-14)
+
+
+def _a_eq_1_ref(b, z, n=0):
+    """``d^n/db^n B(1, b, z)`` at 50 digits, from the closed form itself."""
+    import mpmath as mp  # noqa: PLC0415
+
+    with mp.workdps(50):
+        L = mp.log1p(-mp.mpf(z))
+        f = lambda t: -L if t == 0 else -mp.expm1(t * L) / t
+        return float(f(mp.mpf(b)) if n == 0 else mp.diff(f, mp.mpf(b), n))
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+@pytest.mark.parametrize("n", [2, 3])
+def test_a_eq_1_higher_b_derivatives_across_the_series_band(side, n):
+    """The 2nd and 3rd ``b``-derivatives are right on both sides of the band.
+
+    The direct quotient's derivatives cancel as ``|x| -> 0``; `_EXPRL_BAND` is
+    where they are still accurate (3e-15 / 8e-14 at ``|x| = 1/2``). Narrowed to
+    0.05 they were 2e-12 / 2e-10, which the first derivative alone did not show.
+    """
+    z = 0.9
+    L = np.log1p(-z)
+    d = lambda bb: sp.incomplete_beta(1.0, bb, jnp.asarray(z))
+    for _ in range(n):
+        d = jax.grad(d)
+    for x in (_EXPRL_BAND * (1 - 1e-9), _EXPRL_BAND * (1 + 1e-9)):
+        b = side * x / abs(L)
+        np.testing.assert_allclose(float(d(b)), _a_eq_1_ref(b, z, n), rtol=1e-12)
+
+
+@pytest.mark.parametrize("b", [2.5, 3.0, 4.0])
+def test_a_eq_1_higher_z_derivatives_at_z_eq_1_with_traced_b(b):
+    """Traced and concrete ``b`` agree at ``z = 1`` to the third z-derivative.
+
+    A traced ``b`` writes ``(1-z)^(b-1)`` via ``log(1-z)``, ``-inf`` at z = 1;
+    clamping it differentiated as ``0 * -inf`` and made these ``nan``.
+    """
+    one = jnp.asarray(1.0)
+    d1 = jax.grad(lambda bb, zz: sp.incomplete_beta(1.0, bb, zz), 1)
+    d2 = jax.grad(d1, 1)
+    d3 = jax.grad(d2, 1)
+    for d in (d1, d2, d3):
+        traced, concrete = float(jax.jit(d)(b, one)), float(d(b, one))
+        assert traced == concrete, (b, traced, concrete)
+        assert not np.isnan(traced)
+
+
+@pytest.mark.parametrize("b", [-500.0, -50.0, 50.0])
+def test_a_eq_1_in_the_log1p_band(b):
+    """REGRESSION: XLA's ``log1p`` is ~240 ulp off for ``z`` in (0.3, 0.42].
+
+    The closed form multiplies that by ``|bL|``: 7e-12 at ``b = -500``. `_log1m`
+    switches to ``log(1 - z)`` there, which is exact enough.
+    """
+    z = np.linspace(0.3, 0.42, 25)
+    got = np.asarray(sp.incomplete_beta(1.0, b, jnp.asarray(z)))
+    expect = np.array([_a_eq_1_ref(b, zi) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=1e-13)
+
+
+def test_a_eq_1_infinite_b():
+    """``b = -inf`` diverges for ``z > 0`` (was ``nan``); ``b = +inf`` is 0."""
+    z = jnp.asarray([0.0, 0.3, 1.0])
+    np.testing.assert_array_equal(
+        np.asarray(sp.incomplete_beta(1.0, -np.inf, z)), [0.0, np.inf, np.inf]
+    )
+    np.testing.assert_array_equal(
+        np.asarray(sp.incomplete_beta(1.0, np.inf, z)), [0.0, 0.0, 0.0]
+    )
+
+
+def test_a_eq_1_rejects_an_array_b():
+    """``b`` is a scalar; the closed form must not quietly broadcast it.
+
+    The series path cannot (it raises inside its `scan`), so neither may this,
+    or the behaviour would depend on ``a``. Under pytest the jaxtyping hook
+    rejects it first; without it, the wrapper's own check does. Both are a
+    `TypeError`.
+    """
+    with pytest.raises(TypeError):
+        sp.incomplete_beta(1.0, np.array([0.0, 1.0]), jnp.asarray(0.3))

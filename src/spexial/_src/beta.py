@@ -205,12 +205,24 @@ the default float.
 """
 
 
-def _clamped_log1m(log1mz: AnyArray) -> AnyArray:
-    """``log(1 - z)``, with ``-inf`` (at ``z = 1``) raised to the dtype's minimum.
+_LOG1P_UPTO = 0.3
+"""Below this ``z``, `_log1m` uses ``log1p(-z)``; above it, ``log(1 - z)``.
 
-    Python float, not a NumPy scalar, so the result keeps a weak type.
-    """
-    return jnp.maximum(log1mz, float(jnp.finfo(log1mz.dtype).min))
+XLA's CPU ``log1p`` is off by up to ~240 ulp (2.7e-14) for arguments in
+``(-0.42, -0.3)``, and the closed form multiplies that by ``|b L|``. From
+``z = 0.3`` up, ``1 - z`` is exact to within half an ulp, so ``log`` of it is
+good to 3e-16; below, ``log1p`` is. Either way about 2 ulp.
+"""
+
+
+def _log1m(z: AnyArray) -> AnyArray:
+    """``log(1 - z)`` to about 2 ulp, ``-inf`` at ``z = 1``; see `_LOG1P_UPTO`."""
+    small = z <= _LOG1P_UPTO
+    # Double `where`: each side only ever sees arguments it is accurate and finite
+    # on, so neither puts a non-finite derivative under the other's mask.
+    via_log1p = jnp.log1p(-jnp.where(small, z, 0.0))
+    via_log = jnp.log(1.0 - jnp.where(small, 0.5, z))
+    return jnp.where(small, via_log1p, via_log)  # type: ignore[no-any-return]
 
 
 def _a_eq_1(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
@@ -236,11 +248,17 @@ def _a_eq_1(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     below $x \approx -37$ and so zeroes the mixed derivative
     $\partial_z \partial_b B$.
     """
-    log1mz = jnp.log1p(-jnp.asarray(z))
+    z = jnp.asarray(z)
+    log1mz = _log1m(z)
     # Clamped only where it multiplies `b`: at z = 1 and b = 0, `b * L` would be
     # `0 * -inf = nan`. With the clamp it is 0, the series branch is taken, and
     # the result is `-L * 1 = +inf` -- the true limit -- from the unclamped `L`.
-    x = b * _clamped_log1m(log1mz)
+    # A double `where` rather than `maximum`, whose derivative at the clamp is
+    # `0 * -inf`.
+    inside = z < 1.0
+    x = b * jnp.where(
+        inside, _log1m(jnp.where(inside, z, 0.0)), float(jnp.finfo(log1mz.dtype).min)
+    )
     near = jnp.abs(x) < _EXPRL_BAND
     # `|x| >= 1/2` implies `b != 0`, so these placeholders only keep the
     # unselected branch finite, so that no `0 * inf` reaches a cotangent.
@@ -249,7 +267,11 @@ def _a_eq_1(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     series = _EXPRL_COEFFS[0]
     for c in _EXPRL_COEFFS[1:]:
         series = series * x_near + c
-    return jnp.where(near, -log1mz * series, far)  # type: ignore[no-any-return]
+    out = jnp.where(near, -log1mz * series, far)
+    # b = -inf: x = +inf and `far` is inf / -inf. The integral of (1-t)^(-inf)
+    # diverges for any z > 0; at z = 0 it is empty.
+    infinite_b = jnp.where(z > 0, jnp.where(b > 0, 0.0, jnp.inf), 0.0)
+    return jnp.where(jnp.isinf(b), infinite_b, out)  # type: ignore[no-any-return]
 
 
 @jax.custom_jvp
@@ -273,10 +295,15 @@ def _a_eq_1_jvp(
     if not isinstance(z_dot, SymbolicZero):
         if isinstance(b, jax.core.Tracer):
             # `b` may itself be differentiated, so write the power so that its
-            # `b`-derivative carries `log1p(-z)` rather than `log(1 - z)`, which
-            # loses digits as z -> 0. Clamped so `b = 1, z = 1` is `exp(0) = 1`
-            # rather than `0 * -inf`.
-            integrand = jnp.exp((b - 1.0) * _clamped_log1m(jnp.log1p(-z)))
+            # `b`-derivative carries an accurate `log(1 - z)` (`_log1m`), not
+            # `log` of a rounded `1 - z`, which loses digits as z -> 0. At z = 1
+            # itself `pow` takes over, by a double `where`: the logarithm is
+            # `-inf` there, and any clamp of it differentiates as `0 * -inf`,
+            # making the second and third z-derivatives `nan`.
+            z_arr = jnp.asarray(z)
+            inside = z_arr < 1.0
+            via_log = jnp.exp((b - 1.0) * _log1m(jnp.where(inside, z_arr, 0.0)))
+            integrand = jnp.where(inside, via_log, (1.0 - z_arr) ** (b - 1.0))
         else:
             # A concrete `b` has no derivative to get wrong, and as a constant
             # exponent XLA can simplify `pow` (to a reciprocal at b = 0, a square
@@ -366,7 +393,10 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     the integral is elementary, :math:`(1 - (1-z)^b)/b`, and that closed form
     replaces the series; see `_a_eq_1`. It carries the same exact
     :math:`z`-derivative rule, and its ``b``-derivative is autodiff of the
-    closed form, which is elementary.
+    closed form, which is elementary. A traced ``a`` cannot be inspected and
+    takes the series even at 1, which holds its accuracy only for
+    :math:`\lvert b \rvert \lesssim 10`; keep ``a`` concrete for the closed
+    form's wider domain.
 
     Examples
     --------
@@ -404,6 +434,11 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     # Decided at trace time, so it costs nothing when it does not apply. A traced
     # `a` -- e.g. one being differentiated or `vmap`ped -- takes the series.
     if _is_static_one(a):
+        if np.ndim(b) != 0:
+            # The series path cannot broadcast `b` either (it raises inside its
+            # `scan`); say so here too, rather than answer for some `a` only.
+            msg = f"incomplete_beta: `b` must be a scalar, got shape {np.shape(b)}"
+            raise TypeError(msg)
         return _a_eq_1_core(b, z)
     return _incomplete_beta_core(a, b, z)
 

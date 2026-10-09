@@ -88,3 +88,14 @@ def test_grad_incomplete_beta_parameters(benchmark: BenchmarkFixture) -> None:
     """
     fn = jax.grad(lambda a, b: sp.incomplete_beta(a, b, Z_VECTOR).sum(), argnums=(0, 1))
     benchmark(warm(fn, A, B))
+
+
+@pytest.mark.parametrize(
+    "fn", [sp.incomplete_beta, _incomplete_beta_core], ids=["closed_form", "series"]
+)
+def test_grad_incomplete_beta_a_eq_1_b(
+    benchmark: BenchmarkFixture, fn: Callable
+) -> None:
+    """``d/db`` at a static ``a == 1``: the closed form against the series' autodiff."""
+    grad = jax.grad(lambda b: fn(1.0, b, Z_VECTOR).sum())
+    benchmark(warm(grad, B))
