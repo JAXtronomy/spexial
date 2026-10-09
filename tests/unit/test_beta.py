@@ -300,3 +300,29 @@ def test_vmap_over_b_across_the_switch_has_finite_gradients():
     single = jnp.stack([f(b) for b in bs])
     np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=1e-14)
     assert bool(jnp.all(jnp.isfinite(jax.vmap(jax.grad(f))(bs))))
+
+
+@pytest.mark.parametrize("z", [1e-8, 1e-12])
+@pytest.mark.parametrize("b", [1.5, 20.0])
+def test_mixed_partial_at_small_z(z, b):
+    """REGRESSION (GH-68): ``d/db d/dz B`` to full precision as ``z -> 0``.
+
+    ``d/dz B = z^(a-1) (1-z)^(b-1)``, so ``d/db`` of it is that times
+    ``log(1-z)``. The z-rule's power must carry ``log1p(-z)`` when ``b`` is
+    traced; ``log`` of a rounded ``1 - z`` kept only ~1e-16 / z of it: 5e-9
+    relative at ``z = 1e-8`` and 2e-5 at ``1e-12``. Both the series and the
+    continued-fraction regimes share the rule, hence both ``b``.
+    """
+    a = 2.0
+    got = jax.grad(jax.grad(lambda bb, zz: sp.incomplete_beta(a, bb, zz), 1), 0)
+    expect = z ** (a - 1) * np.log1p(-z) * np.exp((b - 1) * np.log1p(-z))
+    np.testing.assert_allclose(float(got(b, jnp.asarray(z))), expect, rtol=1e-14)
+
+
+def test_z_derivative_with_traced_b_at_z_eq_1():
+    """With ``b`` traced, the z-rule's clamp keeps ``(1-z)^(b-1)`` exact at z = 1."""
+    one = jnp.asarray(1.0)
+    dz = jax.jit(jax.grad(lambda zz, bb: sp.incomplete_beta(2.0, bb, zz)))
+    assert float(dz(one, 1.0)) == 1.0
+    assert float(dz(one, 2.0)) == 0.0
+    assert float(dz(one, 0.5)) == np.inf

@@ -425,7 +425,20 @@ def _incomplete_beta_jvp(
 
     # d/dz B(a, b, z) = z^(a-1) (1-z)^(b-1): the integrand at the endpoint.
     if not isinstance(z_dot, SymbolicZero):
-        tangent_out = tangent_out + z ** (a - 1.0) * (1.0 - z) ** (b - 1.0) * z_dot
+        if isinstance(b, jax.core.Tracer):
+            # `b` may itself be differentiated, so write (1-z)^(b-1) so that its
+            # `b`-derivative carries `log1p(-z)`, not `log(1 - z)` of a rounded
+            # `1 - z`, which keeps only ~1e-16 / z relative precision (GH-68).
+            # Clamped so `b = 1, z = 1` is `exp(0) = 1` rather than `0 * -inf`.
+            log1mz = jnp.log1p(-jnp.asarray(z))
+            log1mz = jnp.maximum(log1mz, float(jnp.finfo(log1mz.dtype).min))
+            one_minus_z_pow = jnp.exp((b - 1.0) * log1mz)
+        else:
+            # A concrete `b` has no derivative to get wrong, and as a constant
+            # exponent XLA can simplify `pow` (to a reciprocal at b = 0, a square
+            # root at b = 3/2), which `exp(... log1p)` would hide from it.
+            one_minus_z_pow = (1.0 - z) ** (b - 1.0)
+        tangent_out = tangent_out + z ** (a - 1.0) * one_minus_z_pow * z_dot
 
     # The a/b tangents are only needed when the parameters are themselves
     # differentiated; there is no cheap closed form, so fall back to autodiff of
