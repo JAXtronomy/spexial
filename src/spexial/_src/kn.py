@@ -213,7 +213,7 @@ def k1e(z: RealArrayLike, /) -> AnyArray:
     # (as does `i1e * k0e`, which is also ~1/2z), and both flushed to zero, so
     # the unmultiplied form returned exactly 0 from there up. Multiplied
     # through, the numerator tends to 1/2 and the denominator to sqrt(z/2pi).
-    k1e = (1.0 - z_safe * i1e(z_safe) * k0e(z_safe)) / (z_safe * i0e(z_safe))
+    scaled = (1.0 - z_safe * i1e(z_safe) * k0e(z_safe)) / (z_safe * i0e(z_safe))
     # Below `tiny` the denominator flushes to zero and the quotient is `inf`,
     # where the true value is `1/z` -- still representable for the factor of
     # about two between `tiny` and `1/max`, which in float32 is the reachable
@@ -234,8 +234,8 @@ def k1e(z: RealArrayLike, /) -> AnyArray:
     # band, so `exp` gives `1/z`; and `nan` for a negative argument, which is
     # out of domain. `-0.0` is not negative and correctly gives `inf`.
     small = z_arr == 0.0
-    k1e = jnp.where(small, jnp.exp(-_log_no_flush(z_arr)), k1e)
-    out = jnp.where(at_inf, 0.0, k1e)
+    scaled = jnp.where(small, jnp.exp(-_log_no_flush(z_arr)), scaled)
+    out = jnp.where(at_inf, 0.0, scaled)
     return _cast_like(out, z)
 
 
