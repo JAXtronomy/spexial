@@ -14,6 +14,7 @@ from pytest_codspeed import BenchmarkFixture
 from benchmarks.utils import warm
 
 import spexial as sp
+from spexial._src.beta import _SERIES, _incomplete_beta_core
 
 Z_SCALAR = jnp.asarray(0.3)
 Z_VECTOR = jnp.linspace(0.001, 0.999, 1_000)
@@ -60,11 +61,11 @@ def test_grad_incomplete_beta_custom_jvp(benchmark: BenchmarkFixture) -> None:
 def test_grad_incomplete_beta_autodiff(benchmark: BenchmarkFixture) -> None:
     """The same gradient, by differentiating the series the rule replaces.
 
-    `jax.custom_jvp` exposes the undecorated implementation as ``.fun``, so
+    The inner `jax.custom_jvp` exposes the undecorated implementation as ``.fun``, so
     this is the honest alternative rather than a proxy for it. The gap between
     this and the benchmark above is what the custom rule buys.
     """
-    fn = jax.grad(lambda z: sp.incomplete_beta.fun(A, B, z).sum())
+    fn = jax.grad(lambda z: _incomplete_beta_core.fun(A, B, z, _SERIES).sum())
     benchmark(warm(fn, Z_VECTOR))
 
 
@@ -77,3 +78,12 @@ def test_grad_incomplete_beta_parameters(benchmark: BenchmarkFixture) -> None:
     """
     fn = jax.grad(lambda a, b: sp.incomplete_beta(a, b, Z_VECTOR).sum(), argnums=(0, 1))
     benchmark(warm(fn, A, B))
+
+
+@pytest.mark.parametrize("b", [50.0, 1e3])
+def test_incomplete_beta_large_b(benchmark: BenchmarkFixture, b: float) -> None:
+    """Above ``b = 10`` the continued fraction replaces the series (GH-64).
+
+    About 3x the series' cost per point, against a series that is wrong there.
+    """
+    benchmark(warm(lambda z: sp.incomplete_beta(A, b, z), Z_VECTOR))
