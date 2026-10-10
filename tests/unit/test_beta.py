@@ -246,8 +246,16 @@ def test_a_eq_1_closed_form_matches_the_series(b):
 
 
 def test_a_eq_1_traced_takes_the_series():
-    """A traced ``a`` cannot be inspected, so it takes the series -- same answer."""
+    """A traced ``a`` cannot be inspected, so it takes the series -- same answer.
+
+    Checked on the traced program itself, not only the values: the series is a
+    `scan`, the closed form has none.
+    """
     z = jnp.asarray(ZS)
+    assert "scan" in str(jax.make_jaxpr(lambda a: sp.incomplete_beta(a, -1.0, z))(1.0))
+    assert "scan" not in str(
+        jax.make_jaxpr(lambda zz: sp.incomplete_beta(1.0, -1.0, zz))(z)
+    )
     traced = jax.jit(lambda a: sp.incomplete_beta(a, -1.0, z))(1.0)
     static = sp.incomplete_beta(1.0, -1.0, z)
     np.testing.assert_allclose(np.asarray(traced), np.asarray(static), rtol=1e-11)
@@ -355,6 +363,7 @@ def test_a_eq_1_keeps_the_input_dtype(z):
         (jnp.asarray(1.0), True),
         (np.array([1.0]), False),
         (1 + 1e-12, False),
+        (1 + 0j, False),
     ],
 )
 def test_static_one_dispatch(a, expect):
@@ -467,3 +476,94 @@ def test_a_eq_1_rejects_an_array_b():
     """
     with pytest.raises(TypeError):
         sp.incomplete_beta(1.0, np.array([0.0, 1.0]), jnp.asarray(0.3))
+
+
+@pytest.mark.parametrize(
+    ("b", "z"),
+    [(-800.0, 0.5883163234964616), (-800.0, 0.5961), (-1e4, 0.0685), (-1e4, 0.0697)],
+)
+def test_a_eq_1_no_spurious_overflow_for_negative_b(b, z):
+    """``(1 - e^x) / b`` overflowed to ``inf`` at ``x > 709.8`` for ``b < 0``.
+
+    The value, ~``e^x / |b|``, stays finite up to ``x < 709.8 + log|b|``: at
+    ``b = -800`` the whole band ``z`` in (0.5883, 0.5961) came back ``inf``.
+    """
+    got = float(sp.incomplete_beta(1.0, b, jnp.asarray(z)))
+    np.testing.assert_allclose(got, _a_eq_1_ref(b, z), rtol=1e-12)
+
+
+def test_a_eq_1_no_spurious_overflow_float32():
+    """The same overflow in float32, at ``x > 88.7``: ``b = -50`` near ``z = 0.83``."""
+    z = np.linspace(0.825, 0.835, 9).astype(np.float32)
+    got = np.asarray(sp.incomplete_beta(1.0, -50.0, jnp.asarray(z)), np.float64)
+    expect = np.array([_a_eq_1_ref(-50.0, float(zi)) for zi in z])
+    assert np.all(np.isfinite(got[np.isfinite(expect) & (expect < 3e38)]))
+    finite = np.isfinite(got)
+    np.testing.assert_allclose(got[finite], expect[finite], rtol=1e-5)
+
+
+@pytest.mark.parametrize("b", [2.0, -2.0, 0.5])
+def test_a_eq_1_outside_the_domain_is_nan(b):
+    """``z > 1`` is outside ``[0, 1]``: ``nan``, not a plausible number.
+
+    The z = 1 clamp once applied to every ``z >= 1`` and returned ``1/b``.
+    """
+    got = np.asarray(sp.incomplete_beta(1.0, b, jnp.asarray([1.5, 2.0])))
+    assert np.all(np.isnan(got)), got
+
+
+@pytest.mark.parametrize("b", [2.5, 4.0])
+def test_a_eq_1_mixed_partial_at_z_eq_1_either_order(b):
+    """``d/dz d/db`` and ``d/db d/dz`` agree at ``z = 1`` (both 0 for ``b > 1``).
+
+    The series branch multiplied ``-inf`` (``log 0``) into its masked value, and
+    one order of differentiation came out ``nan``. For ``b < 1`` the mixed
+    partial is genuinely infinite there, and no order is asserted.
+    """
+    one = jnp.asarray(1.0)
+    f = lambda bb, zz: sp.incomplete_beta(1.0, bb, zz)
+    bz = float(jax.grad(jax.grad(f, 0), 1)(b, one))
+    zb = float(jax.grad(jax.grad(f, 1), 0)(b, one))
+    assert bz == zb == 0.0, (bz, zb)
+
+
+def test_a_eq_1_rejects_an_array_b_without_the_typecheck_hook():
+    """The wrapper's own scalar check, which the pytest jaxtyping hook preempts.
+
+    Run in a fresh interpreter with runtime type checking off -- the default for
+    users -- so it is the wrapper, not the hook, that raises.
+    """
+    import os  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    code = (
+        "import numpy as np, spexial as sp\n"
+        "try:\n"
+        "    sp.incomplete_beta(1.0, np.array([0.0, 1.0]), 0.3)\n"
+        "except TypeError as e:\n"
+        "    print(e)\n"
+    )
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k != "SPEXIAL_ENABLE_RUNTIME_TYPECHECKING"
+    }
+    out = subprocess.run(  # noqa: S603 -- a fixed snippet, run by this interpreter
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert "must be a scalar" in out.stdout, out.stdout + out.stderr
+
+
+def test_a_eq_1_integer_z():
+    """An integer ``z`` promotes to float on the closed-form path too.
+
+    ``B(1, 2, z) = (1 - (1-z)^2) / 2``: 0 at z = 0, 1/2 at z = 1.
+    """
+    got = sp.incomplete_beta(1, 2, jnp.asarray([0, 1]))
+    assert jnp.issubdtype(got.dtype, jnp.floating)
+    np.testing.assert_allclose(np.asarray(got), [0.0, 0.5], rtol=1e-15)

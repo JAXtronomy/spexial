@@ -211,7 +211,9 @@ _LOG1P_UPTO = 0.3
 XLA's CPU ``log1p`` is off by up to ~240 ulp (2.7e-14) for arguments in
 ``(-0.42, -0.3)``, and the closed form multiplies that by ``|b L|``. From
 ``z = 0.3`` up, ``1 - z`` is exact to within half an ulp, so ``log`` of it is
-good to 3e-16; below, ``log1p`` is. Either way about 2 ulp.
+good to 3e-16; below, ``log1p`` is. Either way about 2 ulp. (In float32 the
+switch buys nothing -- there ``log1p`` is the better of the two, 1.6 against
+2.6 ulp on that band -- but costs nothing either.)
 """
 
 
@@ -249,25 +251,37 @@ def _a_eq_1(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     $\partial_z \partial_b B$.
     """
     z = jnp.asarray(z)
-    log1mz = _log1m(z)
-    # Clamped only where it multiplies `b`: at z = 1 and b = 0, `b * L` would be
-    # `0 * -inf = nan`. With the clamp it is 0, the series branch is taken, and
-    # the result is `-L * 1 = +inf` -- the true limit -- from the unclamped `L`.
-    # A double `where` rather than `maximum`, whose derivative at the clamp is
-    # `0 * -inf`.
-    inside = z < 1.0
-    x = b * jnp.where(
-        inside, _log1m(jnp.where(inside, z, 0.0)), float(jnp.finfo(log1mz.dtype).min)
-    )
+    # `L` is clamped at z = 1 only, to the dtype's most negative finite value --
+    # not for z > 1, where `log(1 - z)` is `nan` and must stay so -- and by a
+    # double `where`, so that neither `0 * -inf` (at b = 0) nor the derivative
+    # of a clamp at `-inf` reaches a value or a cotangent.
+    at_1 = z == 1.0
+    L = jnp.where(at_1, float(jnp.finfo(z.dtype).min), _log1m(jnp.where(at_1, 0.0, z)))
+    x = b * L
     near = jnp.abs(x) < _EXPRL_BAND
     # `|x| >= 1/2` implies `b != 0`, so these placeholders only keep the
     # unselected branch finite, so that no `0 * inf` reaches a cotangent.
-    far = (1.0 - jnp.exp(jnp.where(near, 0.0, x))) / jnp.where(near, 1.0, b)
+    x_far = jnp.where(near, 0.0, x)
+    b_far = jnp.where(near, 1.0, b)
+    # Far from x = 0 the closed form is (1 - e^x) / b. For b < 0, x > 0 and e^x
+    # overflows at x ~ 709.8 (88.7 in float32) while the value, ~e^x / |b|, need
+    # not: it is written e^(x - log|b|) - 1/|b| there, with nothing to cancel
+    # since x >= 1/2.
+    negative = b < 0
+    abs_b = jnp.abs(b_far)
+    far_negative = jnp.exp(x_far - jnp.log(abs_b)) - 1.0 / abs_b
+    far_positive = (1.0 - jnp.exp(jnp.where(negative, 0.0, x_far))) / b_far
+    far = jnp.where(negative, far_negative, far_positive)
     x_near = jnp.where(near, x, 0.0)
     series = _EXPRL_COEFFS[0]
     for c in _EXPRL_COEFFS[1:]:
         series = series * x_near + c
-    out = jnp.where(near, -log1mz * series, far)
+    # At z = 1 the series branch is taken only for |b| below ~1e-308, where the
+    # value is +inf either way (a pole for b <= 0; 1/b overflows for b > 0). It
+    # is returned directly rather than as `-L * series` with an infinite `L`,
+    # which would multiply a masked branch by `-inf` in the mixed derivatives.
+    near_value = jnp.where(at_1, jnp.inf, -L * series)
+    out = jnp.where(near, near_value, far)
     # b = -inf: x = +inf and `far` is inf / -inf. The integral of (1-t)^(-inf)
     # diverges for any z > 0; at z = 0 it is empty.
     infinite_b = jnp.where(z > 0, jnp.where(b > 0, 0.0, jnp.inf), 0.0)
@@ -301,7 +315,7 @@ def _a_eq_1_jvp(
             # `-inf` there, and any clamp of it differentiates as `0 * -inf`,
             # making the second and third z-derivatives `nan`.
             z_arr = jnp.asarray(z)
-            inside = z_arr < 1.0
+            inside = z_arr != 1.0
             via_log = jnp.exp((b - 1.0) * _log1m(jnp.where(inside, z_arr, 0.0)))
             integrand = jnp.where(inside, via_log, (1.0 - z_arr) ** (b - 1.0))
         else:
@@ -386,12 +400,15 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     :math:`z`-derivative is supplied by a `jax.custom_jvp` and is exact and
     O(1) -- by Leibniz it is just the integrand at the endpoint,
     :math:`z^{a-1}(1-z)^{b-1}` -- rather than differentiating through 64 terms.
-    It is a `custom_jvp` rather than a `custom_vjp` so that `jax.hessian`'s
-    ``jacfwd(jacrev(...))`` still composes.
+    The derivative rules are `jax.custom_jvp`, not `jax.custom_vjp`, so that
+    `jax.hessian`'s ``jacfwd(jacrev(...))`` still composes. They sit on inner
+    cores: `incomplete_beta` itself is a plain function that dispatches between
+    them, so it has no ``.fun`` or ``.defjvp`` of its own.
 
-    When ``a`` is a concrete 1 (a Python or NumPy scalar, not a traced value)
-    the integral is elementary, :math:`(1 - (1-z)^b)/b`, and that closed form
-    replaces the series; see `_a_eq_1`. It carries the same exact
+    When ``a`` is a concrete 1 (a Python or NumPy scalar, or a concrete 0-d
+    array; not a traced value) the integral is elementary,
+    :math:`(1 - (1-z)^b)/b`, and that closed form replaces the series; see
+    `_a_eq_1`. It carries the same exact
     :math:`z`-derivative rule, and its ``b``-derivative is autodiff of the
     closed form, which is elementary. A traced ``a`` cannot be inspected and
     takes the series even at 1, which holds its accuracy only for
@@ -439,6 +456,11 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
             # `scan`); say so here too, rather than answer for some `a` only.
             msg = f"incomplete_beta: `b` must be a scalar, got shape {np.shape(b)}"
             raise TypeError(msg)
+        # An integer `z` promotes to float, as on the series path; against `b`
+        # the closed form's own arithmetic promotes it as any elementwise op.
+        z = jnp.asarray(z)
+        if not jnp.issubdtype(z.dtype, jnp.inexact):
+            z = z.astype(jnp.promote_types(z.dtype, float))
         return _a_eq_1_core(b, z)
     return _incomplete_beta_core(a, b, z)
 
