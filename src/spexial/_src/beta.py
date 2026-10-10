@@ -41,9 +41,11 @@ was written for the Zhao (1996) family of density profiles (Eq. 43).
 __all__ = ["incomplete_beta"]
 
 import functools as ft
+import math
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.custom_derivatives import SymbolicZero
 
 from .custom_types import AnyArray, AnyArrayLike, ScalarLike
@@ -186,6 +188,162 @@ def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     return _small_z(a, b, jnp.full_like(w, 0.5)) + total  # type: ignore[no-any-return]
 
 
+_EXPRL_BAND = 0.5
+"""Below this ``|x|``, `_a_eq_1` sums ``expm1(x) / x`` as a series.
+
+Above it the direct quotient is accurate to working precision in value and in
+its first three derivatives; below it, those derivatives cancel.
+"""
+
+_EXPRL_COEFFS = tuple(1.0 / math.factorial(k + 1) for k in reversed(range(18)))
+"""Taylor coefficients of ``expm1(x) / x = sum_k x^k / (k+1)!``, highest first.
+
+At ``|x| < 1/2`` the first omitted term is ``0.5^18 / 19! ~ 3e-23``, far below
+float64 resolution. Python floats, not an array, so that Horner's rule in
+`_a_eq_1` keeps the input's dtype and weak type rather than promoting both to
+the default float.
+"""
+
+
+_LOG1P_UPTO = 0.3
+"""Below this ``z``, `_log1m` uses ``log1p(-z)``; above it, ``log(1 - z)``.
+
+XLA's CPU ``log1p`` is off by up to ~240 ulp (2.7e-14) for arguments in
+``(-0.42, -0.3)``, and the closed form multiplies that by ``|b L|``. From
+``z = 0.3`` up, ``1 - z`` is exact to within half an ulp, so ``log`` of it is
+good to 3e-16; below, ``log1p`` is. Either way about 2 ulp. (In float32 the
+switch buys nothing -- there ``log1p`` is the better of the two, 1.6 against
+2.6 ulp on that band -- but costs nothing either.)
+"""
+
+
+def _log1m(z: AnyArray) -> AnyArray:
+    """``log(1 - z)`` to about 2 ulp, ``-inf`` at ``z = 1``; see `_LOG1P_UPTO`."""
+    small = z <= _LOG1P_UPTO
+    # Double `where`: each side only ever sees arguments it is accurate and finite
+    # on, so neither puts a non-finite derivative under the other's mask.
+    via_log1p = jnp.log1p(-jnp.where(small, z, 0.0))
+    via_log = jnp.log(1.0 - jnp.where(small, 0.5, z))
+    return jnp.where(small, via_log1p, via_log)  # type: ignore[no-any-return]
+
+
+def _a_eq_1(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+    r"""$B(1, b, z)$, in closed form.
+
+    .. math::
+
+        B(1, b, z) = \int_0^z (1-t)^{b-1}\,\mathrm{d}t
+                   = \frac{1 - (1-z)^b}{b}
+                   = \frac{1 - e^{x}}{b}
+                   = -L\,\frac{\operatorname{expm1}(x)}{x},
+        \qquad L = \ln(1-z),\ x = bL
+
+    The removable singularity at $b = 0$ (where it is $-\ln(1-z)$) is handled
+    by evaluating ``expm1(x) / x`` as its Taylor series near $x = 0$, by
+    Horner. That changes the *formula* there rather than substituting a value,
+    so every derivative in $b$ is right at $b = 0$ too, not just the value.
+    Away from it, ``(1 - exp(x)) / b`` divides by $b$ rather than $x$, so that
+    at $z = 1$ -- where $L = -\infty$ -- it is exactly $1/b$ for $b > 0$ and
+    $+\infty$ for $b < 0$, instead of $\infty \cdot 0$. It is ``exp``, not
+    ``expm1``, there: with $\lvert x \rvert \ge 1/2$ nothing cancels, and JAX
+    differentiates ``expm1(x)`` as ``expm1(x) + 1``, which rounds $e^x$ to zero
+    below $x \approx -37$ and so zeroes the mixed derivative
+    $\partial_z \partial_b B$.
+    """
+    z = jnp.asarray(z)
+    # `L` is clamped at z = 1 only, to the dtype's most negative finite value --
+    # not for z > 1, where `log(1 - z)` is `nan` and must stay so -- and by a
+    # double `where`, so that neither `0 * -inf` (at b = 0) nor the derivative
+    # of a clamp at `-inf` reaches a value or a cotangent.
+    at_1 = z == 1.0
+    L = jnp.where(at_1, float(jnp.finfo(z.dtype).min), _log1m(jnp.where(at_1, 0.0, z)))
+    x = b * L
+    near = jnp.abs(x) < _EXPRL_BAND
+    # `|x| >= 1/2` implies `b != 0`, so these placeholders only keep the
+    # unselected branch finite, so that no `0 * inf` reaches a cotangent.
+    x_far = jnp.where(near, 0.0, x)
+    b_far = jnp.where(near, 1.0, b)
+    # Far from x = 0 the closed form is (1 - e^x) / b. For b < 0, x > 0 and e^x
+    # overflows at x ~ 709.8 (88.7 in float32) while the value, ~e^x / |b|, need
+    # not: it is written e^(x - log|b|) - 1/|b| there, with nothing to cancel
+    # since x >= 1/2.
+    negative = b < 0
+    abs_b = jnp.abs(b_far)
+    far_negative = jnp.exp(x_far - jnp.log(abs_b)) - 1.0 / abs_b
+    far_positive = (1.0 - jnp.exp(jnp.where(negative, 0.0, x_far))) / b_far
+    far = jnp.where(negative, far_negative, far_positive)
+    x_near = jnp.where(near, x, 0.0)
+    series = _EXPRL_COEFFS[0]
+    for c in _EXPRL_COEFFS[1:]:
+        series = series * x_near + c
+    # At z = 1 the series branch is taken only for |b| below ~1e-308, where the
+    # value is +inf either way (a pole for b <= 0; 1/b overflows for b > 0). It
+    # is returned directly rather than as `-L * series` with an infinite `L`,
+    # which would multiply a masked branch by `-inf` in the mixed derivatives.
+    near_value = jnp.where(at_1, jnp.inf, -L * series)
+    out = jnp.where(near, near_value, far)
+    # b = -inf: x = +inf and `far` is inf / -inf. The integral of (1-t)^(-inf)
+    # diverges for any z > 0; at z = 0 it is empty.
+    infinite_b = jnp.where(z > 0, jnp.where(b > 0, 0.0, jnp.inf), 0.0)
+    return jnp.where(jnp.isinf(b), infinite_b, out)  # type: ignore[no-any-return]
+
+
+@jax.custom_jvp
+def _a_eq_1_core(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+    """`_a_eq_1`, with the same exact O(1) `z`-derivative as the series path."""
+    return _a_eq_1(b, z)
+
+
+@ft.partial(_a_eq_1_core.defjvp, symbolic_zeros=True)
+def _a_eq_1_jvp(
+    primals: tuple[ScalarLike, AnyArray],
+    tangents: tuple[ScalarLike | SymbolicZero, AnyArray | SymbolicZero],
+) -> tuple[AnyArray, AnyArray]:
+    b, z = primals
+    b_dot, z_dot = tangents
+
+    primal_out = _a_eq_1(b, z)
+    tangent_out = jnp.zeros_like(primal_out)
+
+    # The integrand at the endpoint, as for the series -- here (1-z)^(b-1).
+    if not isinstance(z_dot, SymbolicZero):
+        if isinstance(b, jax.core.Tracer):
+            # `b` may itself be differentiated, so write the power so that its
+            # `b`-derivative carries an accurate `log(1 - z)` (`_log1m`), not
+            # `log` of a rounded `1 - z`, which loses digits as z -> 0. At z = 1
+            # itself `pow` takes over, by a double `where`: the logarithm is
+            # `-inf` there, and any clamp of it differentiates as `0 * -inf`,
+            # making the second and third z-derivatives `nan`.
+            z_arr = jnp.asarray(z)
+            inside = z_arr != 1.0
+            via_log = jnp.exp((b - 1.0) * _log1m(jnp.where(inside, z_arr, 0.0)))
+            integrand = jnp.where(inside, via_log, (1.0 - z_arr) ** (b - 1.0))
+        else:
+            # A concrete `b` has no derivative to get wrong, and as a constant
+            # exponent XLA can simplify `pow` (to a reciprocal at b = 0, a square
+            # root at b = 3/2), which `exp(... log1p)` would hide from it.
+            integrand = (1.0 - z) ** (b - 1.0)
+        tangent_out = tangent_out + integrand * z_dot
+
+    # Elementary, so autodiff of the closed form is cheap and exact; the series
+    # near b = 0 keeps every order right at the removable singularity.
+    if not isinstance(b_dot, SymbolicZero):
+        _, b_tangent = jax.jvp(lambda bb: _a_eq_1(bb, z), (b,), (b_dot,))
+        tangent_out = tangent_out + b_tangent
+
+    return primal_out, tangent_out
+
+
+def _is_static_one(a: object) -> bool:
+    """Whether ``a`` is a concrete scalar equal to 1, decidable at trace time."""
+    return (
+        not isinstance(a, jax.core.Tracer)
+        and np.ndim(a) == 0
+        and np.isrealobj(a)
+        and bool(np.equal(a, 1))
+    )
+
+
 def _incomplete_beta_impl(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     r"""$B(a, b, z)$ for $a > 0$, any real $b$, and $z \in [0, 1]$."""
     z = jnp.asarray(z)
@@ -198,7 +356,6 @@ def _incomplete_beta_impl(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyA
     )
 
 
-@jax.custom_jvp
 def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     r"""Unregularized incomplete beta function :math:`B(a, b, z)`.
 
@@ -243,8 +400,20 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     :math:`z`-derivative is supplied by a `jax.custom_jvp` and is exact and
     O(1) -- by Leibniz it is just the integrand at the endpoint,
     :math:`z^{a-1}(1-z)^{b-1}` -- rather than differentiating through 64 terms.
-    It is a `custom_jvp` rather than a `custom_vjp` so that `jax.hessian`'s
-    ``jacfwd(jacrev(...))`` still composes.
+    The derivative rules are `jax.custom_jvp`, not `jax.custom_vjp`, so that
+    `jax.hessian`'s ``jacfwd(jacrev(...))`` still composes. They sit on inner
+    cores: `incomplete_beta` itself is a plain function that dispatches between
+    them, so it has no ``.fun`` or ``.defjvp`` of its own.
+
+    When ``a`` is a concrete 1 (a Python or NumPy scalar, or a concrete 0-d
+    array; not a traced value) the integral is elementary,
+    :math:`(1 - (1-z)^b)/b`, and that closed form replaces the series; see
+    `_a_eq_1`. It carries the same exact
+    :math:`z`-derivative rule, and its ``b``-derivative is autodiff of the
+    closed form, which is elementary. A traced ``a`` cannot be inspected and
+    takes the series even at 1, which holds its accuracy only for
+    :math:`\lvert b \rvert \lesssim 10`; keep ``a`` concrete for the closed
+    form's wider domain.
 
     Examples
     --------
@@ -272,11 +441,37 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     >>> bool(jnp.isnan(jsp.beta(2.0, 0.0) * jsp.betainc(2.0, 0.0, 0.5)))
     True
 
+    With ``a`` a literal 1 the integral is elementary, and that closed form is
+    used instead of the series:
+
+    >>> round(float(sp.incomplete_beta(1.0, 0.0, jnp.asarray(0.5))), 8)
+    0.69314718
+
     """
+    # Decided at trace time, so it costs nothing when it does not apply. A traced
+    # `a` -- e.g. one being differentiated or `vmap`ped -- takes the series.
+    if _is_static_one(a):
+        if np.ndim(b) != 0:
+            # The series path cannot broadcast `b` either (it raises inside its
+            # `scan`); say so here too, rather than answer for some `a` only.
+            msg = f"incomplete_beta: `b` must be a scalar, got shape {np.shape(b)}"
+            raise TypeError(msg)
+        # An integer `z` promotes to float, as on the series path; against `b`
+        # the closed form's own arithmetic promotes it as any elementwise op.
+        z = jnp.asarray(z)
+        if not jnp.issubdtype(z.dtype, jnp.inexact):
+            z = z.astype(jnp.promote_types(z.dtype, float))
+        return _a_eq_1_core(b, z)
+    return _incomplete_beta_core(a, b, z)
+
+
+@jax.custom_jvp
+def _incomplete_beta_core(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+    """`incomplete_beta` by the series, with an exact O(1) `z`-derivative rule."""
     return _incomplete_beta_impl(a, b, z)
 
 
-@ft.partial(incomplete_beta.defjvp, symbolic_zeros=True)
+@ft.partial(_incomplete_beta_core.defjvp, symbolic_zeros=True)
 def _incomplete_beta_jvp(
     primals: tuple[ScalarLike, ScalarLike, AnyArray],
     tangents: tuple[
