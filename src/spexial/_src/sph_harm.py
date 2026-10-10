@@ -64,6 +64,9 @@ smooth on the axis.
 
 """
 
+# The package re-exports these names, so its own `__all__` necessarily repeats
+# this run of them; pylint's similarity check would otherwise flag the copy.
+# pylint: disable=duplicate-code
 __all__ = [
     "sph_harm_y",
     "sph_harm_y_cart",
@@ -71,6 +74,7 @@ __all__ = [
     "sph_harm_y_cart_all_terms",
     "sph_legendre_p",
 ]
+# pylint: enable=duplicate-code
 
 import math
 from functools import partial

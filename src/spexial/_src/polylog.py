@@ -212,7 +212,7 @@ def _li_core(n: int, z: AnyArrayLike) -> AnyArray:
         # collided with the caller's own axis, and a bare `jnp.sum` would have
         # collapsed that axis along with the terms.
         leading = jnp.ones((*jnp.shape(log_z), 1), dtype=log_z.dtype)
-        powers = jnp.concatenate(
+        powers = jnp.concat(
             (leading, log_z[..., None] ** jnp.arange(1, _N_TERMS)), axis=-1
         )
         zeta_series = jnp.sum(
