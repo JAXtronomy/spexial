@@ -90,7 +90,7 @@ floats, so Horner's rule keeps the argument's dtype and weak type.
 """
 
 
-def _expm1_over(y: AnyArray) -> AnyArray:
+def _expm1_over(y: AnyArray, /) -> AnyArray:
     """``expm1(y) / y``, 1 at ``y = 0``, with exact derivatives of every order there.
 
     By its Taylor series for ``|y| < 1/2`` (a polynomial, so autodiff is exact
@@ -105,7 +105,7 @@ def _expm1_over(y: AnyArray) -> AnyArray:
     return jnp.where(small, series, jnp.expm1(y_large) / y_large)  # type: ignore[no-any-return]
 
 
-def _small_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+def _small_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     r"""$B(a, b, z)$ for $z \leq 1/2$, by the defining Taylor series.
 
     Expanding $(1-t)^{b-1}$ binomially and integrating term by term,
@@ -127,7 +127,7 @@ def _small_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     """
 
     def step(
-        carry: tuple[AnyArray, AnyArray, ScalarLike], k: ScalarLike
+        carry: tuple[AnyArray, AnyArray, ScalarLike], k: ScalarLike, /
     ) -> tuple[tuple[AnyArray, AnyArray, ScalarLike], None]:
         total, z_pow, coeff = carry  # coeff = (1-b)_k / k!
         total = total + coeff / (a + k) * z_pow
@@ -138,7 +138,7 @@ def _small_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     return z**a * total  # type: ignore[no-any-return]
 
 
-def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     r"""$B(a, b, z)$ for $z > 1/2$, by reflecting about $t = 1/2$.
 
     Substituting $t = 1-u$ and splitting the range at $u = 1/2$,
@@ -179,7 +179,7 @@ def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
 
 
 def _expand_from(
-    a: ScalarLike, b: ScalarLike, w: AnyArray, w0: AnyArrayLike
+    a: ScalarLike, b: ScalarLike, w: AnyArray, w0: AnyArrayLike, /
 ) -> AnyArray:
     r"""$\int_w^{w_0} u^{b-1}(1-u)^{a-1}\,du$, expanding $(1-u)^{a-1}$ binomially.
 
@@ -241,6 +241,7 @@ def _expand_from(
     def step(
         carry: tuple[AnyArray, AnyArray, AnyArray, ScalarLike, ScalarLike, ScalarLike],
         m: ScalarLike,
+        /,
     ) -> tuple[
         tuple[AnyArray, AnyArray, AnyArray, ScalarLike, ScalarLike, ScalarLike], None
     ]:
@@ -316,7 +317,7 @@ rounding, growing like :math:`b\,\epsilon`: worst over
 
 
 def _continued_fraction(
-    a: AnyArrayLike, b: AnyArrayLike, x: AnyArray, steps: int | None = None
+    a: AnyArrayLike, b: AnyArrayLike, x: AnyArray, /, steps: int | None = None
 ) -> AnyArray:
     r"""Evaluate the DLMF 8.17.22 continued fraction by the modified Lentz method.
 
@@ -339,7 +340,7 @@ def _continued_fraction(
     guard = lambda v: jnp.where(jnp.abs(v) < tiny, tiny, v)  # noqa: E731
 
     def step(
-        carry: tuple[AnyArray, AnyArray, AnyArray], m: ScalarLike
+        carry: tuple[AnyArray, AnyArray, AnyArray], m: ScalarLike, /
     ) -> tuple[tuple[AnyArray, AnyArray, AnyArray], None]:
         c, d, h = carry
         even = m * (b - m) * x / ((a + 2.0 * m - 1.0) * (a + 2.0 * m))
@@ -361,7 +362,7 @@ def _continued_fraction(
     return h  # type: ignore[no-any-return]
 
 
-def _complete_beta(a: ScalarLike, b: ScalarLike) -> AnyArray:
+def _complete_beta(a: ScalarLike, b: ScalarLike, /) -> AnyArray:
     r"""$\log B(a, b)$ for $a, b > 0$, as the two fractions at the switch point.
 
     :math:`B(a, b) = B(a, b, x_0) + B(b, a, 1 - x_0)`, two positive terms, so no
@@ -384,7 +385,7 @@ def _complete_beta(a: ScalarLike, b: ScalarLike) -> AnyArray:
     return log_front + jnp.log(h[0] / a + h[1] / b)  # type: ignore[no-any-return]
 
 
-def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
+def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     r"""$B(a, b, z)$ for $b > 0$, by the continued fraction and reflection.
 
     Below the switch point :math:`x_0 = (a+1)/(a+b+2)` the fraction converges
@@ -428,7 +429,7 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
     return jnp.where(1.0 - x0 == 1.0, jnp.nan, out)  # type: ignore[no-any-return]
 
 
-def _series(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
+def _series(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     """$B(a, b, z)$ by `_small_z` and `_large_z`, switched at $z = 1/2$."""
     # For b <= 0 the integral diverges at z = 1: a genuine pole, +inf (GH-67).
     # `_large_z` cannot see it -- at w = 1 - z = 0 its expansion is `inf - inf`
@@ -471,7 +472,7 @@ needs no reflection, takes over.
 """
 
 
-def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
+def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     r"""$B(a, b, z)$ for large $a$ and $b < $ `_CF_A_B_MIN`, including $b \le 0$.
 
     Split at :math:`s = a/(a+2)`. Below it, the continued fraction directly:
@@ -545,7 +546,7 @@ and 256 change nothing.
 """
 
 
-def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
+def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     r"""$B(a, b, z)$ for very negative $b$, by the continued fraction directly.
 
     No reflection -- it would need :math:`B(a, b)`, which diverges for
@@ -577,7 +578,7 @@ _SERIES, _CONTINUED_FRACTION, _LARGE_A, _NEGATIVE_B, _EITHER = 0, 1, 2, 3, 4
 """
 
 
-def _branch_index(a: ScalarLike, b: ScalarLike) -> ScalarLike:
+def _branch_index(a: ScalarLike, b: ScalarLike, /) -> ScalarLike:
     """Return the branch index (`_SERIES`, `_LARGE_A`, ...) for ``a`` and ``b``."""
     large_a = jnp.where(b >= _CF_A_B_MIN, _CONTINUED_FRACTION, _LARGE_A)
     small_a = jnp.where(b < _NEG_B_FROM, _NEGATIVE_B, _SERIES)
@@ -586,7 +587,7 @@ def _branch_index(a: ScalarLike, b: ScalarLike) -> ScalarLike:
     )
 
 
-def _branch(a: ScalarLike, b: ScalarLike) -> int:
+def _branch(a: ScalarLike, b: ScalarLike, /) -> int:
     """Pick the static branch for concrete ``a`` and ``b``, else `_EITHER`.
 
     Decided in the public wrapper, before `jax.custom_jvp` lifts every argument
@@ -605,7 +606,7 @@ def _branch(a: ScalarLike, b: ScalarLike) -> int:
 
 
 def _incomplete_beta_impl(
-    a: ScalarLike, b: ScalarLike, z: AnyArrayLike, branch: int
+    a: ScalarLike, b: ScalarLike, z: AnyArrayLike, branch: int, /
 ) -> AnyArray:
     r"""$B(a, b, z)$ for $a > 0$, any real $b$, and $z \in [0, 1]$."""
     z = jnp.asarray(z)
@@ -649,7 +650,7 @@ def _incomplete_beta_impl(
         (1.0, 2.0 * _NEG_B_FROM),  # negative b
     )
 
-    def run(k: int) -> Callable[[], AnyArray]:
+    def run(k: int, /) -> Callable[[], AnyArray]:
         def go() -> AnyArray:
             mine = index == k
             ak = jnp.where(mine, a, safe[k][0])
@@ -750,7 +751,7 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
 
 
 def _promote(
-    a: ScalarLike, b: ScalarLike, z: AnyArrayLike
+    a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /
 ) -> tuple[ScalarLike, ScalarLike, AnyArray]:
     """Make ``a``, ``b`` and ``z`` floating, and the strong ones of one dtype.
 
@@ -773,7 +774,7 @@ def _promote(
     if dtype != z.dtype:
         z = z.astype(dtype)
 
-    def match(p: ScalarLike) -> ScalarLike:
+    def match(p: ScalarLike, /) -> ScalarLike:
         if isinstance(p, int | float) and not isinstance(p, bool):
             return float(p)  # a weak float
         p = jnp.asarray(p)
@@ -788,7 +789,7 @@ def _promote(
 
 @ft.partial(jax.custom_jvp, nondiff_argnums=(3,))
 def _incomplete_beta_core(
-    a: ScalarLike, b: ScalarLike, z: AnyArrayLike, branch: int
+    a: ScalarLike, b: ScalarLike, z: AnyArrayLike, branch: int, /
 ) -> AnyArray:
     """`incomplete_beta` for a given static branch, with its derivative rule."""
     return _incomplete_beta_impl(a, b, z, branch)
@@ -801,6 +802,7 @@ def _incomplete_beta_jvp(
     tangents: tuple[
         ScalarLike | SymbolicZero, ScalarLike | SymbolicZero, AnyArray | SymbolicZero
     ],
+    /,
 ) -> tuple[AnyArray, AnyArray]:
     a, b, z = primals
     a_dot, b_dot, z_dot = tangents
