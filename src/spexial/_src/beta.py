@@ -574,7 +574,8 @@ def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
 _SERIES, _CONTINUED_FRACTION, _LARGE_A, _NEGATIVE_B, _EITHER = 0, 1, 2, 3, 4
 """Which evaluation `_incomplete_beta_core` runs; static, so it is compiled alone.
 
-`_EITHER` is for a traced ``a`` or ``b``, whose branch is only known at run time.
+`_EITHER` is for a traced ``a`` or ``b``, whose branch is only known at run time:
+`_dispatch` then switches between the others.
 """
 
 
@@ -622,44 +623,7 @@ def _incomplete_beta_impl(
     dtype = jnp.result_type(a, b, z)
     if dtype != z.dtype:
         z = z.astype(dtype)
-    branches = (_series, _large_b, _large_a, _negative_b)
-    if branch != _EITHER:
-        return branches[branch](a, b, z)
-    index = _branch_index(a, b)
-    # `a` and `b` are scalars, so `switch` runs one branch. Under `vmap` it
-    # becomes a `select` that runs every branch, on every lane. An unselected
-    # branch may then return `nan` or `inf` -- the series at large `b`, the
-    # reflection at `b <= 0` -- and autodiff multiplies its Jacobian by the zero
-    # cotangent `select` gives it, `0 * inf = nan`. What stops that reaching
-    # `a` and `b` is the `where(mine, ...)` on each branch's inputs, whose own
-    # transpose zeroes the unselected lane's cotangent. The substituted values
-    # matter only in that they keep the unselected branches cheap and finite;
-    # any value would do for correctness.
-    #
-    # Each branch is checkpointed. Reverse-mode through a `switch` makes every
-    # branch emit the same set of residuals, zero-filling the others', so the
-    # series branch would allocate the continued fraction's per-step carries
-    # (64 x the points) just to discard them. Checkpointed, a branch's residuals
-    # are its inputs. Measured on the a/b gradient at 1e5 points, b = 1.5: 63 ->
-    # 46 ms (main, with no branching: 40), and the second-derivative compile
-    # 4.9 -> 3.4 s.
-    safe = (
-        (1.0, 1.0),  # series
-        (1.0, 2.0 * _CF_FROM),  # continued fraction
-        (2.0 * _CF_A_FROM, 0.0),  # large a
-        (1.0, 2.0 * _NEG_B_FROM),  # negative b
-    )
-
-    def run(k: int, /) -> Callable[[], AnyArray]:
-        def go() -> AnyArray:
-            mine = index == k
-            ak = jnp.where(mine, a, safe[k][0])
-            bk = jnp.where(mine, b, safe[k][1])
-            return jax.checkpoint(branches[k])(ak, bk, z)  # type: ignore[no-any-return]
-
-        return go
-
-    return jax.lax.switch(index, [run(k) for k in range(len(branches))])  # type: ignore[no-any-return]
+    return (_series, _large_b, _large_a, _negative_b)[branch](a, b, z)
 
 
 def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
@@ -747,7 +711,48 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     # enclosing `jit` and so lose the static choice.
     branch = _branch(a, b)
     a, b, z = _promote(a, b, z)
-    return _incomplete_beta_core(a, b, z, branch)
+    if branch != _EITHER:
+        return _incomplete_beta_core(a, b, z, branch)
+    return _dispatch(a, b, z)
+
+
+def _dispatch(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
+    """Pick the branch at run time, for a traced ``a`` or ``b``.
+
+    The `switch` sits outside the custom JVP, each branch its own static
+    `_incomplete_beta_core`: inside, the rule's `jvp` of a batched `switch`
+    leaves a `stop_gradient` in the linearized program that JAX cannot
+    transpose, so ``grad`` of a `vmap` over ``a`` or ``b`` raised.
+    """
+    index = _branch_index(a, b)
+    # `a` and `b` are scalars, so `switch` runs one branch. Under `vmap` it
+    # becomes a `select` that runs every branch, on every lane. An unselected
+    # branch may then return `nan` or `inf` -- the series at large `b`, the
+    # reflection at `b <= 0` -- and autodiff multiplies its Jacobian by the
+    # zero cotangent `select` gives it, `0 * inf = nan`. What stops that
+    # reaching `a` and `b` is the `where(mine, ...)` on each branch's inputs,
+    # whose own transpose zeroes the unselected lane's cotangent. The
+    # substituted values matter only in that they keep the unselected branches
+    # cheap and finite; any value would do for correctness. `z` needs no mask:
+    # its cotangent is selected per lane after each branch's transpose, so an
+    # unselected branch's infinite (1-z)^(b-1) at z = 1 is discarded.
+    safe = (
+        (1.0, 1.0),  # series
+        (1.0, 2.0 * _CF_FROM),  # continued fraction
+        (2.0 * _CF_A_FROM, 0.0),  # large a
+        (1.0, 2.0 * _NEG_B_FROM),  # negative b
+    )
+
+    def run(k: int, /) -> Callable[[], AnyArray]:
+        def go() -> AnyArray:
+            mine = index == k
+            ak = jnp.where(mine, a, safe[k][0])
+            bk = jnp.where(mine, b, safe[k][1])
+            return _incomplete_beta_core(ak, bk, z, k)  # type: ignore[no-any-return]
+
+        return go
+
+    return jax.lax.switch(index, [run(k) for k in range(len(safe))])  # type: ignore[no-any-return]
 
 
 def _promote(
@@ -811,16 +816,23 @@ def _incomplete_beta_jvp(
     # differentiated; there is no cheap closed form, so fall back to autodiff of
     # the implementation. Skipped entirely in the common case, where the
     # differentiation is with respect to position at fixed a and b. When it does
-    # run, the primal comes from the same `jvp`, not a second evaluation: with
-    # `a` or `b` traced the implementation is a `lax.switch`, and XLA cannot
-    # merge two copies of one, so a separate primal ran the whole thing twice.
+    # run, the primal comes from the same `jvp`, not a second evaluation.
+    #
+    # It is checkpointed. Reverse-mode through `_dispatch`'s `switch` makes
+    # every branch emit the same set of residuals, zero-filling the others', so
+    # the series branch would allocate the continued fraction's per-step carries
+    # (64 x the points) just to discard them. Checkpointed, its residuals are
+    # its inputs. Measured on the a/b gradient at 1e5 points, b = 1.5: 63 -> 46
+    # ms (main, with no branching: 40), and the second-derivative compile 4.9 ->
+    # 3.4 s. Only this `jvp`: checkpointing the whole core also recomputed the
+    # primal in a z-gradient, 4.3 -> 5.6 ms for `value_and_grad`.
     a_zero, b_zero = isinstance(a_dot, SymbolicZero), isinstance(b_dot, SymbolicZero)
     if a_zero and b_zero:
         primal_out = _incomplete_beta_impl(a, b, z, branch)
         tangent_out = jnp.zeros_like(primal_out)
     else:
         primal_out, tangent_out = jax.jvp(
-            lambda aa, bb: _incomplete_beta_impl(aa, bb, z, branch),
+            jax.checkpoint(lambda aa, bb: _incomplete_beta_impl(aa, bb, z, branch)),
             (a, b),
             (
                 jnp.zeros_like(a) if a_zero else a_dot,

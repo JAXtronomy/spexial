@@ -121,6 +121,36 @@ def test_vmap_over_b_across_the_switch_has_finite_gradients():
     assert bool(jnp.all(jnp.isfinite(jax.vmap(jax.grad(f))(bs))))
 
 
+@pytest.mark.parametrize(
+    ("wrt", "bs", "z"),
+    [
+        # One lane per branch: series, continued fraction, large a, negative b.
+        (0, [1.5, 20.0, 0.05, -6.0], 0.3),
+        (1, [1.5, 20.0, 0.05, -6.0], 0.3),
+        # At z = 1 the unselected large-a and negative-b branches, run on their
+        # substitute b <= 0, have an infinite z-derivative (1-z)^(b-1), which
+        # must not reach the selected lanes.
+        (2, [1.5, 20.0, 1.0, 2.0], 1.0),
+    ],
+)
+def test_reverse_mode_through_vmap_across_the_switch(wrt, bs, z):
+    """REGRESSION: ``grad(sum(vmap(f)))`` equals ``vmap(grad(f))``.
+
+    With the `switch` inside the custom JVP, the rule's `jvp` of it, once
+    batched, left a `stop_gradient` in the linearized program that JAX cannot
+    transpose, so reverse mode through `vmap` raised.
+    """
+    args = [jnp.asarray([0.5, 2.0, 9.0, 2.0]), jnp.asarray(bs), jnp.full(4, z)]
+
+    def total(x):
+        return jax.vmap(sp.incomplete_beta)(*args[:wrt], x, *args[wrt + 1 :]).sum()
+
+    batched = jax.grad(total)(args[wrt])
+    single = jax.vmap(jax.grad(sp.incomplete_beta, argnums=wrt))(*args)
+    assert bool(jnp.all(jnp.isfinite(batched)))
+    np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=1e-14)
+
+
 @pytest.mark.parametrize("z", [1e-8, 1e-12])
 @pytest.mark.parametrize("b", [1.5, 20.0])
 def test_mixed_partial_at_small_z(z, b):
