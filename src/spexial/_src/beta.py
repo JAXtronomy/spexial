@@ -78,7 +78,7 @@ truncation shows, for `L = log(1-z)`.
 """
 
 
-def _small_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+def _small_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     r"""$B(a, b, z)$ for $z \leq 1/2$, by the defining Taylor series.
 
     Expanding $(1-t)^{b-1}$ binomially and integrating term by term,
@@ -100,7 +100,7 @@ def _small_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     """
 
     def step(
-        carry: tuple[AnyArray, AnyArray, ScalarLike], k: ScalarLike
+        carry: tuple[AnyArray, AnyArray, ScalarLike], k: ScalarLike, /
     ) -> tuple[tuple[AnyArray, AnyArray, ScalarLike], None]:
         total, z_pow, coeff = carry  # coeff = (1-b)_k / k!
         total = total + coeff / (a + k) * z_pow
@@ -111,7 +111,7 @@ def _small_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     return z**a * total  # type: ignore[no-any-return]
 
 
-def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     r"""$B(a, b, z)$ for $z > 1/2$, by reflecting about $t = 1/2$.
 
     Substituting $t = 1-u$ and splitting the range at $u = 1/2$,
@@ -164,7 +164,7 @@ def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
     d4 = (log_half**4 - log_w**4) / 24
 
     def step(
-        carry: tuple[AnyArray, AnyArray, ScalarLike, ScalarLike], m: ScalarLike
+        carry: tuple[AnyArray, AnyArray, ScalarLike, ScalarLike], m: ScalarLike, /
     ) -> tuple[tuple[AnyArray, AnyArray, ScalarLike, ScalarLike], None]:
         total, w_pow, half_pow, coeff = carry  # coeff = (1-a)_m / m!
         s = b + m
@@ -217,7 +217,7 @@ switch buys nothing -- there ``log1p`` is the better of the two, 1.6 against
 """
 
 
-def _log1m(z: AnyArray) -> AnyArray:
+def _log1m(z: AnyArray, /) -> AnyArray:
     """``log(1 - z)`` to about 2 ulp, ``-inf`` at ``z = 1``; see `_LOG1P_UPTO`."""
     small = z <= _LOG1P_UPTO
     # Double `where`: each side only ever sees arguments it is accurate and finite
@@ -227,7 +227,7 @@ def _log1m(z: AnyArray) -> AnyArray:
     return jnp.where(small, via_log1p, via_log)  # type: ignore[no-any-return]
 
 
-def _a_eq_1(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+def _a_eq_1(b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     r"""$B(1, b, z)$, in closed form.
 
     .. math::
@@ -289,7 +289,7 @@ def _a_eq_1(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
 
 
 @jax.custom_jvp
-def _a_eq_1_core(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+def _a_eq_1_core(b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     """`_a_eq_1`, with the same exact O(1) `z`-derivative as the series path."""
     return _a_eq_1(b, z)
 
@@ -298,6 +298,7 @@ def _a_eq_1_core(b: ScalarLike, z: AnyArrayLike) -> AnyArray:
 def _a_eq_1_jvp(
     primals: tuple[ScalarLike, AnyArray],
     tangents: tuple[ScalarLike | SymbolicZero, AnyArray | SymbolicZero],
+    /,
 ) -> tuple[AnyArray, AnyArray]:
     b, z = primals
     b_dot, z_dot = tangents
@@ -334,7 +335,7 @@ def _a_eq_1_jvp(
     return primal_out, tangent_out
 
 
-def _is_static_one(a: object) -> bool:
+def _is_static_one(a: object, /) -> bool:
     """Whether ``a`` is a concrete scalar equal to 1, decidable at trace time."""
     return (
         not isinstance(a, jax.core.Tracer)
@@ -344,7 +345,7 @@ def _is_static_one(a: object) -> bool:
     )
 
 
-def _incomplete_beta_impl(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+def _incomplete_beta_impl(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     r"""$B(a, b, z)$ for $a > 0$, any real $b$, and $z \in [0, 1]$."""
     z = jnp.asarray(z)
     # Both branches are evaluated, so clamp each one's input to the range where
@@ -466,7 +467,7 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
 
 
 @jax.custom_jvp
-def _incomplete_beta_core(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
+def _incomplete_beta_core(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     """`incomplete_beta` by the series, with an exact O(1) `z`-derivative rule."""
     return _incomplete_beta_impl(a, b, z)
 
@@ -477,6 +478,7 @@ def _incomplete_beta_jvp(
     tangents: tuple[
         ScalarLike | SymbolicZero, ScalarLike | SymbolicZero, AnyArray | SymbolicZero
     ],
+    /,
 ) -> tuple[AnyArray, AnyArray]:
     a, b, z = primals
     a_dot, b_dot, z_dot = tangents
