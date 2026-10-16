@@ -1,7 +1,6 @@
 """Shared fixtures for the unit tests."""
 
 import os
-import resource
 import sys
 from pathlib import Path
 
@@ -24,10 +23,16 @@ def _resident_bytes() -> int:
 
         return int(psutil.Process().memory_info().rss)
     except ImportError:
-        # Peak, not current: past the limit this clears after every test,
-        # which costs only time.
-        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return peak if sys.platform == "darwin" else peak * 1024
+        pass
+    try:
+        # Unix only, so imported here: on Windows it does not exist.
+        import resource  # noqa: PLC0415
+    except ImportError:
+        return 0  # nothing to measure with: never clear, as before this fixture
+    # Peak, not current: past the limit this clears after every test, which
+    # costs only time.
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak if sys.platform == "darwin" else peak * 1024
 
 
 @pytest.fixture(autouse=True)
