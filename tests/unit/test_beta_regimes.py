@@ -61,8 +61,8 @@ def test_large_b_matches_mpmath(a, b):
     fraction and a regime where the series fails even at small ``b``.
 
     Tolerances are the measured worst with headroom: 2e-13 up to ``b = 100``,
-    then 8e-12 out to ``b = 1e5``, where 32 steps of the fraction stop short of
-    full convergence (`_CF_STEPS`).
+    then rounding growing like ``b * eps`` out to ``b = 1e4``; the fraction
+    itself has converged by then (`_CF_STEPS`).
     """
     z = np.array([1e-8, *ZS[1:], 1.0])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
@@ -102,7 +102,7 @@ def test_large_b_parameter_derivatives(a, b, z):
 
 
 def test_vmap_over_b_across_the_switch_has_finite_gradients():
-    """Under `vmap` the `cond` becomes a `select` and both branches run.
+    """Under `vmap` the `switch` becomes a `select` and every branch runs.
 
     Each is handed a ``b`` it is safe for, so the unselected one -- the series
     at ``b = 1e4``, or the reflection at ``b <= 0`` -- cannot put a non-finite
@@ -112,7 +112,7 @@ def test_vmap_over_b_across_the_switch_has_finite_gradients():
     f = lambda b: sp.incomplete_beta(2.0, b, jnp.asarray(0.3))
     batched = jax.vmap(f)(bs)
     single = jnp.stack([f(b) for b in bs])
-    # Batched, `b` is traced and takes the `cond`; one at a time it is concrete
+    # Batched, `b` is traced and takes the `switch`; one at a time it is concrete
     # and takes its branch statically -- two compilations of the same
     # arithmetic, which XLA fuses differently: 2.1e-14 apart at b = 1e4, well
     # inside the accuracy bound. Not a measure of accuracy, which is tested
@@ -234,7 +234,7 @@ def test_near_pole_expansion_close_to_z_eq_1(b):
     """REGRESSION: the near-pole expansion truncates like ``s^K L^(K+1)``.
 
     With 4 terms, ``b = -1e-4`` at ``z = 1 - 1e-15`` (``L ~ -35``) was 1.2e-12
-    off; with `_POLE_TERMS` = 8 the truncation is ~1e-25.
+    off; that step is now evaluated in a form with no truncation at all.
     """
     z = np.array([0.9, 1 - 1e-8, 1 - 1e-15])
     got = np.asarray(sp.incomplete_beta(2.0, b, jnp.asarray(z)))
@@ -253,7 +253,7 @@ def test_vmap_over_a_through_large_a_has_finite_gradients():
 
 
 def test_vmap_over_a_across_the_switch_has_finite_gradients():
-    """As for ``b``: under `vmap` over ``a`` both branches run, on safe values."""
+    """As for ``b``: under `vmap` over ``a`` every branch runs, on safe values."""
     a_s = jnp.asarray([0.5, 4.0, 8.0, 8.5, 16.0, 50.0])
     f = lambda a: sp.incomplete_beta(a, 0.5, jnp.asarray(0.3))
     batched = jax.vmap(f)(a_s)
@@ -285,7 +285,7 @@ def test_higher_z_derivatives_at_z_eq_1_with_traced_b(b):
 def test_large_b_small_a(b):
     """``a = 0.1``: the complete beta's second fraction converges slowest here.
 
-    At 32 steps it was 1e-11 off; it has its own 64 (`_CF_COMPLETE_STEPS`).
+    At 32 steps it was 1e-11 off; `_CF_STEPS` is now 64.
     """
     a = 0.1
     z = np.array(
@@ -385,8 +385,239 @@ def test_pole_at_z_eq_1_for_non_positive_b(b):
 
 @pytest.mark.parametrize("a", [0.5, 8.0, np.nextafter(8.0, 99), 50.0])
 @pytest.mark.parametrize(
-    "b", [-1.0, 0.0, np.nextafter(0.1, 0), 0.1, 5.0, 10.0, np.nextafter(10.0, 99)]
+    "b",
+    [
+        -6.0,
+        -5.0,
+        -1.0,
+        0.0,
+        np.nextafter(0.1, 0),
+        0.1,
+        5.0,
+        10.0,
+        np.nextafter(10.0, 99),
+    ],
 )
 def test_static_and_traced_branch_choice_agree(a, b):
     """`_branch` (concrete, plain Python) mirrors `_branch_index` (traced)."""
     assert _branch(a, b) == int(_branch_index(a, b))
+
+
+# ============================================================================
+# Second audit
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z", "dtype"),
+    [
+        (np.float64(2), jnp.float32(1.5), [0.3, 0.9], jnp.float64),
+        (2, 1.5, np.float32([0.3, 0.9]), jnp.float32),
+        (jnp.float32(2), np.float64(-1), [0.3, 0.9], jnp.float64),
+        (jnp.float32(12), np.float64(-1), [0.3, 0.9], jnp.float64),
+        (12, -1.0, np.float32([0.3, 0.9]), jnp.float32),
+        (2, 50, np.float32([0.01, 0.3]), jnp.float32),
+    ],
+)
+def test_mixed_precision_parameters(a, b, z, dtype):
+    """``a``, ``b`` and ``z`` share one dtype, on every path (GH-66, completed).
+
+    A `scan` carry seeded from one and updated with another changed type: an
+    integer ``a`` with float32 ``z``, float32 ``a`` with float64 ``b`` -- and,
+    new in this PR, the near-pole carry seeded from ``b`` but updated from
+    ``a``. Values are checked against the all-float64 call.
+    """
+    got = sp.incomplete_beta(a, b, jnp.asarray(z))
+    assert got.dtype == dtype
+    expect = sp.incomplete_beta(float(a), float(b), jnp.asarray(z, jnp.float64))
+    rtol = 1e-13 if dtype == jnp.float64 else 1e-5
+    np.testing.assert_allclose(
+        np.asarray(got, np.float64), np.asarray(expect), rtol=rtol
+    )
+
+
+def test_gradient_with_an_integer_parameter():
+    """An integer ``a`` (or ``b``) no longer breaks the gradient in the other.
+
+    Its tangent in the custom JVP was a zero of its own integer dtype, which
+    `jax.jvp` rejects; parameters are now promoted to floating first.
+    """
+    z = jnp.asarray(0.3)
+    np.testing.assert_allclose(
+        float(jax.grad(lambda b: sp.incomplete_beta(2, b, z))(1.5)),
+        float(jax.grad(lambda b: sp.incomplete_beta(2.0, b, z))(1.5)),
+        rtol=1e-14,
+    )
+    np.testing.assert_allclose(
+        float(jax.grad(lambda a: sp.incomplete_beta(a, 2, z))(1.5)),
+        float(jax.grad(lambda a: sp.incomplete_beta(a, 2.0, z))(1.5)),
+        rtol=1e-14,
+    )
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [
+        (50.0, -0.999, 0.9635),
+        (8.5, -0.999, 0.8097),
+        (4.5, -1e-3, 0.6),
+        (4.5, -0.03, 0.75),
+    ],
+)
+def test_just_outside_the_old_pole_band(a, b, z):
+    """``b + m`` a little way from zero: the direct quotient cancelled there.
+
+    With a 1e-3 band, ``1e-3 <= |s| < ~0.1`` was left to ``(w0^s - w^s) / s``:
+    5.8e-12 at ``a = 50, b = -0.999``. The one step with ``|s| < 1/2`` is now
+    evaluated as ``w^s delta expm1(s delta) / (s delta)``.
+    """
+    got = float(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    np.testing.assert_allclose(got, _mp_hyp2f1_beta(a, b, z), rtol=5e-14)
+
+
+@pytest.mark.parametrize("n", [1, 2, 3])
+def test_b_derivatives_just_outside_the_old_pole_band(n):
+    """1st-3rd ``b``-derivatives there: they were 3e-10, 5e-7, 1.5e-3 off."""
+    a, b, z = 4.5, -1 + 1.001e-3, 0.7
+    d = lambda bb: sp.incomplete_beta(a, bb, jnp.asarray(z))
+    for _ in range(n):
+        d = jax.grad(d)
+    with mp.workdps(40):
+        expect = float(
+            mp.diff(lambda t: mp.mpf(z) ** a / a * mp.hyp2f1(a, 1 - t, a + 1, z), b, n)
+        )
+    np.testing.assert_allclose(float(d(b)), expect, rtol=1e-13)
+
+
+def test_near_pole_float32():
+    """The near-pole step in float32: about float32 precision (it was 3.5e-4)."""
+    z = jnp.asarray([0.6, 0.9], jnp.float32)
+    for b in (-1e-3, -0.999):
+        got = np.asarray(sp.incomplete_beta(4.5, b, z), np.float64)
+        expect = np.array([_mp_hyp2f1_beta(4.5, b, float(zi)) for zi in z])
+        np.testing.assert_allclose(got, expect, rtol=1e-5)
+
+
+def test_no_intermediate_overflow_for_very_negative_b():
+    """A representable result must not come back ``nan`` or raise.
+
+    ``w0^b`` overflowed inside the expansion at ``a = 1e4, b = -84`` (true value
+    8.3e307); a concrete ``b = -1100`` made Python float arithmetic raise
+    `OverflowError` even at ``z = 0.3``, below the branch that needed it.
+    """
+    a = 1e4
+    split = a / (a + 2)
+    with mp.workdps(40):
+        expect = float(mp.betainc(a, -84, 0, split))
+    np.testing.assert_allclose(
+        float(sp.incomplete_beta(a, -84.0, jnp.asarray(split))), expect, rtol=1e-11
+    )
+    np.testing.assert_allclose(
+        float(sp.incomplete_beta(2.0, -1100.0, jnp.asarray(0.3))),
+        _mp_hyp2f1_beta(2.0, -1100.0, 0.3),
+        rtol=1e-12,
+    )
+
+
+def test_overflow_past_the_float_range_is_inf():
+    """A true value beyond the float range is ``+inf``, not ``nan``."""
+    assert float(sp.incomplete_beta(12.0, -400.0, jnp.asarray(0.86))) == np.inf
+    assert float(sp.incomplete_beta(2.0, -400.0, jnp.asarray(0.9))) == np.inf
+
+
+def test_mixed_partial_at_z_one_half_is_symmetric():
+    """``d/dz d/db`` at exactly ``z = 1/2`` was halved: `minimum` split the tie."""
+    half = jnp.asarray(0.5)
+    bz = float(jax.grad(jax.grad(sp.incomplete_beta, 1), 2)(2.0, 1.5, half))
+    zb = float(jax.grad(jax.grad(sp.incomplete_beta, 2), 1)(2.0, 1.5, half))
+    np.testing.assert_allclose(bz, zb, rtol=1e-14)
+
+
+@pytest.mark.parametrize(("dtype", "rtol"), [(jnp.bfloat16, 2e-2), (jnp.float16, 2e-3)])
+@pytest.mark.parametrize(("a", "b"), [(2.0, 50.0), (24.0, -0.5)])
+def test_half_precision(dtype, rtol, a, b):
+    """bfloat16/float16 on the continued fraction and on `_large_a`.
+
+    Both evaluate in float32 and round once; Lentz's recurrence in bfloat16
+    was 6% off at ``b = 20``.
+    """
+    # Points whose values are representable in both dtypes; the reference is
+    # the float64 value rounded to `dtype` (below its range that is 0).
+    z = jnp.asarray([0.3, 0.9] if b > 0 else [0.9, 0.97], dtype)
+    got = sp.incomplete_beta(a, b, z)
+    assert got.dtype == dtype
+    full = sp.incomplete_beta(a, b, jnp.asarray(z, jnp.float64))
+    expect = np.asarray(full.astype(dtype), np.float64)
+    np.testing.assert_allclose(np.asarray(got, np.float64), expect, rtol=rtol)
+
+
+@pytest.mark.parametrize(("a", "b"), [(1.0, 1e17), (2.0, 1e17), (0.5, 1e20)])
+def test_nan_past_one_over_eps(a, b):
+    """Past ``b ~ 1/eps`` the switch point rounds to 0: ``nan``, by design.
+
+    Without the explicit ``nan`` the arithmetic does not reliably say so: at
+    ``a = 2, b = 1e17`` it returned a finite 8.0e-35 (truth ~1e-34), at
+    ``a = 0.5, b = 1e20`` ``inf`` (truth ~1.8e-10).
+    """
+    assert np.isnan(float(sp.incomplete_beta(a, b, jnp.asarray(0.5))))
+
+
+def test_large_a_endpoint_gradients():
+    """`_large_a`'s z = 0 guard and its z = 1 pole guard keep gradients finite."""
+    for k in (0, 1):
+        assert (
+            float(jax.grad(sp.incomplete_beta, k)(24.0, -0.5, jnp.asarray(0.0))) == 0.0
+        )
+    jac = jax.jacrev(
+        lambda b: sp.incomplete_beta(24.0, b, jnp.asarray([0.3, 0.9, 1.0]))
+    )
+    assert bool(jnp.all(jnp.isfinite(jac(-0.5)[:2])))
+
+
+def test_continued_fraction_converged_near_x0():
+    """64 steps: the slowest fraction, just above ``x0`` at small ``a``.
+
+    6e-15 at 64 steps; 48 left 5e-14.
+    """
+    a, b = 0.1, 1e3
+    x0 = (a + 1) / (a + b + 2)
+    z = np.array([x0 * (1 + 1e-9), x0 * 1.05])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=2e-14)
+
+
+def test_large_a_takes_large_a_below_b_one_tenth():
+    """Just below ``b = 0.1``, large ``a`` goes to `_large_a`, not the reflection.
+
+    At ``a = 50, b = 0.07`` the reflection is 6.4e-14 off (it loses digits as
+    ``b -> 0``); `_large_a` is 4e-15.
+    """
+    z = np.array([0.5, 0.9, 50 / 52 * 0.999, 0.99])
+    got = np.asarray(sp.incomplete_beta(50.0, 0.07, jnp.asarray(z)))
+    expect = np.array([_mp_hyp2f1_beta(50.0, 0.07, zi) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=2e-14)
+
+
+@pytest.mark.parametrize("a", [0.01, 0.5, 2.0, 8.0])
+@pytest.mark.parametrize("b", [-5.5, -10.0, -50.0, -200.0, -1100.0])
+def test_very_negative_b(a, b):
+    """``b < -5`` (``a <= 8``): the continued fraction directly, no reflection.
+
+    The series' ``(1-b)_k / k!`` grows like ``(|b| z)^k / k!`` before it
+    decays, so 64 terms were 6e-12 off at ``b = -10``, 8% at -50, and had no
+    correct digits by -200. Measured worst here 4.4e-13 (a = 0.01, b = -200).
+    """
+    z = np.array([1e-6, 0.01, 0.1, 0.3, 0.5, 0.7, 0.9, 0.999])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    expect = np.array([_mp_hyp2f1_beta(a, b, zi) for zi in z])
+    ok = np.isfinite(expect) & (np.abs(expect) < 1e300) & (expect != 0)
+    np.testing.assert_allclose(got[ok], expect[ok], rtol=2e-12)
+
+
+@pytest.mark.parametrize("a", [0.5, 2.0, 8.0])
+def test_continuous_across_the_negative_b_switch(a):
+    """Series at ``b = -5``, continued fraction just below: they must meet."""
+    z = jnp.asarray([0.05, 0.5, 0.95])
+    at = sp.incomplete_beta(a, -5.0, z)
+    below = sp.incomplete_beta(a, np.nextafter(-5.0, -99), z)
+    np.testing.assert_allclose(np.asarray(at), np.asarray(below), rtol=1e-13)

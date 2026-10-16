@@ -84,6 +84,6 @@ def test_grad_incomplete_beta_parameters(benchmark: BenchmarkFixture) -> None:
 def test_incomplete_beta_large_b(benchmark: BenchmarkFixture, b: float) -> None:
     """Above ``b = 10`` the continued fraction replaces the series (GH-64).
 
-    About 3x the series' cost per point, against a series that is wrong there.
+    About 6x the series' cost per point, against a series that is wrong there.
     """
     benchmark(warm(lambda z: sp.incomplete_beta(A, b, z), Z_VECTOR))

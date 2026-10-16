@@ -41,6 +41,7 @@ was written for the Zhao (1996) family of density profiles (Eq. 43).
 __all__ = ["incomplete_beta"]
 
 import functools as ft
+import math
 from collections.abc import Callable
 
 import jax
@@ -69,22 +70,39 @@ of compile time. Full unrolling (64) buys a further 15% for 2x the compile,
 and a trace-time Python loop is no faster than this while compiling worse.
 """
 
-_POLE_BAND = 1e-3
-"""Half-width of the band around `b + m == 0` where `_expand_from` expands.
+_NEAR = 0.5
+"""Half-width of the band around ``b + m == 0`` handled apart in `_expand_from`.
 
-Below this the direct form cancels; above it, the expansion's truncation
-would show. With `_POLE_TERMS` terms that is O(s^8 L^9 / 9!), for
-`L = log(1-z)`: ~1e-25 even at `L = -36`.
+At most one step ``m`` has ``|b + m| < 1/2``. Its term,
+``(w0^s - w^s) / s``, cancels for small ``s``; it is evaluated once, after the
+scan, in a form with no cancellation for any ``s`` or dtype. Every other step
+has ``|s| >= 1/2``, where the direct quotient loses nothing worth counting.
+An earlier band of 1e-3, with an expansion in ``s`` inside it, left
+``1e-3 <= |s| < ~0.1`` to the direct form: 5.8e-12 at ``a = 50, b = -0.999``,
+and 3.5e-4 in float32.
 """
 
-_POLE_TERMS = 8
-"""Terms of the near-pole expansion in `_expand_from`.
+_EXPRL_COEFFS = tuple(1.0 / math.factorial(k + 1) for k in reversed(range(18)))
+"""Taylor coefficients of ``expm1(y) / y = sum_k y^k / (k+1)!``, highest first.
 
-Four, as first written, truncate at O(s^4 L^5 / 5!): at `s = 1e-4` and
-`z = 1 - 1e-12` that was 6e-13 relative, and it grows with `|L|` -- 1e-8 at
-the band edge with `z = 1 - 1e-16`. The extra terms are loop-invariant
-multiply-adds, outside the `scan`.
+At ``|y| < 1/2`` the first omitted term is ``0.5^18 / 19! ~ 3e-23``. Python
+floats, so Horner's rule keeps the argument's dtype and weak type.
 """
+
+
+def _expm1_over(y: AnyArray) -> AnyArray:
+    """``expm1(y) / y``, 1 at ``y = 0``, with exact derivatives of every order there.
+
+    By its Taylor series for ``|y| < 1/2`` (a polynomial, so autodiff is exact
+    at 0), and by the quotient outside it, where nothing cancels.
+    """
+    small = jnp.abs(y) < 0.5
+    y_small = jnp.where(small, y, 0.0)
+    y_large = jnp.where(small, 1.0, y)
+    series = _EXPRL_COEFFS[0]
+    for c in _EXPRL_COEFFS[1:]:
+        series = series * y_small + c
+    return jnp.where(small, series, jnp.expm1(y_large) / y_large)  # type: ignore[no-any-return]
 
 
 def _small_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
@@ -149,20 +167,8 @@ def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike) -> AnyArray:
 
     Summed into a `jax.lax.scan` carry, for the same reason as `_small_z`.
 
-    Each term is $(e^{sL_1} - e^{sL_2})/s$ with $s = b + m$, $L_1 = \ln(1/2)$
-    and $L_2 = \ln w$, which the running powers below evaluate directly. That
-    cancels catastrophically as $s \to 0$, so within `_POLE_BAND` of zero it
-    switches to the expansion of the same expression,
-
-    .. math::
-
-        \frac{e^{sL_1} - e^{sL_2}}{s}
-            = \sum_{k \geq 1} \frac{L_1^k - L_2^k}{k!} s^{k-1}
-
-    whose $L$-powers are loop-invariant, so this costs a few extra FMAs rather
-    than transcendentals. Carrying the $O(s)$ term also makes the
-    $b$-derivative right *at* $s = 0$, which integer slopes do hit (e.g.
-    $\gamma = 2$ in Zhao's Eq. 7).
+    The terms are summed by `_expand_from`, which also handles the one term with
+    $b + m$ near zero, where the direct form cancels.
     """
     w = 1.0 - z
     # `_small_z(a, b, 1/2)` below looks like a scalar being recomputed per
@@ -186,22 +192,24 @@ def _expand_from(
     :math:`z = 1/2` (:math:`w_0 = 1/2`), and of `_large_a` above its split
     (:math:`w_0 = 2/(a+2)`, where :math:`(a-1) w_0 < 2` however large ``a``).
 
-    Each term is :math:`(e^{sL_1} - e^{sL_2})/s` with :math:`s = b + m`,
-    :math:`L_1 = \ln w_0` and :math:`L_2 = \ln w`, which the running powers
-    evaluate directly. That cancels catastrophically as :math:`s \to 0`, so
-    within `_POLE_BAND` of zero it switches to the expansion of the same
-    expression,
+    Each term is :math:`(w_0^s - w^s)/s` with :math:`s = b + m`. That cancels as
+    :math:`s \to 0`; at most one step has :math:`|s| <` `_NEAR`, and it is
+    evaluated once, after the scan, as
 
     .. math::
 
-        \frac{e^{sL_1} - e^{sL_2}}{s}
-            = \sum_{k \geq 1} \frac{L_1^k - L_2^k}{k!} s^{k-1}
+        \frac{w_0^s - w^s}{s} = w^s\,\Delta\,
+            \frac{\operatorname{expm1}(s\Delta)}{s\Delta},
+        \qquad \Delta = \ln(w_0 / w),
 
-    to `_POLE_TERMS` terms, whose :math:`L`-powers are loop-invariant, so this
-    costs a few extra FMAs rather than transcendentals. Carrying the
-    :math:`O(s)` terms also makes the :math:`b`-derivative right *at*
-    :math:`s = 0`, which integer slopes do hit (e.g. :math:`\gamma = 2` in
-    Zhao's Eq. 7).
+    which cancels for no :math:`s` and in no dtype; `_expm1_over` is a
+    polynomial near 0, so every :math:`b`-derivative is exact at :math:`s = 0`,
+    which integer slopes do hit (e.g. :math:`\gamma = 2` in Zhao's Eq. 7).
+
+    The sum is carried divided by :math:`w_0^b` and scaled back at the end,
+    through logarithms only if :math:`w_0^b` itself would overflow -- so a very
+    negative :math:`b` cannot overflow an intermediate while the result is
+    representable.
 
     At :math:`w = 0` (:math:`z = 1`) there is nothing to cancel -- :math:`w^s`
     is 0 for :math:`s > 0` -- so the direct form is used there whatever
@@ -213,60 +221,64 @@ def _expand_from(
     materializing them all at once would make this memory- rather than
     flop-bound.
     """
+    # An array, weakly typed for a Python scalar: Python float arithmetic on a
+    # concrete `b` (0.5 ** -1100) would raise `OverflowError`, not return inf.
+    w0 = jnp.asarray(w0)
     at_0 = w == 0
+    w_safe = jnp.where(at_0, w0, w)
     log_w0 = jnp.log(w0)
-    log_w = jnp.log(jnp.where(at_0, w0, w))
-    # (L1^k - L2^k) / k!, for k = 1 .. _POLE_TERMS, by running powers.
-    diffs = []
-    p1, p2, fact = log_w0, log_w, 1.0
-    for k in range(1, _POLE_TERMS + 1):
-        fact *= k
-        diffs.append((p1 - p2) / fact)
-        p1, p2 = p1 * log_w0, p2 * log_w
+    delta = log_w0 - jnp.log(w_safe)  # log(w0 / w) >= 0
+    # The sum is carried divided by w0^b, which is applied at the end: each term
+    # w0^(b+m) - w^(b+m) is w0^b (w0^m - r^b w^m), r = w / w0 <= 1. Unscaled, a
+    # very negative b overflowed w0^b in an intermediate while the result -- a
+    # *difference* of such terms -- was representable.
+    r_b = jnp.where(at_0, 0.0, jnp.exp(-b * delta))  # r^b; 0^b = 0 for b > 0
 
-    # Only one step can be near a pole -- s = b + m, and the band is far
-    # narrower than 1 -- so the scan just records that step's coefficient and
-    # `s` (scalars), and its expansion is added once afterwards, rather than
-    # evaluating the polynomial for every point at every step.
+    # The one step with |s| < `_NEAR` is skipped here and added afterwards; the
+    # scan only records its coefficient and `s` (scalars). At w = 0 there is
+    # nothing to cancel -- w^s = 0 for s > 0 -- so that step is taken directly
+    # (s <= 0 at w = 0 is the pole, which the callers handle).
     def step(
         carry: tuple[AnyArray, AnyArray, AnyArray, ScalarLike, ScalarLike, ScalarLike],
         m: ScalarLike,
     ) -> tuple[
         tuple[AnyArray, AnyArray, AnyArray, ScalarLike, ScalarLike, ScalarLike], None
     ]:
-        total, w_pow, w0_pow, coeff, pole_coeff, pole_s = carry  # coeff = (1-a)_m/m!
+        total, w0_m, w_m, coeff, near_coeff, near_s = carry  # coeff = (1-a)_m/m!
         s = b + m
-        in_band = jnp.abs(s) < _POLE_BAND
-        near_pole = in_band & ~at_0
-        # Per point: at w = 0 the in-band step takes its direct form, divided by s.
-        s_safe = jnp.where(near_pole, 1.0, s)
-        direct = (w0_pow - w_pow) / s_safe
-        total = total + coeff * jnp.where(near_pole, 0.0, direct)
-        pole_coeff = jnp.where(in_band, coeff, pole_coeff)
-        pole_s = jnp.where(in_band, s, pole_s)
+        in_band = jnp.abs(s) < _NEAR
+        skip = in_band & ~at_0
+        s_safe = jnp.where(skip | (s == 0), 1.0, s)
+        total = total + coeff * jnp.where(skip, 0.0, (w0_m - w_m) / s_safe)
+        near_coeff = jnp.where(in_band, coeff, near_coeff)
+        near_s = jnp.where(in_band, s, near_s)
         next_coeff = coeff * (m + 1.0 - a) / (m + 1.0)
-        return (total, w_pow * w, w0_pow * w0, next_coeff, pole_coeff, pole_s), None
+        return (total, w0_m * w0, w_m * w, next_coeff, near_coeff, near_s), None
 
-    # Floating and weakly typed whatever `a` and `b` are (integers included),
-    # so the scalar carries neither change type nor promote anything.
-    zero = jnp.zeros_like(w0**b * 1.0)
-    init = (
-        jnp.zeros_like(w),
-        w**b,
-        w0**b * jnp.ones_like(w),
-        jnp.ones_like(a),
-        zero,
-        zero,
-    )
-    (total, _, _, _, pole_coeff, pole_s), _ = jax.lax.scan(
+    zero = jnp.zeros_like(log_w0 * b)  # floating, weakly typed if both are
+    init = (jnp.zeros_like(w), jnp.ones_like(w), r_b, jnp.ones_like(a), zero, zero)
+    (total, _, _, _, near_coeff, near_s), _ = jax.lax.scan(
         step, init, jnp.arange(_NTERMS), unroll=_UNROLL
     )
-    series = diffs[-1]
-    for d in reversed(diffs[:-1]):
-        series = d + pole_s * series
-    # At w = 0 the in-band step used its direct form inside the scan (there is
-    # nothing to cancel), so its correction is zero there.
-    return total + jnp.where(at_0, 0.0, pole_coeff * series)  # type: ignore[no-any-return]
+    # The skipped step, scaled likewise: (w0^s - w^s) / s / w0^b
+    # = r^b w^m* (e^(s delta) - 1) / s = r^b w^m* delta expm1(s delta) / (s delta),
+    # which cancels for no s; m* = s - b. At w = 0 it was taken in the scan.
+    w_m_near = r_b * jnp.exp((near_s - b) * jnp.log(w_safe))
+    near = near_coeff * w_m_near * delta * _expm1_over(near_s * delta)
+    scaled = total + jnp.where(at_0, 0.0, near)
+    # Apply w0^b: directly while it is finite, and through logarithms only when
+    # it would overflow (b log w0 > ~700), so as not to spend |log| * eps of
+    # accuracy on a round trip the common case does not need.
+    log_scale = b * log_w0
+    big = log_scale > 700.0
+    direct = scaled * jnp.exp(jnp.where(big, 0.0, log_scale))
+    via_log = jnp.exp(
+        jnp.where(big, log_scale, 0.0)
+        + jnp.log(jnp.where(big & (scaled > 0), scaled, 1.0))
+    )
+    return jnp.where(  # type: ignore[no-any-return]
+        big, jnp.where(scaled > 0, via_log, 0.0), direct
+    )
 
 
 _CF_FROM = 10.0
@@ -283,9 +295,11 @@ Both series expand :math:`(1-t)^{b-1}` binomially, and its coefficients
 _CF_UNROLL = 1
 """Not unrolled, unlike the series.
 
-`lax.cond` traces both branches, so this is compiled on every call, series or
-not. Unrolled 16-fold it made a second ``b``-derivative take 200 s to compile
-for no runtime gain (measured 39 vs 41 ms at 1e5 points); unrolled once, 11 s.
+A traced ``a`` or ``b`` goes through a `lax.switch`, which compiles every
+branch, so this is compiled whenever either is traced, whatever the values
+(a concrete pair compiles only its own branch). Unrolled 16-fold it made a
+second ``b``-derivative take 200 s to compile for no runtime gain (measured
+39 vs 41 ms at 1e5 points); unrolled once, 11 s.
 """
 
 _CF_STEPS = 64
@@ -301,7 +315,9 @@ rounding, growing like :math:`b\,\epsilon`: worst over
 """
 
 
-def _continued_fraction(a: AnyArrayLike, b: AnyArrayLike, x: AnyArray) -> AnyArray:
+def _continued_fraction(
+    a: AnyArrayLike, b: AnyArrayLike, x: AnyArray, steps: int | None = None
+) -> AnyArray:
     r"""Evaluate the DLMF 8.17.22 continued fraction by the modified Lentz method.
 
     .. math::
@@ -337,7 +353,10 @@ def _continued_fraction(a: AnyArrayLike, b: AnyArrayLike, x: AnyArray) -> AnyArr
     d = 1.0 / guard(1.0 - (a + b) * x / (a + 1.0))
     init = (jnp.ones_like(x), d, d)
     (_, _, h), _ = jax.lax.scan(
-        step, init, jnp.arange(1, _CF_STEPS + 1), unroll=_CF_UNROLL
+        step,
+        init,
+        jnp.arange(1, (_CF_STEPS if steps is None else steps) + 1),
+        unroll=_CF_UNROLL,
     )
     return h  # type: ignore[no-any-return]
 
@@ -384,7 +403,10 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
     if jnp.dtype(z.dtype).itemsize < 4:
         # Half precision has too few bits for Lentz's recurrence to settle; work
         # in float32 and round the result once.
-        return _large_b(a, b, z.astype(jnp.float32)).astype(z.dtype)
+        f32 = jnp.float32
+        return _large_b(jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)).astype(
+            z.dtype
+        )
     x0 = (a + 1.0) / (a + b + 2.0)
     swap = z >= x0
     # z = 0 and z = 1 make the term exactly zero (the direct one at 0, the
@@ -415,11 +437,14 @@ def _series(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
     pole = (z == 1.0) & (b <= 0)
     z = jnp.where(pole, 0.5, z)
     # Both branches are evaluated, so clamp each one's input to the range where
-    # it is well behaved; `where` then discards the unused value.
+    # it is well behaved; `where` then discards the unused value. Clamped by
+    # `where`, not `minimum`/`maximum`: those split the derivative at a tie,
+    # and at exactly z = 1/2 the series' z-derivative came out halved.
+    lower = z <= 0.5
     value = jnp.where(
-        z <= 0.5,
-        _small_z(a, b, jnp.minimum(z, 0.5)),
-        _large_z(a, b, jnp.maximum(z, 0.5)),
+        lower,
+        _small_z(a, b, jnp.where(lower, z, 0.5)),
+        _large_z(a, b, jnp.where(lower, 0.5, z)),
     )
     return jnp.where(pole, jnp.inf, value)  # type: ignore[no-any-return]
 
@@ -450,9 +475,12 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
     r"""$B(a, b, z)$ for large $a$ and $b < $ `_CF_A_B_MIN`, including $b \le 0$.
 
     Split at :math:`s = a/(a+2)`. Below it, the continued fraction directly:
-    for :math:`b < 1/a` that is below its switch point
-    :math:`x_0 = (a+1)/(a+b+2)` (and :math:`x_0 > 1` for :math:`b \le -1`), so
-    it converges. Above it,
+    that is at or below its switch point :math:`x_0 = (a+1)/(a+b+2)` whenever
+    :math:`b \le 1 + 2/a` -- so for every :math:`b < 0.1` routed here -- and
+    beyond :math:`x_0` it still converges in this range, only more slowly
+    (checked against mpmath; for :math:`-(a+2) < b \le -1`, :math:`x_0 > 1`,
+    and below that :math:`x_0 < 0`, where the textbook criterion says
+    nothing). Above it,
 
     .. math::
 
@@ -471,7 +499,10 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
     :math:`z = 0` the term is a genuine zero, guarded as in `_large_b`.
     """
     if jnp.dtype(z.dtype).itemsize < 4:
-        return _large_a(a, b, z.astype(jnp.float32)).astype(z.dtype)
+        f32 = jnp.float32
+        return _large_a(jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)).astype(
+            z.dtype
+        )
     # Arrays, weakly typed when ``a`` is a Python scalar, so `z` sets the dtype.
     split = jnp.asarray(a / (a + 2.0))
     w0 = jnp.asarray(2.0 / (a + 2.0))
@@ -487,14 +518,59 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
     direct = jnp.where(at_0, 0.0, direct)
     log_front_s = a * jnp.log(split) + b * jnp.log(w0)
     at_split = jnp.exp(log_front_s + jnp.log(_continued_fraction(a, b, split) / a))
-    w = jnp.where(below | pole, w0, 1.0 - z)
+    # At z = 1 (the pole when b <= 0) `_expand_from` takes w = 0 safely itself.
+    w = jnp.where(below, w0, 1.0 - z)
     above = at_split + _expand_from(a, b, w, w0)
     return jnp.where(  # type: ignore[no-any-return]
         pole, jnp.inf, jnp.where(below, direct, above)
     )
 
 
-_SERIES, _CONTINUED_FRACTION, _LARGE_A, _EITHER = 0, 1, 2, 3
+_NEG_B_FROM = -5.0
+r"""Below this ``b`` (for ``a`` up to `_CF_A_FROM`), `_negative_b` replaces the series.
+
+`_small_z`'s terms carry :math:`(1-b)_k / k!`, which for very negative
+:math:`b` grows like :math:`(|b| z)^k / k!` before it decays: 64 terms cover
+:math:`|b| z \lesssim 10`. Measured worst over :math:`a \in [0.5, 8]`:
+:math:`2\times10^{-15}` at :math:`b = -5`, :math:`6\times10^{-12}` at -10,
+:math:`2\times10^{-7}` at -20, 8% at -50, no correct digits by -200.
+"""
+
+_NEG_B_STEPS = 128
+"""Double steps of the continued fraction in `_negative_b`.
+
+At very negative ``b`` and small ``a`` the fraction converges more slowly than
+in `_large_b`: 64 steps leave 5e-9 at ``a = 0.5, b = -1100``; 128 give 7e-15,
+and 256 change nothing.
+"""
+
+
+def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray) -> AnyArray:
+    r"""$B(a, b, z)$ for very negative $b$, by the continued fraction directly.
+
+    No reflection -- it would need :math:`B(a, b)`, which diverges for
+    :math:`b \le 0` -- and none needed: for :math:`b` this negative the fraction
+    converges at every :math:`z \in [0, 1)` (checked against mpmath for
+    :math:`a \in [0.01, 8]`, :math:`b \in [-1100, -5]`: worst
+    :math:`6\times10^{-14}`). The term is formed in log space, as in
+    `_large_b`, so a huge value that is still representable does not overflow
+    on the way. :math:`z = 0` is a genuine zero; :math:`z = 1` the pole.
+    """
+    if jnp.dtype(z.dtype).itemsize < 4:
+        f32 = jnp.float32
+        return _negative_b(
+            jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)
+        ).astype(z.dtype)
+    endpoint = (z == 0) | (z == 1)
+    zs = jnp.where(endpoint, 0.5, z)
+    h = _continued_fraction(a, b, zs, steps=_NEG_B_STEPS)
+    term = jnp.exp(a * jnp.log(zs) + b * jnp.log1p(-zs) + jnp.log(h / a))
+    return jnp.where(  # type: ignore[no-any-return]
+        z == 1, jnp.inf, jnp.where(z == 0, 0.0, term)
+    )
+
+
+_SERIES, _CONTINUED_FRACTION, _LARGE_A, _NEGATIVE_B, _EITHER = 0, 1, 2, 3, 4
 """Which evaluation `_incomplete_beta_core` runs; static, so it is compiled alone.
 
 `_EITHER` is for a traced ``a`` or ``b``, whose branch is only known at run time.
@@ -502,10 +578,11 @@ _SERIES, _CONTINUED_FRACTION, _LARGE_A, _EITHER = 0, 1, 2, 3
 
 
 def _branch_index(a: ScalarLike, b: ScalarLike) -> ScalarLike:
-    """`_SERIES`, `_CONTINUED_FRACTION` or `_LARGE_A` for these ``a`` and ``b``."""
+    """Return the branch index (`_SERIES`, `_LARGE_A`, ...) for ``a`` and ``b``."""
     large_a = jnp.where(b >= _CF_A_B_MIN, _CONTINUED_FRACTION, _LARGE_A)
+    small_a = jnp.where(b < _NEG_B_FROM, _NEGATIVE_B, _SERIES)
     return jnp.where(  # type: ignore[no-any-return]
-        b > _CF_FROM, _CONTINUED_FRACTION, jnp.where(a > _CF_A_FROM, large_a, _SERIES)
+        b > _CF_FROM, _CONTINUED_FRACTION, jnp.where(a > _CF_A_FROM, large_a, small_a)
     )
 
 
@@ -524,7 +601,7 @@ def _branch(a: ScalarLike, b: ScalarLike) -> int:
         return _CONTINUED_FRACTION
     if a > _CF_A_FROM:
         return _CONTINUED_FRACTION if b >= _CF_A_B_MIN else _LARGE_A
-    return _SERIES
+    return _NEGATIVE_B if b < _NEG_B_FROM else _SERIES
 
 
 def _incomplete_beta_impl(
@@ -544,16 +621,19 @@ def _incomplete_beta_impl(
     dtype = jnp.result_type(a, b, z)
     if dtype != z.dtype:
         z = z.astype(dtype)
-    branches = (_series, _large_b, _large_a)
+    branches = (_series, _large_b, _large_a, _negative_b)
     if branch != _EITHER:
         return branches[branch](a, b, z)
     index = _branch_index(a, b)
     # `a` and `b` are scalars, so `switch` runs one branch. Under `vmap` it
-    # becomes a `select` that runs all three, so each is handed parameters it is
-    # safe for -- the series is wildly wrong for large `a` or `b`, the
-    # reflection needs `b > 0`, and `_large_a` large `a` -- so that none puts a
-    # non-finite value where autodiff would multiply it by the zero cotangent of
-    # an unselected side.
+    # becomes a `select` that runs every branch, on every lane. An unselected
+    # branch may then return `nan` or `inf` -- the series at large `b`, the
+    # reflection at `b <= 0` -- and autodiff multiplies its Jacobian by the zero
+    # cotangent `select` gives it, `0 * inf = nan`. What stops that reaching
+    # `a` and `b` is the `where(mine, ...)` on each branch's inputs, whose own
+    # transpose zeroes the unselected lane's cotangent. The substituted values
+    # matter only in that they keep the unselected branches cheap and finite;
+    # any value would do for correctness.
     #
     # Each branch is checkpointed. Reverse-mode through a `switch` makes every
     # branch emit the same set of residuals, zero-filling the others', so the
@@ -566,6 +646,7 @@ def _incomplete_beta_impl(
         (1.0, 1.0),  # series
         (1.0, 2.0 * _CF_FROM),  # continued fraction
         (2.0 * _CF_A_FROM, 0.0),  # large a
+        (1.0, 2.0 * _NEG_B_FROM),  # negative b
     )
 
     def run(k: int) -> Callable[[], AnyArray]:
@@ -577,7 +658,7 @@ def _incomplete_beta_impl(
 
         return go
 
-    return jax.lax.switch(index, [run(k) for k in range(3)])  # type: ignore[no-any-return]
+    return jax.lax.switch(index, [run(k) for k in range(len(branches))])  # type: ignore[no-any-return]
 
 
 def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
@@ -620,9 +701,13 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     Notes
     -----
     Two fixed-length series, switched at :math:`z = 1/2`, each converging like
-    :math:`2^{-k}`; see `_small_z` and `_large_z`. Above :math:`b = 10`, or
-    above :math:`a = 8` with :math:`b \ge 0.1`, their alternating terms cancel,
-    and a fixed-length continued fraction is used instead; see `_large_b`. The
+    :math:`2^{-k}`; see `_small_z` and `_large_z`. Outside :math:`a \le 8`,
+    :math:`-5 \le b \le 10` their binomial coefficients cancel or grow, and
+    three fixed-length methods take over: the continued fraction with
+    reflection (`_large_b`: :math:`b > 10`, or :math:`a > 8` with
+    :math:`b \ge 0.1`), `_large_a` (:math:`a > 8`, :math:`b < 0.1`), and the
+    continued fraction directly (`_negative_b`: :math:`a \le 8`,
+    :math:`b < -5`). The
     :math:`z`-derivative is supplied by a `jax.custom_jvp` and is exact and
     O(1) -- by Leibniz it is just the integrand at the endpoint,
     :math:`z^{a-1}(1-z)^{b-1}` -- rather than differentiating through 64 terms.
@@ -656,7 +741,49 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     True
 
     """
-    return _incomplete_beta_core(a, b, z, _branch(a, b))
+    # The branch is chosen from the arguments as given -- before the promotion
+    # below, whose `jnp` ops would turn a literal into a staged value under an
+    # enclosing `jit` and so lose the static choice.
+    branch = _branch(a, b)
+    a, b, z = _promote(a, b, z)
+    return _incomplete_beta_core(a, b, z, branch)
+
+
+def _promote(
+    a: ScalarLike, b: ScalarLike, z: AnyArrayLike
+) -> tuple[ScalarLike, ScalarLike, AnyArray]:
+    """Make ``a``, ``b`` and ``z`` floating, and the strong ones of one dtype.
+
+    Integer ``z`` becomes float (otherwise it carries its dtype into the
+    continued fraction's switch point and truncates it to zero), then takes
+    ``result_type(a, b, z)`` (GH-66). Integer ``a`` and ``b`` become float too
+    -- an integer seeding a `scan` carry that a float then updates is a type
+    error, and an integer primal has a ``float0`` tangent the custom JVP
+    cannot build -- and a *strong* ``a`` or ``b`` of another dtype is cast to
+    the common one, for the same reason (float32 ``a`` with float64 ``b``).
+    Weak parameters -- Python floats -- are left alone: they never change a
+    carry's type, and casting them down to a float32 ``z`` would compute the
+    parameter-only quantities (the switch point, the complete beta function)
+    in float32 for nothing, at ``b * eps`` cost.
+    """
+    z = jnp.asarray(z)
+    if not jnp.issubdtype(z.dtype, jnp.inexact):
+        z = z.astype(jnp.promote_types(z.dtype, float))
+    dtype = jnp.result_type(a, b, z)
+    if dtype != z.dtype:
+        z = z.astype(dtype)
+
+    def match(p: ScalarLike) -> ScalarLike:
+        if isinstance(p, int | float) and not isinstance(p, bool):
+            return float(p)  # a weak float
+        p = jnp.asarray(p)
+        if p.weak_type:
+            if jnp.issubdtype(p.dtype, jnp.inexact):
+                return p
+            return p * 1.0  # a weak integer becomes a weak float
+        return p.astype(dtype)
+
+    return match(a), match(b), z
 
 
 @ft.partial(jax.custom_jvp, nondiff_argnums=(3,))
@@ -683,8 +810,8 @@ def _incomplete_beta_jvp(
     # the implementation. Skipped entirely in the common case, where the
     # differentiation is with respect to position at fixed a and b. When it does
     # run, the primal comes from the same `jvp`, not a second evaluation: with
-    # `b` traced the implementation is a `lax.cond`, and XLA cannot merge two
-    # copies of one, so a separate primal ran the whole thing twice (1.8x).
+    # `a` or `b` traced the implementation is a `lax.switch`, and XLA cannot
+    # merge two copies of one, so a separate primal ran the whole thing twice.
     a_zero, b_zero = isinstance(a_dot, SymbolicZero), isinstance(b_dot, SymbolicZero)
     if a_zero and b_zero:
         primal_out = _incomplete_beta_impl(a, b, z, branch)
