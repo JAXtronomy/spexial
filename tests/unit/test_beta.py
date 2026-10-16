@@ -18,6 +18,7 @@ from scipy.integrate import quad
 from scipy.special import beta as scipy_beta, betainc as scipy_betainc, hyp2f1
 
 import spexial as sp
+from spexial._src.beta import _EXPRL_BAND, _incomplete_beta_core, _is_static_one
 
 # `a > 0` always. `b` is any real: the negative and zero values are the reason
 # this exists, and come up as ordinary slopes in double power-law profiles.
@@ -135,7 +136,7 @@ def test_endpoints(a, b):
     np.testing.assert_allclose(float(got[1]), scipy_beta(a, b), rtol=1e-11)
 
 
-@pytest.mark.parametrize("a", [0.5, 2.0])
+@pytest.mark.parametrize("a", [0.5, 1.0, 2.0])
 @pytest.mark.parametrize("b", [-1.0, 0.0, 1.5])
 def test_z_derivative_is_the_integrand(a, b):
     """The custom JVP must equal ``z^(a-1) (1-z)^(b-1)``, exactly.
@@ -227,3 +228,342 @@ def test_integer_arguments_are_promoted():
     got = sp.incomplete_beta(2, 1, jnp.asarray(1))
     assert jnp.issubdtype(got.dtype, jnp.floating)
     np.testing.assert_allclose(float(got), scipy_beta(2.0, 1.0), rtol=1e-12)
+
+
+# ============================================================================
+# The a == 1 closed form
+
+
+@pytest.mark.parametrize("b", BS)
+def test_a_eq_1_closed_form_matches_the_series(b):
+    """A static ``a == 1`` takes `_a_eq_1`; it must agree with the series it skips."""
+    z = jnp.asarray(ZS)
+    np.testing.assert_allclose(
+        np.asarray(sp.incomplete_beta(1.0, b, z)),
+        np.asarray(_incomplete_beta_core(1.0, b, z)),
+        rtol=1e-11,
+    )
+
+
+def test_a_eq_1_traced_takes_the_series():
+    """A traced ``a`` cannot be inspected, so it takes the series -- same answer.
+
+    Checked on the traced program itself, not only the values: the series is a
+    `scan`, the closed form has none.
+    """
+    z = jnp.asarray(ZS)
+    assert "scan" in str(jax.make_jaxpr(lambda a: sp.incomplete_beta(a, -1.0, z))(1.0))
+    assert "scan" not in str(
+        jax.make_jaxpr(lambda zz: sp.incomplete_beta(1.0, -1.0, zz))(z)
+    )
+    traced = jax.jit(lambda a: sp.incomplete_beta(a, -1.0, z))(1.0)
+    static = sp.incomplete_beta(1.0, -1.0, z)
+    np.testing.assert_allclose(np.asarray(traced), np.asarray(static), rtol=1e-11)
+
+
+@pytest.mark.parametrize("z", [0.1, 0.5, 0.9, 1 - 1e-6])
+def test_a_eq_1_b_derivatives_at_the_removable_singularity(z):
+    """``b = 0`` is removable; every order of the ``b``-derivative must be right.
+
+    ``B(1, b, z) = -L sum_k (bL)^k / (k+1)!`` with ``L = log(1-z)``, so the
+    n-th ``b``-derivative at ``b = 0`` is ``-L^(n+1) / (n+1)``. A `where` that
+    substituted ``-L`` at ``b = 0`` would get the value right and all of these
+    wrong.
+    """
+    L = np.log1p(-z)
+    f = lambda b: sp.incomplete_beta(1.0, b, jnp.asarray(z))
+    d1, d2, d3 = jax.grad(f), jax.grad(jax.grad(f)), jax.grad(jax.grad(jax.grad(f)))
+    np.testing.assert_allclose(float(f(0.0)), -L, rtol=1e-14)
+    np.testing.assert_allclose(float(d1(0.0)), -(L**2) / 2, rtol=1e-13)
+    np.testing.assert_allclose(float(d2(0.0)), -(L**3) / 3, rtol=1e-13)
+    np.testing.assert_allclose(float(d3(0.0)), -(L**4) / 4, rtol=1e-13)
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+def test_a_eq_1_continuous_across_the_series_band(side):
+    """Value and ``b``-derivative agree with the reference on both sides of the band.
+
+    `_a_eq_1` switches from the series to ``expm1(x) / x`` at
+    ``|x| = _EXPRL_BAND``; a step there would be invisible to tests that never
+    sample the seam.
+    """
+    z = 0.9
+    L = np.log1p(-z)
+    for x in (_EXPRL_BAND * (1 - 1e-9), _EXPRL_BAND * (1 + 1e-9)):
+        b = side * x / abs(L)
+        got = float(sp.incomplete_beta(1.0, b, jnp.asarray(z)))
+        np.testing.assert_allclose(got, -np.expm1(b * L) / b, rtol=1e-14)
+        grad = float(
+            jax.grad(lambda bb: sp.incomplete_beta(1.0, bb, jnp.asarray(z)))(b)
+        )
+        expect = (np.expm1(b * L) - b * L * np.exp(b * L)) / b**2
+        np.testing.assert_allclose(grad, expect, rtol=1e-12)
+
+
+def test_a_eq_1_forward_and_reverse_agree():
+    """The masked branches must not leak a ``0 * inf`` into either mode."""
+    f = lambda bb: sp.incomplete_beta(1.0, bb, jnp.asarray(0.7))
+    for b in (-1.0, 0.0, 1e-9, 0.3):
+        fwd = float(jax.jacfwd(f)(b))
+        rev = float(jax.jacrev(f)(b))
+        np.testing.assert_allclose(fwd, rev, rtol=1e-14)
+
+
+@pytest.mark.parametrize("b", [0.5, 1.0, 2.5, 300.0])
+def test_a_eq_1_at_z_eq_1(b):
+    """``B(1, b, 1) = 1/b`` for ``b > 0``, and ``d/db`` there is ``-1/b^2``.
+
+    The ``-L expm1(x)/x`` form is ``inf * 0`` here, since ``L = log(1-z) = -inf``.
+    Both differentiation modes are checked: the masked branch holds an infinity.
+    """
+    one = jnp.asarray(1.0)
+    np.testing.assert_allclose(
+        float(sp.incomplete_beta(1.0, b, one)), 1 / b, rtol=1e-15
+    )
+    for d in (jax.jacfwd, jax.jacrev):
+        got = float(d(lambda bb: sp.incomplete_beta(1.0, bb, one))(b))
+        np.testing.assert_allclose(got, -1 / b**2, rtol=1e-14)
+
+
+@pytest.mark.parametrize("b", [-2.5, -1e-300, 0.0])
+def test_a_eq_1_diverges_at_z_eq_1(b):
+    """For ``b <= 0`` the integral diverges at ``z = 1``: ``+inf``, not ``nan``.
+
+    ``b = 0`` is the case that needs care: ``b * log(1-z)`` is ``0 * -inf``.
+    """
+    assert float(sp.incomplete_beta(1.0, b, jnp.asarray(1.0))) == np.inf
+
+
+@pytest.mark.parametrize(
+    "z",
+    [
+        jnp.asarray([0.3, 0.9], jnp.float32),
+        jnp.asarray([0.3, 0.9], jnp.bfloat16),
+        jnp.asarray([0.3, 0.9], jnp.float16),
+        jnp.asarray([0.3, 0.9]),
+        0.3,
+    ],
+    ids=["float32", "bfloat16", "float16", "float64", "weak"],
+)
+def test_a_eq_1_keeps_the_input_dtype(z):
+    """The closed form returns what the series would: same dtype, same weak type.
+
+    Otherwise the output dtype would depend on whether ``a`` happens to be 1.
+    """
+    got, series = sp.incomplete_beta(1.0, 0.5, z), _incomplete_beta_core(1.0, 0.5, z)
+    assert (got.dtype, got.weak_type) == (series.dtype, series.weak_type)
+
+
+@pytest.mark.parametrize(
+    ("a", "expect"),
+    [
+        (1.0, True),
+        (1, True),
+        (np.float32(1), True),
+        (jnp.asarray(1.0), True),
+        (np.array([1.0]), False),
+        (1 + 1e-12, False),
+        (1 + 0j, False),
+    ],
+)
+def test_static_one_dispatch(a, expect):
+    """Only a concrete real scalar exactly equal to 1 takes the closed form."""
+    assert _is_static_one(a) is expect
+
+
+@pytest.mark.parametrize(("b", "z"), [(20.0, 0.9), (2.5, 1 - 1e-10), (2.5, 0.999)])
+def test_a_eq_1_mixed_partial_where_exp_x_is_tiny(b, z):
+    """``d/dz d/db B = log(1-z) (1-z)^(b-1)``, even where ``exp(bL)`` is tiny.
+
+    JAX differentiates ``expm1(x)`` as ``expm1(x) + 1``, which is exactly zero
+    below ``x ~ -37`` -- so the far branch uses ``1 - exp(x)``, whose derivative
+    is ``exp(x)`` itself.
+    """
+    got = jax.grad(jax.grad(lambda bb, zz: sp.incomplete_beta(1.0, bb, zz), 0), 1)
+    expect = np.log1p(-z) * np.exp((b - 1) * np.log1p(-z))
+    np.testing.assert_allclose(float(got(b, jnp.asarray(z))), expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize("z", [1e-8, 1e-12])
+def test_a_eq_1_mixed_partial_at_small_z(z):
+    """``d/db d/dz B = log(1-z) (1-z)^(b-1)`` to full precision as ``z -> 0``.
+
+    The z-rule's ``b``-derivative must carry ``log1p(-z)``, not ``log(1 - z)``,
+    which keeps only ``1e-16 / z`` relative precision.
+    """
+    got = jax.grad(jax.grad(lambda bb, zz: sp.incomplete_beta(1.0, bb, zz), 1), 0)
+    expect = np.log1p(-z) * np.exp(-np.log1p(-z))
+    np.testing.assert_allclose(float(got(0.0, jnp.asarray(z))), expect, rtol=1e-14)
+
+
+def _a_eq_1_ref(b, z, n=0):
+    """``d^n/db^n B(1, b, z)`` at 50 digits, from the closed form itself."""
+    import mpmath as mp  # noqa: PLC0415
+
+    with mp.workdps(50):
+        L = mp.log1p(-mp.mpf(z))
+        f = lambda t: -L if t == 0 else -mp.expm1(t * L) / t
+        return float(f(mp.mpf(b)) if n == 0 else mp.diff(f, mp.mpf(b), n))
+
+
+@pytest.mark.parametrize("side", [-1, 1])
+@pytest.mark.parametrize("n", [2, 3])
+def test_a_eq_1_higher_b_derivatives_across_the_series_band(side, n):
+    """The 2nd and 3rd ``b``-derivatives are right on both sides of the band.
+
+    The direct quotient's derivatives cancel as ``|x| -> 0``; `_EXPRL_BAND` is
+    where they are still accurate (3e-15 / 8e-14 at ``|x| = 1/2``). Narrowed to
+    0.05 they were 2e-12 / 2e-10, which the first derivative alone did not show.
+    """
+    z = 0.9
+    L = np.log1p(-z)
+    d = lambda bb: sp.incomplete_beta(1.0, bb, jnp.asarray(z))
+    for _ in range(n):
+        d = jax.grad(d)
+    for x in (_EXPRL_BAND * (1 - 1e-9), _EXPRL_BAND * (1 + 1e-9)):
+        b = side * x / abs(L)
+        np.testing.assert_allclose(float(d(b)), _a_eq_1_ref(b, z, n), rtol=1e-12)
+
+
+@pytest.mark.parametrize("b", [2.5, 3.0, 4.0])
+def test_a_eq_1_higher_z_derivatives_at_z_eq_1_with_traced_b(b):
+    """Traced and concrete ``b`` agree at ``z = 1`` to the third z-derivative.
+
+    A traced ``b`` writes ``(1-z)^(b-1)`` via ``log(1-z)``, ``-inf`` at z = 1;
+    clamping it differentiated as ``0 * -inf`` and made these ``nan``.
+    """
+    one = jnp.asarray(1.0)
+    d1 = jax.grad(lambda bb, zz: sp.incomplete_beta(1.0, bb, zz), 1)
+    d2 = jax.grad(d1, 1)
+    d3 = jax.grad(d2, 1)
+    for d in (d1, d2, d3):
+        traced, concrete = float(jax.jit(d)(b, one)), float(d(b, one))
+        assert traced == concrete, (b, traced, concrete)
+        assert not np.isnan(traced)
+
+
+@pytest.mark.parametrize("b", [-500.0, -50.0, 50.0])
+def test_a_eq_1_in_the_log1p_band(b):
+    """REGRESSION: XLA's ``log1p`` is ~240 ulp off for ``z`` in (0.3, 0.42].
+
+    The closed form multiplies that by ``|bL|``: 7e-12 at ``b = -500``. `_log1m`
+    switches to ``log(1 - z)`` there, which is exact enough.
+    """
+    z = np.linspace(0.3, 0.42, 25)
+    got = np.asarray(sp.incomplete_beta(1.0, b, jnp.asarray(z)))
+    expect = np.array([_a_eq_1_ref(b, zi) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=1e-13)
+
+
+def test_a_eq_1_infinite_b():
+    """``b = -inf`` diverges for ``z > 0`` (was ``nan``); ``b = +inf`` is 0."""
+    z = jnp.asarray([0.0, 0.3, 1.0])
+    np.testing.assert_array_equal(
+        np.asarray(sp.incomplete_beta(1.0, -np.inf, z)), [0.0, np.inf, np.inf]
+    )
+    np.testing.assert_array_equal(
+        np.asarray(sp.incomplete_beta(1.0, np.inf, z)), [0.0, 0.0, 0.0]
+    )
+
+
+def test_a_eq_1_rejects_an_array_b():
+    """``b`` is a scalar; the closed form must not quietly broadcast it.
+
+    The series path cannot (it raises inside its `scan`), so neither may this,
+    or the behaviour would depend on ``a``. Under pytest the jaxtyping hook
+    rejects it first; without it, the wrapper's own check does. Both are a
+    `TypeError`.
+    """
+    with pytest.raises(TypeError):
+        sp.incomplete_beta(1.0, np.array([0.0, 1.0]), jnp.asarray(0.3))
+
+
+@pytest.mark.parametrize(
+    ("b", "z"),
+    [(-800.0, 0.5883163234964616), (-800.0, 0.5961), (-1e4, 0.0685), (-1e4, 0.0697)],
+)
+def test_a_eq_1_no_spurious_overflow_for_negative_b(b, z):
+    """``(1 - e^x) / b`` overflowed to ``inf`` at ``x > 709.8`` for ``b < 0``.
+
+    The value, ~``e^x / |b|``, stays finite up to ``x < 709.8 + log|b|``: at
+    ``b = -800`` the whole band ``z`` in (0.5883, 0.5961) came back ``inf``.
+    """
+    got = float(sp.incomplete_beta(1.0, b, jnp.asarray(z)))
+    np.testing.assert_allclose(got, _a_eq_1_ref(b, z), rtol=1e-12)
+
+
+def test_a_eq_1_no_spurious_overflow_float32():
+    """The same overflow in float32, at ``x > 88.7``: ``b = -50`` near ``z = 0.83``."""
+    z = np.linspace(0.825, 0.835, 9).astype(np.float32)
+    got = np.asarray(sp.incomplete_beta(1.0, -50.0, jnp.asarray(z)), np.float64)
+    expect = np.array([_a_eq_1_ref(-50.0, float(zi)) for zi in z])
+    assert np.all(np.isfinite(got[np.isfinite(expect) & (expect < 3e38)]))
+    finite = np.isfinite(got)
+    np.testing.assert_allclose(got[finite], expect[finite], rtol=1e-5)
+
+
+@pytest.mark.parametrize("b", [2.0, -2.0, 0.5])
+def test_a_eq_1_outside_the_domain_is_nan(b):
+    """``z > 1`` is outside ``[0, 1]``: ``nan``, not a plausible number.
+
+    The z = 1 clamp once applied to every ``z >= 1`` and returned ``1/b``.
+    """
+    got = np.asarray(sp.incomplete_beta(1.0, b, jnp.asarray([1.5, 2.0])))
+    assert np.all(np.isnan(got)), got
+
+
+@pytest.mark.parametrize("b", [2.5, 4.0])
+def test_a_eq_1_mixed_partial_at_z_eq_1_either_order(b):
+    """``d/dz d/db`` and ``d/db d/dz`` agree at ``z = 1`` (both 0 for ``b > 1``).
+
+    The series branch multiplied ``-inf`` (``log 0``) into its masked value, and
+    one order of differentiation came out ``nan``. For ``b < 1`` the mixed
+    partial is genuinely infinite there, and no order is asserted.
+    """
+    one = jnp.asarray(1.0)
+    f = lambda bb, zz: sp.incomplete_beta(1.0, bb, zz)
+    bz = float(jax.grad(jax.grad(f, 0), 1)(b, one))
+    zb = float(jax.grad(jax.grad(f, 1), 0)(b, one))
+    assert bz == zb == 0.0, (bz, zb)
+
+
+def test_a_eq_1_rejects_an_array_b_without_the_typecheck_hook():
+    """The wrapper's own scalar check, which the pytest jaxtyping hook preempts.
+
+    Run in a fresh interpreter with runtime type checking off -- the default for
+    users -- so it is the wrapper, not the hook, that raises.
+    """
+    import os  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    code = (
+        "import numpy as np, spexial as sp\n"
+        "try:\n"
+        "    sp.incomplete_beta(1.0, np.array([0.0, 1.0]), 0.3)\n"
+        "except TypeError as e:\n"
+        "    print(e)\n"
+    )
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k != "SPEXIAL_ENABLE_RUNTIME_TYPECHECKING"
+    }
+    out = subprocess.run(  # noqa: S603 -- a fixed snippet, run by this interpreter
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert "must be a scalar" in out.stdout, out.stdout + out.stderr
+
+
+def test_a_eq_1_integer_z():
+    """An integer ``z`` promotes to float on the closed-form path too.
+
+    ``B(1, 2, z) = (1 - (1-z)^2) / 2``: 0 at z = 0, 1/2 at z = 1.
+    """
+    got = sp.incomplete_beta(1, 2, jnp.asarray([0, 1]))
+    assert jnp.issubdtype(got.dtype, jnp.floating)
+    np.testing.assert_allclose(np.asarray(got), [0.0, 0.5], rtol=1e-15)
