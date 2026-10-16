@@ -206,9 +206,10 @@ def _expand_from(
     polynomial near 0, so every :math:`b`-derivative is exact at :math:`s = 0`,
     which integer slopes do hit (e.g. :math:`\gamma = 2` in Zhao's Eq. 7).
 
-    The sum is carried divided by :math:`w_0^b` and scaled back at the end, by
-    :math:`w_0^{b/2}` twice -- so a very negative :math:`b` cannot overflow an
-    intermediate while the result is representable.
+    The sum is carried divided by :math:`w_0^b` and scaled back at the end,
+    through logarithms only if :math:`w_0^b` itself would overflow -- so a very
+    negative :math:`b` cannot overflow an intermediate while the result is
+    representable.
 
     At :math:`w = 0` (:math:`z = 1`) there is nothing to cancel -- :math:`w^s`
     is 0 for :math:`s > 0` -- so the direct form is used there whatever
@@ -266,14 +267,19 @@ def _expand_from(
     w_m_near = r_b * jnp.exp((near_s - b) * jnp.log(w_safe))
     near = near_coeff * w_m_near * delta * _expm1_over(near_s * delta)
     scaled = total + jnp.where(at_0, 0.0, near)
-    # Apply w0^b in two halves, so that b log w0 past ~709 does not overflow
-    # `exp` while the product is representable: each half is finite to b log w0
-    # ~ 1418, past which only a subnormal `scaled` leaves a finite result. Not
-    # through logarithms: their `exp` and `log` per point cost the series 1.3 ->
-    # 0.95 ms at 1e4 points, and a `cond` to skip them breaks reverse mode
-    # through `vmap`, as in `_dispatch`.
-    half = jnp.exp(0.5 * b * log_w0)
-    return scaled * half * half  # type: ignore[no-any-return]
+    # Apply w0^b: directly while it is finite, and through logarithms only when
+    # it would overflow (b log w0 > ~700), so as not to spend |log| * eps of
+    # accuracy on a round trip the common case does not need.
+    log_scale = b * log_w0
+    big = log_scale > 700.0
+    direct = scaled * jnp.exp(jnp.where(big, 0.0, log_scale))
+    via_log = jnp.exp(
+        jnp.where(big, log_scale, 0.0)
+        + jnp.log(jnp.where(big & (scaled > 0), scaled, 1.0))
+    )
+    return jnp.where(  # type: ignore[no-any-return]
+        big, jnp.where(scaled > 0, via_log, 0.0), direct
+    )
 
 
 _CF_FROM = 10.0
