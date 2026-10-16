@@ -123,7 +123,7 @@ def test_one_sided_batches_match_a_mixed_one(n):
     """
     above = jnp.linspace(n + 1.0, 4.0 * n, 97)  # n + 1 keeps the derivative's
     below = jnp.linspace(0.0, 0.9 * n, 97)  # order n + 1 on the same side
-    mixed = jnp.concatenate([below, above])
+    mixed = jnp.concat([below, above])
     for f in (
         lambda z: sp.spherical_jn(n, z),
         lambda z: sp.spherical_jn(n, z, derivative=True),
