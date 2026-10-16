@@ -76,9 +76,143 @@ def test_special_values():
         )
 
 
-def test_small_values_are_zero():
-    """Far below the turning point the value is exactly zero."""
-    assert float(sp.spherical_jn(100, 10.0)) == 0.0
+def test_upward_zeroes_small_values():
+    """Upward recurrence alone sets values far below the turning point to 0."""
+    assert (
+        float(sp.spherical_jn(100, 10.0, recurrence=sp.SphericalJnRecurrence.UP)) == 0.0
+    )
+
+
+def test_default_keeps_small_values():
+    """The default is right there instead: scipy gives 5.832040182006039e-90."""
+    got = float(sp.spherical_jn(100, 10.0))
+    assert got == pytest.approx(5.832040182006039e-90, rel=1e-12)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_tiny_argument_is_finite(dtype):
+    """Down to z ~ tiny, where one step once grew the float64 carry by 2**535."""
+    tiny = float(jnp.finfo(dtype).tiny)
+    z = jnp.asarray([tiny, 1e-30, 1e-21, 1e-15], dtype)
+    for n in (2, 5, 60):
+        for d in (False, True):
+            assert np.all(np.isfinite(sp.spherical_jn(n, z, derivative=d)))
+    # The leading term of the series, x**2 / 15, where it is representable.
+    rtol = 1e-12 if dtype == "float64" else 1e-5
+    np.testing.assert_allclose(sp.spherical_jn(2, z[1:]), z[1:] ** 2 / 15, rtol=rtol)
+
+
+def test_downward_is_nan_above_the_turning_point():
+    """`SphericalJnRecurrence.DOWN` cannot be right at ``|z| >= n``, and says so."""
+    z = jnp.asarray([0.5, 9.9, 10.0, -10.0, 30.0])
+    got = np.asarray(sp.spherical_jn(10, z, recurrence=sp.SphericalJnRecurrence.DOWN))
+    np.testing.assert_array_equal(np.isnan(got), [False, False, True, True, True])
+    both = np.asarray(sp.spherical_jn(10, z[:2]))
+    np.testing.assert_allclose(got[:2], both, rtol=1e-14)
+    table = sp.spherical_jn_all(10, 12.0, recurrence=sp.SphericalJnRecurrence.DOWN)
+    assert np.all(np.isnan(table[2:]))
+
+
+@pytest.mark.parametrize("n", [7, 60])
+def test_one_sided_batches_match_a_mixed_one(n):
+    """A batch wholly above or below the turning point skips one recurrence.
+
+    It must still give what the same points give inside a mixed batch, which
+    runs both -- including through `jax.grad` and `jax.vmap`, which see the
+    `lax.cond` differently.
+    """
+    above = jnp.linspace(n + 1.0, 4.0 * n, 97)  # n + 1 keeps the derivative's
+    below = jnp.linspace(0.0, 0.9 * n, 97)  # order n + 1 on the same side
+    mixed = jnp.concatenate([below, above])
+    for f in (
+        lambda z: sp.spherical_jn(n, z),
+        lambda z: sp.spherical_jn(n, z, derivative=True),
+        lambda z: sp.spherical_jn_all(n, z),
+        jax.vmap(jax.grad(lambda t: sp.spherical_jn(n, t))),
+    ):
+        whole = np.asarray(f(mixed))
+        split = np.concatenate([np.asarray(f(below)), np.asarray(f(above))], -1)
+        np.testing.assert_allclose(split, whole, rtol=1e-13, atol=1e-16)
+    per_point = jax.vmap(lambda t: sp.spherical_jn(n, t))(above)
+    np.testing.assert_allclose(per_point, sp.spherical_jn(n, above), rtol=1e-13)
+
+
+@pytest.mark.parametrize("n", [0, 1])
+def test_downward_orders_0_and_1_are_exact_everywhere(n):
+    """Closed forms under `DOWN` too, derivative included, past ``|z| = n + 1``.
+
+    The derivative rule needs order ``n + 1``; taking that from the downward
+    recurrence made ``j_1'`` `nan` for every ``|z| >= 2``.
+    """
+    z = np.linspace(0.5, 40.0, 81)
+    down = sp.SphericalJnRecurrence.DOWN
+    j0, j1, j2, _ = _closed_forms(z)
+    want = -j1 if n == 0 else (j0 - 2.0 * j2) / 3.0
+    got = sp.spherical_jn(n, jnp.asarray(z), derivative=True, recurrence=down)
+    np.testing.assert_allclose(got, want, rtol=1e-12, atol=1e-15)
+    grad = jax.vmap(jax.grad(lambda t: sp.spherical_jn(n, t, recurrence=down)))
+    np.testing.assert_allclose(grad(jnp.asarray(z)), want, rtol=1e-12, atol=1e-15)
+
+
+@pytest.mark.parametrize("n", [2, 5, 30])
+def test_downward_value_and_derivative_are_nan_together(n):
+    """Under `DOWN`, j_n and j_n' are `nan` from exactly ``|z| = n``, and agree.
+
+    The derivative's neighbour, order ``n + 1``, is finite up to ``n + 1``,
+    which once left a finite `jax.grad` of a `nan` value on ``[n, n + 1)``.
+    """
+    down = sp.SphericalJnRecurrence.DOWN
+    z = jnp.asarray([n - 0.5, n - 1e-9, n, n + 0.5, n + 1.0 - 1e-9, -(n + 0.5)])
+    beyond = np.abs(np.asarray(z)) >= n
+    value = np.asarray(sp.spherical_jn(n, z, recurrence=down))
+    slope = np.asarray(sp.spherical_jn(n, z, derivative=True, recurrence=down))
+    grad = jax.vmap(jax.grad(lambda t: sp.spherical_jn(n, t, recurrence=down)))
+    for got in (value, slope, np.asarray(grad(z))):
+        np.testing.assert_array_equal(np.isnan(got), beyond)
+    table = sp.spherical_jn_all(n, z, derivative=True, recurrence=down)
+    np.testing.assert_array_equal(np.isnan(table), np.broadcast_to(beyond, table.shape))
+
+
+@pytest.mark.parametrize("n", [5, 60])
+def test_both_splits_exactly_at_the_order(n):
+    """`BOTH` is `DOWN` on ``[n - 1, n)`` and `UP` from ``n``, bit for bit.
+
+    Pins the switch: upward recurrence is still accurate just below the
+    turning point, so no accuracy test notices it moving there.
+    """
+    R = sp.SphericalJnRecurrence
+    below = jnp.linspace(n - 1.0, n - 1e-6, 17)
+    above = jnp.linspace(float(n), n + 1.0, 17)
+    np.testing.assert_array_equal(
+        sp.spherical_jn(n, below), sp.spherical_jn(n, below, recurrence=R.DOWN)
+    )
+    np.testing.assert_array_equal(
+        sp.spherical_jn(n, above), sp.spherical_jn(n, above, recurrence=R.UP)
+    )
+
+
+def test_tiny_argument_series_every_order():
+    """Below the Miller floor, each order is ``z**l / (2l + 1)!!`` to rounding."""
+    z = np.asarray([1e-24, 1e-30, 1e-40])
+    table = np.asarray(sp.spherical_jn_all(12, jnp.asarray(z)))
+    for order in range(2, 13):
+        double_factorial = float(np.prod(np.arange(2 * order + 1, 0, -2.0)))
+        want = z**order / double_factorial
+        kept = want > 1e-300  # past this the true value is subnormal
+        np.testing.assert_allclose(table[order][kept], want[kept], rtol=1e-13)
+
+
+def test_recurrence_accepts_its_string_values():
+    """``"up"`` is `SphericalJnRecurrence.UP`, and an unknown name raises."""
+    z = jnp.linspace(0.1, 30.0, 7)
+    np.testing.assert_array_equal(
+        sp.spherical_jn(5, z, recurrence="up"),
+        sp.spherical_jn(5, z, recurrence=sp.SphericalJnRecurrence.UP),
+    )
+    # `ValueError` from `SphericalJnRecurrence(...)`, or `TypeError` first where the
+    # runtime type checker is on, as it is under the test suite.
+    with pytest.raises((ValueError, TypeError)):
+        sp.spherical_jn(5, z, recurrence="sideways")
 
 
 def test_tiny_argument():

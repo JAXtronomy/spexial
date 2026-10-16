@@ -15,6 +15,7 @@ _ORIGINS = {
     "k2": "spexial._src.kn",
     "k2e": "spexial._src.kn",
     "polylog": "spexial._src.polylog",
+    "SphericalJnRecurrence": "spexial._src.spherical_bessel",
     "comb": "spexial._src.comb",
     "eval_gegenbauer": "spexial._src.gegenbauer",
     "eval_gegenbauers": "spexial._src.gegenbauer",
