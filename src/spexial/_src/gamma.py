@@ -104,15 +104,24 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
     wide = jnp.asarray(0.0).dtype
     reciprocal = jnp.exp(-log_no_flush(magnitude, dtype=wide)).astype(x_arr.dtype)
     signed = jnp.where(is_negative(x_arr), -reciprocal, reciprocal)
-    # Substituted across the whole subnormal band, upstream finite or not.
-    # Delegation is the default, and being *more accurate* is a reason to
-    # depart from it: measured against mpmath over all 767 float16 subnormals
-    # where `jax.scipy.special.gamma` returns a finite value, this branch is
-    # better at 690 of them and worse at 5, worst 4.8e-4 against upstream's
-    # 4.2e-3. An earlier version gated on `~isfinite(out)` to "keep upstream's
-    # answer where upstream has one", justified by a 60x figure that was
-    # measured backwards.
-    return jnp.where(positive_subnormal(magnitude), signed, out)
+    # Substituted across the whole subnormal band, upstream finite or not --
+    # *except* where this very reciprocal overflows. Delegation is the
+    # default, and being *more accurate* is a reason to depart from it:
+    # measured against mpmath over all 767 float16 subnormals where
+    # `jax.scipy.special.gamma` returns a finite value, this branch is better
+    # at 690 of them and worse at 5, worst 4.8e-4 against upstream's 4.2e-3. An
+    # earlier version gated on `~isfinite(out)` to "keep upstream's answer
+    # where upstream has one", justified by a 60x figure that was measured
+    # backwards.
+    #
+    # But `reciprocal` is `1/|x|` at the edge of the subnormal band, which is
+    # itself at the edge of the dtype's range -- for `bfloat16`, `|x| =
+    # tiny/4` rounds `reciprocal` up past the largest representable value, to
+    # `inf`, while upstream's own (differently-rounded) answer is still
+    # finite. Overriding a finite upstream value with `inf` is not "more
+    # accurate" by any measurement; it is this branch failing on its own
+    # terms, so the one case to keep off of it is where it has overflowed.
+    return jnp.where(positive_subnormal(magnitude) & jnp.isfinite(signed), signed, out)
 
 
 @gamma.defjvp
