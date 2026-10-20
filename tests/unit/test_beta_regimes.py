@@ -311,6 +311,64 @@ def test_higher_z_derivatives_at_z_eq_1_with_traced_b(b):
         assert not np.isnan(traced)
 
 
+def _mp_integrand_derivative(a, b, z, order):
+    """``d^order/dz^order`` of ``z^(a-1) (1-z)^(b-1)``, by mpmath."""
+    with mp.workdps(30):
+        return float(mp.diff(lambda t: t ** (a - 1) * (1 - t) ** (b - 1), z, order))
+
+
+@pytest.mark.parametrize("traced", [False, True])
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [
+        (9.0, 1.0, 1.0),
+        (2.0, 2.0, 1.0),
+        (2.0, 3.0, 1.0),
+        (1.0, 3.0, 0.0),
+        (2.0, 3.0, 0.0),
+        (2.0, 1.5, 0.0),
+    ],
+)
+def test_z_derivatives_at_an_integer_exponent_endpoint(a, b, z, traced):
+    """REGRESSION (GH-73): z-derivatives at an integer-exponent endpoint.
+
+    Every z-derivative at ``z = 0`` or ``1`` is finite where the integrand's
+    exponent there, ``a - 1`` or ``b - 1``, is an integer ``n >= 0``. JAX
+    differentiates a float-exponent ``x ** y`` as ``y x^(y-1)``, which is
+    ``0 * inf`` at ``x = 0`` once differentiation has brought ``y`` to 0, so
+    the derivatives from order ``n + 2`` on were ``nan`` (jax-ml/jax#14397).
+    """
+    d = lambda bb, zz: sp.incomplete_beta(a, bb, zz)
+    for order in range(1, 6):
+        d = jax.grad(d, 1)
+        got = float(jax.jit(d)(b, z) if traced else d(b, z))  # jit traces b
+        want = _mp_integrand_derivative(a, b, z, order - 1)
+        np.testing.assert_allclose(
+            got, want, rtol=1e-12, atol=1e-12, err_msg=f"{order=}"
+        )
+
+
+def test_a_derivative_of_z_derivatives_at_a_eq_1():
+    """``d/da d^2/dz^2 B`` at ``a = 1``, ``z > 0``.
+
+    The GH-73 guard is only at ``z = 0``. Guarding ``a = 1`` everywhere would
+    zero this, as the ``y == 0`` special case once did in JAX's own rule
+    (jax-ml/jax#12033). ``z^(a-1)`` is the factor to test: it is `_pow` at every
+    ``z``, while a traced ``b`` goes through ``log1p`` inside the interval.
+    """
+    b, z = 2.0, 0.3
+    d2z = lambda aa: jax.grad(jax.grad(lambda zz: sp.incomplete_beta(aa, b, zz)))(z)
+    got = float(jax.grad(d2z)(jnp.asarray(1.0)))
+    with mp.workdps(30):
+        want = float(
+            mp.diff(
+                lambda aa: mp.diff(lambda t: t ** (aa - 1) * (1 - t) ** (b - 1), z),
+                1.0,
+            )
+        )
+    np.testing.assert_allclose(got, want, rtol=1e-12)
+
+
 @pytest.mark.parametrize("b", [1e3, 1e4, 1e5])
 def test_large_b_small_a(b):
     """``a = 0.1``: the complete beta's second fraction converges slowest here.

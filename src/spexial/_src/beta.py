@@ -792,6 +792,43 @@ def _promote(
     return match(a), match(b), z
 
 
+@jax.custom_jvp
+def _pow(x: AnyArrayLike, y: ScalarLike, /) -> AnyArray:
+    """``x ** y`` for ``x >= 0``, with every x-derivative exact at ``x = 0``.
+
+    JAX differentiates a float-exponent power as ``y x^(y-1)``, which at
+    ``x = 0`` is ``0 * inf`` once differentiation has brought ``y`` to 0 --
+    upstream's deliberate reading of ``**`` on floats as the real function
+    ``x^y``, not differentiable at (0, 0) (jax-ml/jax#14397). For an integer
+    ``y = n >= 0`` that made the z-rule's derivatives from order ``n + 2`` on
+    ``nan`` at the endpoint (GH-73). Here the x-derivative of ``x^0`` at
+    ``x = 0`` is 0 exactly, and the rule recurses through `_pow`, so every order
+    meets that case in turn.
+    """
+    return jnp.asarray(x) ** y
+
+
+@_pow.defjvp
+def _pow_jvp(
+    primals: tuple[AnyArrayLike, ScalarLike],
+    tangents: tuple[AnyArrayLike, ScalarLike],
+    /,
+) -> tuple[AnyArray, AnyArray]:
+    x, y = primals
+    x_dot, y_dot = tangents
+    out = _pow(x, y)
+    # Only at x = 0: guarding y = 0 alone would also zero the y-derivative of
+    # this, y x^(y-1) -> x^(y-1), at every x -- the bug that removed JAX's own
+    # special case (jax-ml/jax#12033). Doubly, so the masked 0 * inf cannot
+    # reach a cotangent.
+    corner = (x == 0) & (y == 0)
+    dx = jnp.where(corner, 0.0, y * _pow(jnp.where(corner, 1.0, x), y - 1.0))
+    # d/dy x^y = log(x) x^y, which is 0 at x = 0 for y > 0; `log` of a safe
+    # value there, as JAX does.
+    dy = jnp.log(jnp.where(x == 0, 1.0, x)) * out
+    return out, dx * x_dot + dy * y_dot
+
+
 @ft.partial(jax.custom_jvp, nondiff_argnums=(3,))
 def _incomplete_beta_core(
     a: ScalarLike, b: ScalarLike, z: AnyArrayLike, branch: int, /
@@ -854,12 +891,12 @@ def _incomplete_beta_jvp(
             inside = z_arr < 1.0
             z_in = jnp.where(inside, z_arr, 0.0)
             via_log1p = jnp.exp((b - 1.0) * jnp.log1p(-z_in))
-            one_minus_z_pow = jnp.where(inside, via_log1p, (1.0 - z_arr) ** (b - 1.0))
+            one_minus_z_pow = jnp.where(inside, via_log1p, _pow(1.0 - z_arr, b - 1.0))
         else:
             # A concrete `b` has no derivative to get wrong, and as a constant
             # exponent XLA can simplify `pow` (to a reciprocal at b = 0, a square
             # root at b = 3/2), which `exp(... log1p)` would hide from it.
-            one_minus_z_pow = (1.0 - z) ** (b - 1.0)
-        tangent_out = tangent_out + z ** (a - 1.0) * one_minus_z_pow * z_dot
+            one_minus_z_pow = _pow(1.0 - z, b - 1.0)
+        tangent_out = tangent_out + _pow(z, a - 1.0) * one_minus_z_pow * z_dot
 
     return primal_out, tangent_out
