@@ -222,8 +222,13 @@ def test_jit_and_vmap_compose():
     np.testing.assert_allclose(np.asarray(mapped), np.asarray(direct), rtol=1e-14)
 
 
-def test_integer_arguments_are_promoted():
-    """Integer ``a``/``b``/``z`` promote to float, as everywhere else here."""
-    got = sp.incomplete_beta(2, 1, jnp.asarray(1))
+@pytest.mark.parametrize("b", [1, 20])
+def test_integer_arguments_are_promoted(b):
+    """Integer ``a``/``b``/``z`` promote to float, as everywhere else here.
+
+    ``b = 20`` takes the continued fraction, where an integer ``z`` once carried
+    its dtype into the switch point and truncated it to zero: the answer was 0.
+    """
+    got = sp.incomplete_beta(2, b, jnp.asarray(1))
     assert jnp.issubdtype(got.dtype, jnp.floating)
-    np.testing.assert_allclose(float(got), scipy_beta(2.0, 1.0), rtol=1e-12)
+    np.testing.assert_allclose(float(got), scipy_beta(2.0, b), rtol=1e-12)
