@@ -111,13 +111,14 @@ def test_vmap_over_b_across_the_switch_has_finite_gradients():
     bs = jnp.asarray([-2.0, 0.0, 5.0, 10.0, 10.5, 300.0, 1e4])
     f = lambda b: sp.incomplete_beta(2.0, b, jnp.asarray(0.3))
     batched = jax.vmap(f)(bs)
-    single = jnp.stack([f(b) for b in bs])
-    # Batched, `b` is traced and takes the `switch`; one at a time it is concrete
-    # and takes its branch statically -- two compilations of the same
-    # arithmetic, which XLA fuses differently: 2.1e-14 apart at b = 1e4, well
-    # inside the accuracy bound. Not a measure of accuracy, which is tested
-    # against mpmath elsewhere.
-    np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=5e-14)
+    # Against mpmath, not against `f` one `b` at a time: that takes its branch
+    # statically, a different compilation of the same arithmetic, and the two
+    # differ by more than either errs -- at b = 1e4, 2.1e-14 under jax 0.10 and
+    # 8.2e-14 under 0.12, with each within 1e-13 of the truth. Here the
+    # masking must leave the selected branch's value exact.
+    with mp.workdps(30):
+        expect = [float(_mp_incomplete_beta(2.0, float(b), 0.3)) for b in bs]
+    np.testing.assert_allclose(np.asarray(batched), expect, rtol=1e-12)
     assert bool(jnp.all(jnp.isfinite(jax.vmap(jax.grad(f))(bs))))
 
 
