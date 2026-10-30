@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -137,7 +137,7 @@ name = "build"
 version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "os_name == 'nt' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "colorama", marker = "os_name == 'nt'" },
     { name = "packaging" },
     { name = "pyproject-hooks" },
 ]
@@ -151,7 +151,7 @@ name = "cffi"
 version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "pycparser" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9e/ef/008a1939e372c06329a3fce4279c02f328488f3526744906eeec3da7ad5f/cffi-2.1.1.tar.gz", hash = "sha256:dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be", size = 530807, upload-time = "2026-08-03T21:21:18.939Z" }
 wheels = [
@@ -414,7 +414,7 @@ name = "colorlog"
 version = "6.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8c/55/ba79756cb90c8d69d599d57785398ac87bba7b19c80e87f4e8a562197c93/colorlog-6.12.0.tar.gz", hash = "sha256:2a7924c1dadf18b22a0eb8b06d1c7b01d5341707ec1641eb6fcc4fde0c3e8e5f", size = 18151, upload-time = "2026-07-23T13:40:40.71Z" }
 wheels = [
@@ -569,7 +569,7 @@ wheels = [
 
 [package.optional-dependencies]
 toml = [
-    { name = "tomli", marker = "python_full_version <= '3.11' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "tomli", marker = "python_full_version <= '3.11'" },
 ]
 
 [[package]]
@@ -854,8 +854,8 @@ wheels = [
 
 [package.optional-dependencies]
 numpy = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 
 [[package]]
@@ -872,7 +872,7 @@ name = "ipykernel"
 version = "7.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "appnope", marker = "sys_platform == 'darwin' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "appnope", marker = "sys_platform == 'darwin'" },
     { name = "comm" },
     { name = "debugpy" },
     { name = "ipython" },
@@ -896,17 +896,17 @@ name = "ipython"
 version = "9.17.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
     { name = "ipython-pygments-lexers" },
     { name = "jedi" },
     { name = "matplotlib-inline" },
-    { name = "pexpect", marker = "(sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'emscripten' and extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (sys_platform == 'emscripten' and extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (sys_platform == 'emscripten' and extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local') or (sys_platform == 'win32' and extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (sys_platform == 'win32' and extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (sys_platform == 'win32' and extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "pexpect", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
     { name = "prompt-toolkit" },
-    { name = "psutil", marker = "(sys_platform != 'cygwin' and sys_platform != 'emscripten') or (sys_platform == 'cygwin' and extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (sys_platform == 'cygwin' and extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (sys_platform == 'cygwin' and extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local') or (sys_platform == 'emscripten' and extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (sys_platform == 'emscripten' and extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (sys_platform == 'emscripten' and extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "psutil", marker = "sys_platform != 'cygwin' and sys_platform != 'emscripten'" },
     { name = "pygments" },
     { name = "stack-data" },
     { name = "traitlets" },
-    { name = "typing-extensions", marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b9/32/99451b1283ec5d92ad77073f12e1c667dc10775384d8f15c2914207149dd/ipython-9.17.1.tar.gz", hash = "sha256:8919be8c27f20a6f4423145028063f6637b42a03ce57665bb12015ee1f073529", size = 4539289, upload-time = "2026-09-01T08:29:32.6Z" }
 wheels = [
@@ -976,11 +976,11 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 dependencies = [
-    { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "ml-dtypes", marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "opt-einsum", marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" } },
+    { name = "ml-dtypes" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" } },
+    { name = "opt-einsum" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" } },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d2/73/eb91d98fcadfa2cbcfdd4e417ab116e47eb20882acc5ee678e47c35d6b57/jax-0.10.2.tar.gz", hash = "sha256:bf77428a8c2e6904c4f46d5ab12aa5cfc6cad2179f07f7e4c0fc75ac86ef0639", size = 2775110, upload-time = "2026-06-17T23:44:57.818Z" }
 wheels = [
@@ -1008,11 +1008,11 @@ resolution-markers = [
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
-    { name = "jaxlib", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "ml-dtypes", marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "opt-einsum", marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "jaxlib", version = "0.11.1", source = { registry = "https://pypi.org/simple" } },
+    { name = "ml-dtypes" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" } },
+    { name = "opt-einsum" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" } },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/90/aa/c3b6ac3863a490661e255d2356802b54d57b533460fa221d30743d81a6c1/jax-0.11.1.tar.gz", hash = "sha256:43e0d45b1dac002eca04c2de73298395225dd0d4651e3f573a540eaa18abfd80", size = 2864119, upload-time = "2026-08-17T20:31:29.938Z" }
 wheels = [
@@ -1021,7 +1021,7 @@ wheels = [
 
 [package.optional-dependencies]
 cuda12 = [
-    { name = "jax-cuda12-plugin", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, extra = ["with-cuda"], marker = "(python_full_version >= '3.12' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "jax-cuda12-plugin", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, extra = ["with-cuda"], marker = "(python_full_version >= '3.12' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
     { name = "jaxlib", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 cuda12-local = [
@@ -1149,9 +1149,9 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 dependencies = [
-    { name = "ml-dtypes", marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "ml-dtypes" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" } },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" } },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b2/2c/7038fc73154307389631b5b2dbe5ac529e1918eecc19a27e6644ad114bbf/jaxlib-0.10.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:5a98873fc867623b81f2bee15d554b8edd6588a183d01fa50d21b1e3db96ff2b", size = 61429039, upload-time = "2026-06-17T23:43:44.858Z" },
@@ -1189,9 +1189,9 @@ resolution-markers = [
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
-    { name = "ml-dtypes", marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "ml-dtypes" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" } },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" } },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6a/b4/9a7caf8704536e694ab8b4286eb4afa2224f3f75283f370d2246343e7bbc/jaxlib-0.11.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:384f633331c012491ccd65c38d47cd80d4131f5b3852694766bffa9385ddc9f3", size = 63173264, upload-time = "2026-08-17T20:30:07.721Z" },
@@ -1540,7 +1540,7 @@ version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
     { name = "ghp-import" },
     { name = "jinja2" },
     { name = "markdown" },
@@ -1627,8 +1627,8 @@ name = "ml-dtypes"
 version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/12/72/307d7c4bd0600601c7133fba5cb78af7db968152951c1cd473abb1cda782/ml_dtypes-0.6.0.tar.gz", hash = "sha256:5e60251d32ced5598972e4d5e06a2f044341f9291402551a3f6f0ec44f9299b0", size = 3032327, upload-time = "2026-08-13T14:14:40.215Z" }
 wheels = [
@@ -1684,7 +1684,7 @@ version = "2.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ast-serialize" },
-    { name = "librt", marker = "platform_python_implementation != 'PyPy' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "librt", marker = "platform_python_implementation != 'PyPy'" },
     { name = "mypy-extensions" },
     { name = "pathspec" },
     { name = "typing-extensions" },
@@ -2279,7 +2279,7 @@ version = "4.0.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "astroid" },
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
     { name = "dill" },
     { name = "isort" },
     { name = "mccabe" },
@@ -2331,7 +2331,7 @@ name = "pytest"
 version = "9.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
     { name = "iniconfig" },
     { name = "packaging" },
     { name = "pluggy" },
@@ -2455,14 +2455,14 @@ wheels = [
 
 [[package]]
 name = "python-discovery"
-version = "1.6.0"
+version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/91/96/0f93e27c9f60a650838f2118159aa115fd5732c0716247917b7ba7ede665/python_discovery-1.6.0.tar.gz", hash = "sha256:6393b4eae1be8b2182670635e7baff89ac21cb9f8e86fd1ff40c7b1144febb4c", size = 82849, upload-time = "2026-08-28T17:30:02.366Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/91/53/f0382313b138502c5af4d3f534db0a5f0925d628d110be2fc42fb38fb0d5/python_discovery-1.7.0.tar.gz", hash = "sha256:f484668953706f0b8815521ccf13811fa6ccdc4bd68cf3ef943594ad68a2ac86", size = 124047, upload-time = "2026-10-30T19:24:30.801Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/5e/21abf578182fb15006a57faf3711a1e659e29d600d19b6e557eae908c81d/python_discovery-1.6.0-py3-none-any.whl", hash = "sha256:d4e244cf17b8b29819ed78003d55fbacf86eda23425b075454fff9271b79377a", size = 38451, upload-time = "2026-08-28T17:30:01.236Z" },
+    { url = "https://files.pythonhosted.org/packages/27/a2/ac16c0b9efa00bc3926827e8299fef116b9803c1f1c916583ae6cb556804/python_discovery-1.7.0-py3-none-any.whl", hash = "sha256:252643f846e11e959ee6fb2f6adafad6822f860b7c1cf953360ea9a020c6de71", size = 39451, upload-time = "2026-10-30T19:24:29.47Z" },
 ]
 
 [[package]]
@@ -2546,7 +2546,7 @@ name = "pyzmq"
 version = "27.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi", marker = "implementation_name == 'pypy' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "cffi", marker = "implementation_name == 'pypy'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e7/8d/5b3d5631c2f4b4b8862f64cd0c9eb777b5710eeb5125b4be8dd0a200a4c0/pyzmq-27.2.0.tar.gz", hash = "sha256:54d4259d1bfae24ecdb5ca79f7acc2eac6c286a02d6a0ae617797cb45f0726d3", size = 292316, upload-time = "2026-08-20T19:08:21.19Z" }
 wheels = [
@@ -2638,7 +2638,7 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" } },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7a/97/5a3609c4f8d58b039179648e62dd220f89864f56f7357f5d4f45c29eb2cc/scipy-1.17.1.tar.gz", hash = "sha256:95d8e012d8cb8816c226aef832200b1d45109ed4464303e997c5b13122b297c0", size = 30573822, upload-time = "2026-02-23T00:26:24.851Z" }
 wheels = [
@@ -2715,7 +2715,7 @@ resolution-markers = [
     "python_full_version == '3.12.*'",
 ]
 dependencies = [
-    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" } },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7e/74/66de6258867beb2ef08f35f9f2ac017a52cacd5081714d239ff1a442d458/scipy-1.18.1.tar.gz", hash = "sha256:52c4b7422442aba924d03ad4019852b08a92e64ea187b933135687bfe2747307", size = 30781235, upload-time = "2026-08-21T23:28:50.599Z" }
 wheels = [
@@ -2803,10 +2803,10 @@ wheels = [
 name = "spexial"
 source = { editable = "." }
 dependencies = [
-    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "jaxlib", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "jaxlib", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "jaxtyping" },
     { name = "typing-extensions" },
 ]
@@ -2818,11 +2818,11 @@ cpu = [
 ]
 cuda12 = [
     { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "(python_full_version < '3.12' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "(python_full_version >= '3.12' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "(python_full_version >= '3.12' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
 ]
 cuda12-local = [
     { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12-local"], marker = "(python_full_version < '3.12' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12-local"], marker = "(python_full_version >= '3.12' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12-local"], marker = "(python_full_version >= '3.12' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
 ]
 
 [package.dev-dependencies]
@@ -2838,8 +2838,8 @@ bench = [
     { name = "pytest-github-actions-annotate-failures" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "sybil", extra = ["pytest"] },
 ]
 build = [
@@ -2852,8 +2852,8 @@ dev = [
     { name = "hippogriffe" },
     { name = "hypothesis", extra = ["numpy"] },
     { name = "ipykernel" },
-    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "mkdocstrings", extra = ["python"] },
     { name = "mpmath" },
     { name = "mypy" },
@@ -2871,16 +2871,16 @@ dev = [
     { name = "pytest-github-actions-annotate-failures" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "sybil", extra = ["pytest"] },
     { name = "ty" },
     { name = "zensical" },
 ]
 docs = [
     { name = "hippogriffe" },
-    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "jax", version = "0.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "mkdocstrings", extra = ["python"] },
     { name = "pymdown-extensions" },
     { name = "zensical" },
@@ -2903,8 +2903,8 @@ test = [
     { name = "pytest-github-actions-annotate-failures" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
-    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12') or (extra == 'extra-7-spexial-cpu' and extra == 'extra-7-spexial-cuda12-local') or (extra == 'extra-7-spexial-cuda12' and extra == 'extra-7-spexial-cuda12-local')" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "sybil", extra = ["pytest"] },
 ]
 typecheck = [
@@ -3168,17 +3168,18 @@ wheels = [
 
 [[package]]
 name = "virtualenv"
-version = "21.7.13"
+version = "21.14.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "distlib" },
     { name = "filelock" },
+    { name = "packaging" },
     { name = "platformdirs" },
     { name = "python-discovery" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/13/50/c9b84eb106d0db420b9878dac0a386c5791726f127ce20b06897f6e3a1e9/virtualenv-21.7.13.tar.gz", hash = "sha256:0355558b6f33619aab31347e43643b0ebc97f61ea3acf617b2b69e1f8a843d11", size = 5360306, upload-time = "2026-09-18T04:35:49.354Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/aa/bff50daee0488e16d611258a9b6c5a1d0c9e128f8ca424e9f4e1c0444ef2/virtualenv-21.14.13.tar.gz", hash = "sha256:de5307ba4b9a0001d9c8ea02832d38f63ca432880f416c1bface61c4323fd905", size = 5570301, upload-time = "2026-10-22T20:10:16.952Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/ce/e74453531b0c49a58d0e8a4f9bab4495705859fee4a4f7de27d58f4a791a/virtualenv-21.7.13-py3-none-any.whl", hash = "sha256:1bea5af7463f59c4719db48fe739579a2a4f569c96f26c086edda85c96da9f59", size = 5328680, upload-time = "2026-09-18T04:35:47.194Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/a9/c10d8a44a29fb94a18b43fdf11f38caca53ae7c9406f11a72b1cb8f624f1/virtualenv-21.14.13-py3-none-any.whl", hash = "sha256:5fbb04138a4861580b78ba9110d529a26bc48fcc93c8ec36bc0202eeed96a788", size = 5557094, upload-time = "2026-10-22T20:10:15.096Z" },
 ]
 
 [[package]]
@@ -3332,7 +3333,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/94/e5/389cdd675cfb847d49bd8901944b06abae7dde1385767738f159ea11f8c3/zensical-0.0.66-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:edd3be5e9d6cceaccaed2fdc53d4e02d02db004706e49389cbce6f96c92c4e4d", size = 15425564, upload-time = "2026-09-28T09:48:07.374Z" },
     { url = "https://files.pythonhosted.org/packages/0d/8d/8ad9cff38c92a728466666654f3063ebbcad54ffc252d4d35a58bf890007/zensical-0.0.66-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:fa2aca4e1d3ecafd2444904183894bf5c4afb2d3541bb3ffc88f324b24d93444", size = 15097798, upload-time = "2026-09-28T09:48:09.836Z" },
     { url = "https://files.pythonhosted.org/packages/fa/20/3d95d7fcd29d4b662615ac055c1bc35b13bd9adf5243d95f7996b082a4ba/zensical-0.0.66-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8cdcd5482450defb3da9fa7538ae87c849354c72ab4c3d45f18cbd3762788a47", size = 15388458, upload-time = "2026-09-28T09:48:12.377Z" },
-    { url = "https://files.pythonhosted.org/packages/7b/44/27cb13e5690233b0b01368d25a0f07efe60f84ca076fd897b6a598ea224b/zensical-0.0.66-cp310-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:f2976572c867859a65f2ce73af017425417109e64aa081b2faa274ca28d06fcf", size = 15461069, upload-time = "2026-09-28T09:48:16.124Z" },
     { url = "https://files.pythonhosted.org/packages/20/65/5c7aef820f0f775932d61d0f2c13a88066daacb82eea9c06e1cab1f0f1c5/zensical-0.0.66-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e2c672393e4de4abde78c0f06a975eeef00d8d3d0fc19541d2a9e4155776be41", size = 15733416, upload-time = "2026-09-28T09:48:18.725Z" },
     { url = "https://files.pythonhosted.org/packages/06/48/93e35db88ce5a3d8e453d9b87e1b9c72ddca49b87fb614defbac9b888ec1/zensical-0.0.66-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:04911b79ad4b468a3234b16d3b0fcb6fb7d61dd4f5ea34cb2a8cc1a240cc1b39", size = 15564602, upload-time = "2026-09-28T09:48:21.407Z" },
     { url = "https://files.pythonhosted.org/packages/48/dd/4bf42e4135b0651bd43174458d94471a482dbdcd87f6b2afc199cae2f01c/zensical-0.0.66-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:9fb539cb7f3153c050b412d917330d1d5f86ba4e997bca59479d22ef98a5273d", size = 15967451, upload-time = "2026-09-28T09:48:23.665Z" },
