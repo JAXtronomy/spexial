@@ -16,7 +16,7 @@ from pytest_codspeed import BenchmarkFixture
 from benchmarks.utils import warm
 
 import spexial as sp
-from spexial._src.beta import _incomplete_beta_core
+from spexial._src.beta import _SERIES, _incomplete_beta_core
 
 Z_SCALAR = jnp.asarray(0.3)
 Z_VECTOR = jnp.linspace(0.001, 0.999, 1_000)
@@ -55,7 +55,9 @@ def test_incomplete_beta_non_positive_b(benchmark: BenchmarkFixture, b: float) -
 
 
 @pytest.mark.parametrize(
-    "fn", [sp.incomplete_beta, _incomplete_beta_core], ids=["closed_form", "series"]
+    "fn",
+    [sp.incomplete_beta, lambda a, b, z: _incomplete_beta_core(a, b, z, _SERIES)],
+    ids=["closed_form", "series"],
 )
 def test_incomplete_beta_a_eq_1(benchmark: BenchmarkFixture, fn: Callable) -> None:
     """A static ``a == 1`` is elementary; the pair is what skipping the series saves."""
@@ -75,7 +77,7 @@ def test_grad_incomplete_beta_autodiff(benchmark: BenchmarkFixture) -> None:
     this is the honest alternative rather than a proxy for it. The gap between
     this and the benchmark above is what the custom rule buys.
     """
-    fn = jax.grad(lambda z: _incomplete_beta_core.fun(A, B, z).sum())
+    fn = jax.grad(lambda z: _incomplete_beta_core.fun(A, B, z, _SERIES).sum())
     benchmark(warm(fn, Z_VECTOR))
 
 
@@ -91,7 +93,9 @@ def test_grad_incomplete_beta_parameters(benchmark: BenchmarkFixture) -> None:
 
 
 @pytest.mark.parametrize(
-    "fn", [sp.incomplete_beta, _incomplete_beta_core], ids=["closed_form", "series"]
+    "fn",
+    [sp.incomplete_beta, lambda a, b, z: _incomplete_beta_core(a, b, z, _SERIES)],
+    ids=["closed_form", "series"],
 )
 def test_grad_incomplete_beta_a_eq_1_b(
     benchmark: BenchmarkFixture, fn: Callable
@@ -99,3 +103,12 @@ def test_grad_incomplete_beta_a_eq_1_b(
     """``d/db`` at a static ``a == 1``: the closed form against the series' autodiff."""
     grad = jax.grad(lambda b: fn(1.0, b, Z_VECTOR).sum())
     benchmark(warm(grad, B))
+
+
+@pytest.mark.parametrize("b", [50.0, 1e3])
+def test_incomplete_beta_large_b(benchmark: BenchmarkFixture, b: float) -> None:
+    """Above ``b = 10`` the continued fraction replaces the series (GH-64).
+
+    About 6x the series' cost per point, against a series that is wrong there.
+    """
+    benchmark(warm(lambda z: sp.incomplete_beta(A, b, z), Z_VECTOR))

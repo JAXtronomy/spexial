@@ -18,7 +18,12 @@ from scipy.integrate import quad
 from scipy.special import beta as scipy_beta, betainc as scipy_betainc, hyp2f1
 
 import spexial as sp
-from spexial._src.beta import _EXPRL_BAND, _incomplete_beta_core, _is_static_one
+from spexial._src.beta import (
+    _EXPRL_BAND,
+    _SERIES,
+    _incomplete_beta_core,
+    _is_static_one,
+)
 
 # `a > 0` always. `b` is any real: the negative and zero values are the reason
 # this exists, and come up as ordinary slopes in double power-law profiles.
@@ -223,11 +228,16 @@ def test_jit_and_vmap_compose():
     np.testing.assert_allclose(np.asarray(mapped), np.asarray(direct), rtol=1e-14)
 
 
-def test_integer_arguments_are_promoted():
-    """Integer ``a``/``b``/``z`` promote to float, as everywhere else here."""
-    got = sp.incomplete_beta(2, 1, jnp.asarray(1))
+@pytest.mark.parametrize("b", [1, 20])
+def test_integer_arguments_are_promoted(b):
+    """Integer ``a``/``b``/``z`` promote to float, as everywhere else here.
+
+    ``b = 20`` takes the continued fraction, where an integer ``z`` once carried
+    its dtype into the switch point and truncated it to zero: the answer was 0.
+    """
+    got = sp.incomplete_beta(2, b, jnp.asarray(1))
     assert jnp.issubdtype(got.dtype, jnp.floating)
-    np.testing.assert_allclose(float(got), scipy_beta(2.0, 1.0), rtol=1e-12)
+    np.testing.assert_allclose(float(got), scipy_beta(2.0, b), rtol=1e-12)
 
 
 # ============================================================================
@@ -240,7 +250,7 @@ def test_a_eq_1_closed_form_matches_the_series(b):
     z = jnp.asarray(ZS)
     np.testing.assert_allclose(
         np.asarray(sp.incomplete_beta(1.0, b, z)),
-        np.asarray(_incomplete_beta_core(1.0, b, z)),
+        np.asarray(_incomplete_beta_core(1.0, b, z, _SERIES)),
         rtol=1e-11,
     )
 
@@ -350,7 +360,8 @@ def test_a_eq_1_keeps_the_input_dtype(z):
 
     Otherwise the output dtype would depend on whether ``a`` happens to be 1.
     """
-    got, series = sp.incomplete_beta(1.0, 0.5, z), _incomplete_beta_core(1.0, 0.5, z)
+    got = sp.incomplete_beta(1.0, 0.5, z)
+    series = _incomplete_beta_core(1.0, 0.5, z, _SERIES)
     assert (got.dtype, got.weak_type) == (series.dtype, series.weak_type)
 
 
