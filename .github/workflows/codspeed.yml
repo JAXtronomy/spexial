@@ -54,7 +54,7 @@ jobs:
       # dispatch-bound scalar benchmarks, which are mostly interpreter. Bump
       # this deliberately, and expect one run of environment changes when you do.
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.12.19"
           python-version-file: ".python-version"
@@ -74,7 +74,7 @@ jobs:
       # single-threaded XLA pool, so the numbers do not move with the runner's
       # core count.
       - name: Run benchmarks under CodSpeed
-        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         env:
           JAX_ENABLE_X64: "True"
         with:
