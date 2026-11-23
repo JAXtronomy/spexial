@@ -665,14 +665,20 @@ def _exp_of_log_term_jvp(
     a_dot, b_dot, x_dot = tangents
     log_value = log_fn(a, b, x)
     root = jnp.exp(log_value / 2.0)
-    # Per lane, so that each lane's tangent can be scaled by its own root.
-    lane = lambda p: jnp.broadcast_to(p, log_value.shape)  # noqa: E731
-    _, log_dot = jax.jvp(
-        log_fn,
-        (lane(a), lane(b), lane(x)),
-        (lane(a_dot) * root, lane(b_dot) * root, lane(x_dot) * root),
-    )
-    return jnp.exp(log_value), root * log_dot
+
+    def lane(
+        primal: AnyArrayLike, tangent: AnyArrayLike, /
+    ) -> tuple[AnyArray, AnyArray]:
+        # Per lane, so that each lane's tangent can be scaled by its own root;
+        # in the dtype the primal computation gives it, which for a weak
+        # (Python) parameter is the other arguments', so that a float32 root
+        # cannot meet a float64 primal (a `TypeError` in `jax.jvp`).
+        p = primal + jnp.zeros_like(log_value)
+        return p, (tangent * root).astype(p.dtype)
+
+    (a_l, a_t), (b_l, b_t), (x_l, x_t) = lane(a, a_dot), lane(b, b_dot), lane(x, x_dot)
+    _, log_dot = jax.jvp(log_fn, (a_l, b_l, x_l), (a_t, b_t, x_t))
+    return jnp.exp(log_value), (root * log_dot).astype(log_value.dtype)
 
 
 def _split_at(
@@ -1060,7 +1066,11 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
         z = jnp.asarray(z)
         if not jnp.issubdtype(z.dtype, jnp.inexact):
             z = z.astype(jnp.promote_types(z.dtype, float))
-        out_dtype = jnp.result_type(b, z)
+        # A strong `a` takes part in the dtype, as on the other paths
+        # (`result_type(a, b, z)`), so it does not depend on whether a is 1.
+        out_dtype = jnp.result_type(a, b, z)
+        if out_dtype != z.dtype:
+            z = z.astype(out_dtype)
         if jnp.dtype(out_dtype).itemsize < 4:
             # Half precision in float32, rounded once, as on the other paths:
             # in bfloat16 the closed form was 4% off at (-10, 0.6).

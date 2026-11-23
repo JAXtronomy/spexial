@@ -895,3 +895,29 @@ def test_a_eq_1_half_precision(b, z, dtype):
     assert got.dtype == dtype
     exact = (1 - (1 - float(zz)) ** b) / b  # at the rounded z
     assert float(got) == float(jnp.asarray(exact, jnp.float32).astype(dtype))
+
+
+@pytest.mark.parametrize(("a", "b"), [(2.0, 1.5), (20.0, -20.0), (3.0, -20.0)])
+def test_float32_parameter_with_a_python_float_differentiates(a, b):
+    """A float32 ``a`` traced against a Python-float ``b`` and ``z``.
+
+    Every branch is traced under `lax.switch`; the rule scaling the tangents of
+    `_large_a` and `_negative_b` formed them in float32 against a float64 primal
+    and `jax.jvp` raised `TypeError`, in every regime.
+    """
+    f32 = jnp.float32
+    got = jax.grad(lambda aa: sp.incomplete_beta(aa, b, 0.4))(f32(a))
+    assert got.dtype == f32
+    expect = jax.grad(lambda aa: sp.incomplete_beta(aa, b, 0.4))(a)
+    np.testing.assert_allclose(float(got), float(expect), rtol=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("a", "z"),
+    [(jnp.float64(1.0), jnp.float32(0.5)), (jnp.float32(1.0), jnp.bfloat16(0.5))],
+)
+def test_a_eq_1_dtype_includes_a_strong_a(a, z):
+    """``result_type(a, b, z)`` at ``a == 1`` too, as at ``a = 1.0001``."""
+    got = sp.incomplete_beta(a, -10.0, z)
+    other = sp.incomplete_beta(a + np.asarray(1e-4, a.dtype), -10.0, z)
+    assert got.dtype == other.dtype == jnp.result_type(a, -10.0, z)
