@@ -30,8 +30,10 @@ True
 `jax.scipy.special.hyp2f1` *can* express it for any ``b`` (DLMF 8.17.7), but it
 is a `jax.lax.while_loop` whose trip count depends on its data: under
 `jax.vmap` every lane pays the worst lane's iteration count, and its derivative
-runs a second such loop. What is here instead is two fixed-length,
-geometrically convergent series with an exact O(1) derivative rule.
+runs a second such loop. What is here instead is fixed-length evaluation
+throughout -- two geometrically convergent series, and continued fractions with
+a fixed number of steps where the series cancel -- with an exact O(1)
+derivative rule.
 
 Contributed from `galax <https://github.com/GalacticDynamics/galax>`_, where it
 was written for the Zhao (1996) family of density profiles (Eq. 43).
@@ -456,9 +458,12 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     # z = 0 and z = 1 make the term exactly zero (the direct one at 0, the
     # reflected one at 1). Evaluated, `log(0)` would put `0 * -inf` into the
     # a- and b-derivatives; it is a genuine zero for every a, b > 0, so its
-    # parameter derivatives are zero too.
+    # parameter derivatives are zero too. The substitute is on the side the
+    # endpoint takes, where that fraction converges: a fixed 1/2 ran the direct
+    # fraction far above x0 at large b, where it went negative (-27.9 at
+    # (2, 1000)), and its `log` made the masked gradients `nan`.
     endpoint = (z == 0) | (z == 1)
-    zs = jnp.where(endpoint, 0.5, z)
+    zs = jnp.where(z == 0, 0.5 * x0, jnp.where(z == 1, 0.5 * (1.0 + x0), z))
     log_front = a * jnp.log(zs) + b * _log1m(zs)
     first = jnp.where(swap, b, a)
     h = _continued_fraction(first, jnp.where(swap, a, b), jnp.where(swap, 1.0 - zs, zs))
@@ -543,8 +548,9 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     expansion `_large_z` uses from :math:`w_0 = 1/2`, where its terms grow like
     :math:`(a/2)^m/m!` and cancel; here they fall like :math:`2^m/m!`
     (:math:`(a-1) w_0 < 2`), costing under a digit. Measured against mpmath over
-    :math:`a \in [12, 100]`, :math:`b \in [-50, 0.1)` and :math:`z` to
-    :math:`1 - 10^{-12}`: :math:`2\times10^{-14}`, where the series was
+    :math:`a \in [12, 100]`, :math:`b \in [-1000, 0.1)` and :math:`z` to
+    :math:`1 - 10^{-12}`: :math:`2\times10^{-13}` or better (:math:`1.2\times
+    10^{-13}` at :math:`(100, -50, 100/102)`), where the series was
     :math:`10^{-9}` at :math:`a = 24` and :math:`10^{22}` at 100.
 
     At :math:`z = 1` with :math:`b \le 0` the integral diverges: the pole is
@@ -602,6 +608,12 @@ def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     :math:`a = 0.01, b = -200, z = 1/2`. The terms are formed in log space, as
     in `_large_b`, so a huge value that is still representable does not
     overflow on the way. :math:`z = 0` is a genuine zero; :math:`z = 1` the pole.
+
+    One reverse-mode limit is left: in the tail, at :math:`a \gtrsim 6`, where
+    the value is within about 50x of the float range (from
+    :math:`4\times10^{306}`), `jax.grad` in :math:`a` or :math:`b` is ``nan``:
+    the cotangent of the rescale by :math:`w_0^b` overflows inside the sum.
+    `jax.jacfwd` is exact there.
     """
     if jnp.dtype(z.dtype).itemsize < 4:
         f32 = jnp.float32
@@ -610,6 +622,57 @@ def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
         ).astype(z.dtype)
     half = jnp.asarray(0.5)
     return _split_at(a, b, z, half, half, steps=_NEG_B_STEPS)
+
+
+def _log_term(
+    a: AnyArrayLike, b: AnyArrayLike, x: AnyArray, /, steps: int | None = None
+) -> AnyArray:
+    """``log(B(a, b, x))`` by the continued fraction, for ``x`` in (0, 1)."""
+    log_front = a * jnp.log(x) + b * _log1m(x)
+    return log_front + jnp.log(_continued_fraction(a, b, x, steps=steps) / a)  # type: ignore[no-any-return]
+
+
+@ft.partial(jax.custom_jvp, nondiff_argnums=(0,))
+def _exp_of_log_term(
+    log_fn: Callable[[AnyArrayLike, AnyArrayLike, AnyArray], AnyArray],
+    a: ScalarLike,
+    b: ScalarLike,
+    x: AnyArray,
+    /,
+) -> AnyArray:
+    r"""``exp(log_fn(a, b, x))``, differentiated so reverse mode cannot overflow.
+
+    Autodiff of :math:`e^L` hands :math:`L`'s graph the cotangent :math:`e^L`
+    itself, which the fraction's recurrence then amplifies (by :math:`1/h` and
+    more): near the top of the float range, from about :math:`10^{305}`, the
+    reverse-mode :math:`a`- and :math:`b`-gradients came out ``nan`` while the
+    value and forward mode were fine. The tangent here is
+    :math:`e^{L/2} \cdot \dot L(e^{L/2} \dot a, e^{L/2} \dot b)` -- the same
+    number, by linearity -- so neither side of the transposed map sees more
+    than :math:`e^{L/2}`.
+    """
+    return jnp.exp(log_fn(a, b, x))
+
+
+@_exp_of_log_term.defjvp
+def _exp_of_log_term_jvp(
+    log_fn: Callable[[AnyArrayLike, AnyArrayLike, AnyArray], AnyArray],
+    primals: tuple[ScalarLike, ScalarLike, AnyArray],
+    tangents: tuple[ScalarLike, ScalarLike, AnyArray],
+    /,
+) -> tuple[AnyArray, AnyArray]:
+    a, b, x = primals
+    a_dot, b_dot, x_dot = tangents
+    log_value = log_fn(a, b, x)
+    root = jnp.exp(log_value / 2.0)
+    # Per lane, so that each lane's tangent can be scaled by its own root.
+    lane = lambda p: jnp.broadcast_to(p, log_value.shape)  # noqa: E731
+    _, log_dot = jax.jvp(
+        log_fn,
+        (lane(a), lane(b), lane(x)),
+        (lane(a_dot) * root, lane(b_dot) * root, lane(x_dot) * root),
+    )
+    return jnp.exp(log_value), root * log_dot
 
 
 def _split_at(
@@ -647,10 +710,13 @@ def _split_at(
     below = z < split
     pole = (z == 1.0) & (b <= 0)
     at_0 = z == 0
-    xs = jnp.where(below & ~at_0, z, split)
-    log_front = a * jnp.log(xs) + b * _log1m(xs)
-    h = _continued_fraction(a, b, xs, steps=steps)
-    direct = jnp.where(at_0, 0.0, jnp.exp(log_front + jnp.log(h / a)))
+    # At z = 0, a point below the split where z^a (1-z)^b cannot overflow
+    # (|b| x <= 1/2): at the split itself (1 - s)^b overflowed for very negative
+    # b, and its masked `inf` made the gradients `nan`.
+    x_at_0 = 0.5 * split / (1.0 + jnp.abs(b))
+    xs = jnp.where(at_0, x_at_0, jnp.where(below, z, split))
+    term = _exp_of_log_term(ft.partial(_log_term, steps=steps), a, b, xs)
+    direct = jnp.where(at_0, 0.0, term)
     w = jnp.where(below, w0, 1.0 - z)
     tail = _expand_from(a, b, w, w0, wide_b=True)
     return jnp.where(  # type: ignore[no-any-return]
@@ -994,6 +1060,13 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
         z = jnp.asarray(z)
         if not jnp.issubdtype(z.dtype, jnp.inexact):
             z = z.astype(jnp.promote_types(z.dtype, float))
+        out_dtype = jnp.result_type(b, z)
+        if jnp.dtype(out_dtype).itemsize < 4:
+            # Half precision in float32, rounded once, as on the other paths:
+            # in bfloat16 the closed form was 4% off at (-10, 0.6).
+            f32 = jnp.float32
+            b32 = b if isinstance(b, int | float) else jnp.asarray(b, f32)
+            return _a_eq_1_core(b32, z.astype(f32)).astype(out_dtype)
         return _a_eq_1_core(b, z)
     # The branch is chosen from the arguments as given -- before the promotion
     # below, whose `jnp` ops would turn a literal into a staged value under an

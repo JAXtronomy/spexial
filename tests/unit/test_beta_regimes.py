@@ -818,3 +818,80 @@ def test_parameter_gradients_large_a_and_negative_b(a, b, z):
     grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
     got = [float(g) for g in grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
     np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        (2.0, 1000.0),
+        (0.1, 80.0),
+        (30.0, 100.0),
+        (30.0, -300.0),
+        (50.0, -250.0),
+        (8.01, -500.0),
+        (2.0, -50.0),
+    ],
+)
+def test_parameter_gradients_at_z_eq_0_are_zero(a, b):
+    """``B(a, b, 0) = 0`` for every a, b, so its a- and b-gradients are 0.
+
+    A substitute z of 1/2 ran `_large_b`'s fraction far above its switch point
+    (``h = -27.9`` at (2, 1000), and its `log` was `nan`), and `_split_at`'s
+    substitute at the split overflowed ``(1 - s)^b``: both masked, both `nan`
+    in reverse mode.
+    """
+    grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
+    got = grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(0.0))
+    assert [float(g) for g in got] == [0.0, 0.0]
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [(8.01, -1000.0, 0.51), (50.0, -1000.0, 0.525), (30.0, -500.0, 0.75)],
+)
+def test_parameter_gradients_near_the_top_of_the_float_range(a, b, z):
+    """Values from 5e294 to 6e304: reverse mode as accurate as forward mode.
+
+    The cotangent of ``exp(L)`` is the value itself, which the fraction's
+    recurrence amplified past the float range from about 1e305. Measured worst
+    6.6e-14.
+    """
+    grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
+    got = [float(g) for g in grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
+    np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
+
+
+@pytest.mark.xfail(
+    reason="documented limit: the tail's rescale cotangent overflows within ~50x "
+    "of DBL_MAX for a >~ 6 in `_negative_b`; forward mode is exact",
+    strict=True,
+)
+def test_reverse_mode_in_the_negative_b_tail_near_dbl_max():
+    """3.8e307 at (8, -700, 0.6414): `jax.grad` in ``a`` is `nan` there."""
+    a, b, z = 8.0, -700.0, 0.6414
+    got = jax.grad(sp.incomplete_beta, 0)(
+        jnp.asarray(a), jnp.asarray(b), jnp.asarray(z)
+    )
+    np.testing.assert_allclose(
+        float(got), _mp_parameter_derivatives(a, b, z)[0], rtol=1e-12
+    )
+
+
+def test_forward_mode_in_the_negative_b_tail_near_dbl_max():
+    """The same point by `jax.jacfwd`: exact (measured 5.5e-14)."""
+    a, b, z = 8.0, -700.0, 0.6414
+    jac = jax.jacfwd(sp.incomplete_beta, (0, 1))
+    got = [float(g) for g in jac(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
+    np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
+
+
+@pytest.mark.parametrize(
+    ("b", "z", "dtype"), [(-10.0, 0.6, jnp.bfloat16), (-3.0, 0.9, jnp.float16)]
+)
+def test_a_eq_1_half_precision(b, z, dtype):
+    """The closed form at ``a == 1`` in float32, rounded once (4% off in bfloat16)."""
+    zz = jnp.asarray(z, dtype)
+    got = sp.incomplete_beta(1.0, b, zz)
+    assert got.dtype == dtype
+    exact = (1 - (1 - float(zz)) ** b) / b  # at the rounded z
+    assert float(got) == float(jnp.asarray(exact, jnp.float32).astype(dtype))
