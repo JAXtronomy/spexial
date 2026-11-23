@@ -581,7 +581,8 @@ def test_just_outside_the_old_pole_band(a, b, z):
 
     With a 1e-3 band, ``1e-3 <= |s| < ~0.1`` was left to ``(w0^s - w^s) / s``:
     5.8e-12 at ``a = 50, b = -0.999``. The one step with ``|s| < 1/2`` is now
-    evaluated as ``w^s delta expm1(s delta) / (s delta)``.
+    evaluated apart, relative to ``w0^b``, as
+    ``w0^m delta expm1(-s delta) / (-s delta)``.
     """
     got = float(sp.incomplete_beta(a, b, jnp.asarray(z)))
     np.testing.assert_allclose(got, _mp_hyp2f1_beta(a, b, z), rtol=5e-14)
@@ -670,12 +671,14 @@ def test_mixed_partial_at_z_one_half_is_symmetric():
 
 
 @pytest.mark.parametrize(("dtype", "rtol"), [(jnp.bfloat16, 2e-2), (jnp.float16, 2e-3)])
-@pytest.mark.parametrize(("a", "b"), [(2.0, 50.0), (24.0, -0.5)])
+@pytest.mark.parametrize(
+    ("a", "b"), [(2.0, 50.0), (24.0, -0.5), (4.0, 9.5), (2.0, -5.0), (2.0, -20.0)]
+)
 def test_half_precision(dtype, rtol, a, b):
-    """bfloat16/float16 on the continued fraction and on `_large_a`.
+    """bfloat16/float16 on every method: each evaluates in float32, rounds once.
 
-    Both evaluate in float32 and round once; Lentz's recurrence in bfloat16
-    was 6% off at ``b = 20``.
+    Lentz's recurrence in bfloat16 was 6% off at ``b = 20``; the series in half
+    precision was 33% off at (4, 9.5, 0.9) in bfloat16 and ``nan`` at (2, -5).
     """
     # Points whose values are representable in both dtypes; the reference is
     # the float64 value rounded to `dtype` (below its range that is 0).
@@ -739,7 +742,7 @@ def test_large_a_takes_large_a_below_b_one_tenth():
 @pytest.mark.parametrize("a", [0.01, 0.5, 2.0, 8.0])
 @pytest.mark.parametrize("b", [-5.5, -10.0, -50.0, -200.0, -1100.0])
 def test_very_negative_b(a, b):
-    """``b < -5`` (``a <= 8``): the continued fraction directly, no reflection.
+    """``b < -5`` (``a <= 8``): the continued fraction, no reflection.
 
     The series' ``(1-b)_k / k!`` grows like ``(|b| z)^k / k!`` before it
     decays, so 64 terms were 6e-12 off at ``b = -10``, 8% at -50, and had no
@@ -759,3 +762,59 @@ def test_continuous_across_the_negative_b_switch(a):
     at = sp.incomplete_beta(a, -5.0, z)
     below = sp.incomplete_beta(a, np.nextafter(-5.0, -99), z)
     np.testing.assert_allclose(np.asarray(at), np.asarray(below), rtol=1e-13)
+
+
+def test_half_precision_series_overflow_is_inf():
+    """Past float16's range the series gives ``inf``, not ``nan`` (2.5e8 here)."""
+    got = sp.incomplete_beta(0.5, -4.5, jnp.asarray([0.99], jnp.float16))
+    assert np.isposinf(np.asarray(got, np.float64)).all()
+
+
+def test_large_a_float32_near_its_overflow():
+    """`_large_a` in float32 up to float32's range, not float64's threshold.
+
+    ``w0^b`` here is ``e^89.5``, past float32's largest value, while the result
+    is 1.5e37; the log-space rescale used to wait for ``b log w0 > 700``.
+    """
+    z = np.array([0.86, 0.862])
+    got = np.asarray(sp.incomplete_beta(12.0, -46.0, jnp.asarray(z, jnp.float32)))
+    expect = np.array([_mp_hyp2f1_beta(12.0, -46.0, zi) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=3e-5)
+
+
+def _mp_parameter_derivatives(a, b, z):
+    """``(d/da, d/db) B(a, b, z)`` by mpmath, at 50 digits."""
+
+    def f(aa, bb):
+        return mp.mpf(z) ** aa / aa * mp.hyp2f1(aa, 1 - bb, aa + 1, z)
+
+    with mp.workdps(50):
+        da = mp.diff(lambda t: f(t, b), a)
+        db = mp.diff(lambda t: f(a, t), b)
+        return float(da), float(db)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [
+        # `_large_a`: B(a, b, s) at the split is past the float range, so a
+        # shared scalar for it put 0 * inf into the lanes below.
+        (50.0, -250.0, 0.01),
+        (50.0, -1000.0, 0.3),
+        # `_large_a` near z = 1: differentiated through the split point, the two
+        # pieces cancelled at the size of the value (3e-5 at (21.16, -5)).
+        (12.0, -2.5, 1 - 1e-12),
+        (21.16, -5.0, 1 - 1e-12),
+        (20.0, -10.0, 1 - 1e-9),
+        # `_negative_b` near z = 1: the fraction's d/da is a small remainder of
+        # 1/a, and lost 1.6e-5 of it at (0.16, -8.716).
+        (0.1, -5.01, 1 - 1e-9),
+        (0.16, -8.716, 1 - 1e-9),
+        (2.0, -6.0, 1 - 1e-9),
+    ],
+)
+def test_parameter_gradients_large_a_and_negative_b(a, b, z):
+    """Reverse-mode a- and b-gradients against mpmath; measured worst 5e-14."""
+    grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
+    got = [float(g) for g in grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
+    np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)

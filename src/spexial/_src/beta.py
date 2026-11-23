@@ -211,12 +211,14 @@ def _expand_from(
 
     The sum is carried divided by :math:`w_0^b` and scaled back at the end, so
     a very negative :math:`b` cannot overflow an intermediate while the result
-    is representable. With ``wide_b`` (`_large_a`, where :math:`b` is
-    unbounded below) the scaling goes through logarithms if :math:`w_0^b`
-    itself would overflow, and a result past the float range is ``inf``.
-    Without it (`_large_z`: :math:`-5 \le b \le 10`, :math:`w_0 = 1/2`)
-    neither can happen, and both are skipped: they cost each point a
-    logarithm and an exponential.
+    is representable. With ``wide_b`` (`_split_at`, for `_large_a` and
+    `_negative_b`, where :math:`b` is unbounded below) the scaling goes through
+    logarithms if :math:`w_0^b` itself would overflow, and a result past the
+    float range is ``inf``.
+    Without it (`_large_z`: :math:`-5 \le b \le 10`, :math:`w_0 = 1/2`, in
+    float32 or float64, since `_series` promotes half precision) neither can
+    happen, and both are skipped: they cost each point a logarithm and an
+    exponential.
 
     At :math:`w = 0` (:math:`z = 1`) there is nothing to cancel -- :math:`w^s`
     is 0 for :math:`s > 0` -- so the skipped term there is
@@ -238,10 +240,14 @@ def _expand_from(
     delta = log_w0 - log_w  # log(w0 / w) >= 0
     if wide_b:
         # Where r^b = (w / w0)^b (below) is past the float range, so is the
-        # result: it is at least (1 - w0)^(a-1) (w^b - w0^b) / |b|. With
-        # w >= eps (w is 1 - z) the overflow needs |b| > 20 in float64, |b| > 5
-        # in float32, so it happens only in `_large_a`, where w0 <= 1/5 and
-        # (1 - w0)^(a-1) >= e^-2: there (1 - w0)^(a-1) w0^b / |b| > 300 already.
+        # result. That needs b < 0, and with w >= eps (w is 1 - z) |b| > 19 in
+        # float64 or |b| > 5 in float32; w^b = r^b w0^b, with w0^b >= 2^|b|
+        # (w0 <= 1/2 in both callers). While r <= 1/2 (|b| up to ~1000 in
+        # float64), the integral over [w, 2w] alone is at least
+        # (1 - 2w)^(a-1) w^b (1 - 2^b) / |b|, with (1 - 2w)^(a-1) ~ 1 since w is
+        # then tiny; past that, the integral over [w, w0] is at least
+        # (1 - w0)^(a-1) w0^b / |b| (r^b - 1), with (1 - w0)^(a-1) >= 2^-7. Either
+        # way the factor over r^b is well above 1.
         # The expansion would make it `inf - inf`, so return `inf`, with
         # delta = 0 under the mask, so that no `nan` reaches a cotangent.
         log_max = math.log(float(jnp.finfo(w.dtype).max))
@@ -293,20 +299,28 @@ def _expand_from(
     near = near_coeff * near_w0_m * delta * _expm1_over(-near_s * delta)
     near_at_0 = near_coeff * near_w0_m / jnp.where(near_s == 0, 1.0, near_s)
     scaled = total + jnp.where(at_0, near_at_0, near)
+    # At w = w0 the integral is exactly 0, but the sum leaves a rounding residue
+    # (3e-28 at a = 50, b = -250), which w0^b (e^814 there) overflows; `_split_at`
+    # masks those lanes, and the masked `inf` made its gradients `nan`.
+    scaled = jnp.where(w == w0, 0.0, scaled)
     log_scale = b * log_w0
     if not wide_b:
-        # w0^b = 2^-b for b >= -5: nowhere near overflow.
+        # w0^b = 2^-b for b >= -5: nowhere near overflow in float32 or float64
+        # (`_series` promotes half precision).
         return scaled * jnp.exp(log_scale)  # type: ignore[no-any-return]
     # Apply w0^b: directly while it is finite, and through logarithms only when
-    # it would overflow (b log w0 > ~700), so as not to spend |log| * eps of
-    # accuracy on a round trip the common case does not need.
-    big = log_scale > 700.0
+    # it would overflow (b log w0 > log of the dtype's largest value: ~709.8 in
+    # float64, ~88.7 in float32), so as not to spend |log| * eps of accuracy on
+    # a round trip the common case does not need.
+    big = log_scale > log_max
     direct = scaled * jnp.exp(jnp.where(big, 0.0, log_scale))
+    # Only where the sum is positive: where it is 0 an exponent of `log_scale`
+    # alone is `exp(inf)` under the mask, and its zero cotangent is `nan`.
+    via = big & (scaled > 0)
     via_log = jnp.exp(
-        jnp.where(big, log_scale, 0.0)
-        + jnp.log(jnp.where(big & (scaled > 0), scaled, 1.0))
+        jnp.where(via, log_scale, 0.0) + jnp.log(jnp.where(via, scaled, 1.0))
     )
-    out = jnp.where(big, jnp.where(scaled > 0, via_log, 0.0), direct)
+    out = jnp.where(big, jnp.where(via, via_log, 0.0), direct)
     return jnp.where(overflow, jnp.inf, out)  # type: ignore[no-any-return]
 
 
@@ -460,6 +474,15 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
 
 def _series(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     """$B(a, b, z)$ by `_small_z` and `_large_z`, switched at $z = 1/2$."""
+    if jnp.dtype(z.dtype).itemsize < 4:
+        # Half precision has too few bits for the series' cancellations (8% off
+        # at (4, 9.5, 0.9) in float16), and its range is too short for
+        # `_large_z`'s unguarded rescale (nan at (2, -5)); work in float32 and
+        # round the result once, as the other methods do.
+        f32 = jnp.float32
+        return _series(jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)).astype(
+            z.dtype
+        )
     # For b <= 0 the integral diverges at z = 1: a genuine pole, +inf (GH-67).
     # `_large_z` cannot see it -- at w = 1 - z = 0 its expansion is `inf - inf`
     # -- so the pole is returned directly, and the series is handed a harmless
@@ -534,26 +557,13 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
             z.dtype
         )
     # Arrays, weakly typed when ``a`` is a Python scalar, so `z` sets the dtype.
-    split = jnp.asarray(a / (a + 2.0))
-    w0 = jnp.asarray(2.0 / (a + 2.0))
-    below = z < split
-    pole = (z == 1.0) & (b <= 0)
-    at_0 = z == 0
-    # Below the split: the fraction at z itself (z = 0 guarded, as in
-    # `_large_b`); above it: the fraction at the split, a scalar, plus the
-    # expansion out to z.
-    xs = jnp.where(below & ~at_0, z, split)
-    log_front = a * jnp.log(xs) + b * _log1m(xs)
-    direct = jnp.exp(log_front + jnp.log(_continued_fraction(a, b, xs) / a))
-    direct = jnp.where(at_0, 0.0, direct)
-    log_front_s = a * jnp.log(split) + b * jnp.log(w0)
-    at_split = jnp.exp(log_front_s + jnp.log(_continued_fraction(a, b, split) / a))
-    # At z = 1 (the pole when b <= 0) `_expand_from` takes w = 0 safely itself.
-    w = jnp.where(below, w0, 1.0 - z)
-    above = at_split + _expand_from(a, b, w, w0, wide_b=True)
-    return jnp.where(  # type: ignore[no-any-return]
-        pole, jnp.inf, jnp.where(below, direct, above)
-    )
+    # The result does not depend on where the split sits, so it carries no
+    # a-derivative: differentiated, the two pieces' derivatives through it cancel
+    # at the size of the value, leaving 3e-5 relative error in d/da at
+    # (21.16, -5, 1 - 1e-12).
+    split = jax.lax.stop_gradient(jnp.asarray(a / (a + 2.0)))
+    w0 = jax.lax.stop_gradient(jnp.asarray(2.0 / (a + 2.0)))
+    return _split_at(a, b, z, split, w0)
 
 
 _NEG_B_FROM = -5.0
@@ -576,28 +586,75 @@ and 256 change nothing.
 
 
 def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
-    r"""$B(a, b, z)$ for very negative $b$, by the continued fraction directly.
+    r"""$B(a, b, z)$ for very negative $b$, by the continued fraction and the tail.
 
     No reflection -- it would need :math:`B(a, b)`, which diverges for
     :math:`b \le 0` -- and none needed: for :math:`b` this negative the fraction
     converges at every :math:`z \in [0, 1)` (checked against mpmath for
     :math:`a \in [0.01, 8]`, :math:`b \in [-1100, -5]`: worst
-    :math:`4.4\times10^{-13}`, at :math:`a = 0.01, b = -200`). The term is
-    formed in log space, as in `_large_b`, so a huge value that is still
-    representable does not overflow on the way. :math:`z = 0` is a genuine
-    zero; :math:`z = 1` the pole.
+    :math:`4.4\times10^{-13}`, at :math:`a = 0.01, b = -200`). It is used up to
+    :math:`z = 1/2`, and above that `_split_at` adds the binomial tail from
+    :math:`w_0 = 1/2`, as `_large_z` does: the value is no better for it, but
+    the fraction's :math:`a`-derivative lost up to :math:`1.6\times10^{-5}` near
+    :math:`z = 1` (:math:`(0.16, -8.716, 1 - 10^{-9})`), and the tail's is good
+    to :math:`10^{-14}`. Below :math:`z = 1/2` the fraction's :math:`a`-derivative
+    still loses digits as :math:`1/a` grows: :math:`2\times10^{-11}` at
+    :math:`a = 0.01, b = -200, z = 1/2`. The terms are formed in log space, as
+    in `_large_b`, so a huge value that is still representable does not
+    overflow on the way. :math:`z = 0` is a genuine zero; :math:`z = 1` the pole.
     """
     if jnp.dtype(z.dtype).itemsize < 4:
         f32 = jnp.float32
         return _negative_b(
             jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)
         ).astype(z.dtype)
-    endpoint = (z == 0) | (z == 1)
-    zs = jnp.where(endpoint, 0.5, z)
-    h = _continued_fraction(a, b, zs, steps=_NEG_B_STEPS)
-    term = jnp.exp(a * jnp.log(zs) + b * _log1m(zs) + jnp.log(h / a))
+    half = jnp.asarray(0.5)
+    return _split_at(a, b, z, half, half, steps=_NEG_B_STEPS)
+
+
+def _split_at(
+    a: ScalarLike,
+    b: ScalarLike,
+    z: AnyArray,
+    split: AnyArray,
+    w0: AnyArray,
+    /,
+    steps: int | None = None,
+) -> AnyArray:
+    r"""Sum the fraction below ``split``; above it, the fraction there and the tail.
+
+    .. math::
+
+        B(a, b, z) = B(a, b, s) + \int_{1-z}^{w_0} u^{b-1}(1-u)^{a-1}\,du,
+        \qquad w_0 = 1 - s,
+
+    the tail by `_expand_from`. For `_large_a` and `_negative_b`. Near
+    :math:`z = 1` the fraction's :math:`a`-derivative is a small remainder of
+    :math:`1/a` against :math:`\partial_a \ln h`, and lost 1e-5 of it at
+    :math:`(0.1, -5.01, 1 - 10^{-9})`; the tail's has no such cancellation.
+
+    Each lane's fraction is at ``z`` below the split and at the split above
+    it, so no scalar is shared between lanes. A shared :math:`B(a, b, s)` that
+    overflowed, as it does for :math:`b` below about :math:`-218` at
+    :math:`a = 50`, put ``0 * inf`` into the reverse-mode :math:`a`- and
+    :math:`b`-gradients of the lanes below the split, whose values are finite.
+
+    At :math:`z = 1` with :math:`b \le 0` the integral diverges: the pole is
+    returned as ``inf``, and `_expand_from` takes :math:`w = 0` safely itself.
+    At :math:`z = 0` the term is a genuine zero; ``log(0)`` is kept out of it,
+    so that no ``0 * -inf`` reaches the parameter derivatives.
+    """
+    below = z < split
+    pole = (z == 1.0) & (b <= 0)
+    at_0 = z == 0
+    xs = jnp.where(below & ~at_0, z, split)
+    log_front = a * jnp.log(xs) + b * _log1m(xs)
+    h = _continued_fraction(a, b, xs, steps=steps)
+    direct = jnp.where(at_0, 0.0, jnp.exp(log_front + jnp.log(h / a)))
+    w = jnp.where(below, w0, 1.0 - z)
+    tail = _expand_from(a, b, w, w0, wide_b=True)
     return jnp.where(  # type: ignore[no-any-return]
-        z == 1, jnp.inf, jnp.where(z == 0, 0.0, term)
+        pole, jnp.inf, direct + jnp.where(below, 0.0, tail)
     )
 
 
@@ -860,7 +917,7 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     three fixed-length methods take over: the continued fraction with
     reflection (`_large_b`: :math:`b > 10`, or :math:`a > 8` with
     :math:`b \ge 0.1`), `_large_a` (:math:`a > 8`, :math:`b < 0.1`), and the
-    continued fraction directly (`_negative_b`: :math:`a \le 8`,
+    continued fraction without reflection (`_negative_b`: :math:`a \le 8`,
     :math:`b < -5`).
 
     Measured against mpmath in float64, the relative error is :math:`5 \times
