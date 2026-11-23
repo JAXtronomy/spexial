@@ -63,8 +63,8 @@ If you need many degrees at once, prefer a function that returns them all in one
 `jax.grad` works directly:
 
 ```pycon
->>> float(jax.grad(sp.zeta)(4.0))
--0.06891126589612538
+>>> round(float(jax.grad(sp.zeta)(4.0)), 15)
+-0.068911265896125
 
 ```
 
