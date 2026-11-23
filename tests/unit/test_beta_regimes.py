@@ -914,6 +914,31 @@ def test_a_lane_past_the_range_leaves_the_others_finite():
 
 
 @pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [
+        (2.0, -20.0, 0.5),  # _negative_b, at its split z = 1/2
+        (20.0, -5.0, 20.0 / 22.0),  # _large_a, at its split a/(a+2)
+        (9.0, -1.0, 9.0 / 11.0),
+        (30.0, -2.0, 30.0 / 32.0),  # 1 - split == w0 exactly
+    ],
+)
+def test_mixed_partials_at_the_split(a, b, z):
+    """``d/dz d/da B`` and ``d/dz d/db B`` exactly at `_split_at`'s split.
+
+    There the tail has zero (or one ulp of negative) length, so its tangent
+    was 0, and the fraction was held at the split: both partials came out 0,
+    where they are ``log(z) I`` and ``log(1-z) I``, ``I`` the integrand.
+    """
+    d_a = float(jax.grad(jax.grad(sp.incomplete_beta, 0), 2)(a, b, z))
+    d_b = float(jax.grad(jax.grad(sp.incomplete_beta, 1), 2)(a, b, z))
+    with mp.workdps(30):
+        zz = mp.mpf(z)
+        integrand = zz ** (a - 1) * (1 - zz) ** (b - 1)
+        want_a, want_b = float(mp.log(zz) * integrand), float(mp.log1p(-zz) * integrand)
+    np.testing.assert_allclose([d_a, d_b], [want_a, want_b], rtol=1e-12)
+
+
+@pytest.mark.parametrize(
     ("a", "b", "z", "dtype"),
     [
         (2.0, -300.0, 0.999, jnp.float64),  # _negative_b, above its split

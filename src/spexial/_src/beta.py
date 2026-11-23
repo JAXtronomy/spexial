@@ -736,7 +736,7 @@ def _split_at(
     :math:`1/a` against :math:`\partial_a \ln h`, and lost 1e-5 of it at
     :math:`(0.1, -5.01, 1 - 10^{-9})`; the tail's has no such cancellation.
 
-    Each lane's fraction is at ``z`` below the split and at the split above
+    Each lane's fraction is at ``z`` at or below the split and at the split above
     it, so no scalar is shared between lanes. A shared :math:`B(a, b, s)` that
     overflowed, as it does for :math:`b` below about :math:`-218` at
     :math:`a = 50`, put ``0 * inf`` into the reverse-mode :math:`a`- and
@@ -747,7 +747,11 @@ def _split_at(
     At :math:`z = 0` the term is a genuine zero; ``log(0)`` is kept out of it,
     so that no ``0 * -inf`` reaches the parameter derivatives.
     """
-    below = z < split
+    # The split itself, and any z whose tail 1 - z rounds to no length (or one
+    # ulp of negative length), go to the fraction: there the tail's value is 0
+    # and its tangent with it, while the fraction was held at the split, so
+    # d/dz d/da and d/dz d/db came out 0 at z = 1/2 for (2, -20), not -7.3e5.
+    below = (z <= split) | (1.0 - z >= w0)
     pole = (z == 1.0) & (b <= 0)
     at_0 = z == 0
     # At z = 0, a point below the split where z^a (1-z)^b cannot overflow
