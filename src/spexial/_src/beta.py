@@ -1275,7 +1275,12 @@ def _incomplete_beta_jvp(
     # primal in a z-gradient, 4.3 -> 5.6 ms for `value_and_grad`.
     a_zero, b_zero = isinstance(a_dot, SymbolicZero), isinstance(b_dot, SymbolicZero)
     if a_zero and b_zero:
-        primal_out = _incomplete_beta_impl(a, b, z, branch)
+        # Through the custom JVP itself, not the implementation: differentiated
+        # again, the primal then takes this rule too. Through the implementation
+        # it differentiated the raw series -- 10x the flops of a traced-b second
+        # z-derivative -- and its z**a at z = 0, a = 2 is `0 * inf` by the fifth,
+        # which jax 0.12 no longer pruned inside `_dispatch`'s `switch`: `nan`.
+        primal_out = _incomplete_beta_core(a, b, z, branch)
         tangent_out = jnp.zeros_like(primal_out)
     else:
         primal_out, tangent_out = jax.jvp(
