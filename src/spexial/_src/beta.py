@@ -759,9 +759,13 @@ def _split_at(
     direct = jnp.where(at_0, 0.0, term)
     w = jnp.where(below, w0, 1.0 - z)
     tail = _expand_from(a, b, w, w0, wide_b=True)
-    return jnp.where(  # type: ignore[no-any-return]
-        pole, jnp.inf, direct + jnp.where(below, 0.0, tail)
-    )
+    total = direct + jnp.where(below, 0.0, tail)
+    # Past the float range the value is `inf` and its tangent 0, as at the pole.
+    # The tail's own tangent is 0 there, but the fraction's, at the split, is
+    # finite and passed through the sum: the a- and b-gradients at (2, -300,
+    # 0.999) were those at z = 1/2, -2.4e87.
+    total = jnp.where(jnp.isinf(total), jax.lax.stop_gradient(total), total)
+    return jnp.where(pole, jnp.inf, total)  # type: ignore[no-any-return]
 
 
 _SERIES, _CONTINUED_FRACTION, _LARGE_A, _NEGATIVE_B, _EITHER = 0, 1, 2, 3, 4

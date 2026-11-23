@@ -914,6 +914,32 @@ def test_a_lane_past_the_range_leaves_the_others_finite():
 
 
 @pytest.mark.parametrize(
+    ("a", "b", "z", "dtype"),
+    [
+        (2.0, -300.0, 0.999, jnp.float64),  # _negative_b, above its split
+        (2.0, -150.0, 0.999, jnp.float64),
+        (9.0, -300.0, 0.999, jnp.float64),  # _large_a, above its split
+        (2.0, -40.0, 0.99, jnp.float32),
+    ],
+)
+def test_parameter_gradients_are_zero_where_the_value_is_inf(a, b, z, dtype):
+    """Past the float range the a- and b-gradients are 0, as at the pole.
+
+    Above the split the value is B(a, b, s) plus the tail; only the tail's
+    tangent was zeroed past the range, so the gradients were those of the
+    finite B(a, b, s): -2.4e87 at (2, -300, 0.999), the gradient at z = 1/2.
+    """
+    zz = jnp.asarray(z, dtype)
+    f = lambda aa, bb: sp.incomplete_beta(aa, bb, zz)
+    assert bool(jnp.isinf(f(a, b)))
+    rev = jax.grad(f, argnums=(0, 1))(a, b)
+    fwd = jax.jacfwd(f, argnums=(0, 1))(a, b)
+    jit_rev = jax.jit(jax.grad(f, argnums=(0, 1)))(a, b)  # traced a, b: _dispatch
+    for g in (*rev, *fwd, *jit_rev):
+        assert float(g) == 0.0, (rev, fwd, jit_rev)
+
+
+@pytest.mark.parametrize(
     ("b", "z", "dtype"), [(-10.0, 0.6, jnp.bfloat16), (-3.0, 0.9, jnp.float16)]
 )
 def test_a_eq_1_half_precision(b, z, dtype):
