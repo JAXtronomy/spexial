@@ -177,11 +177,12 @@ def _large_z(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     # point, but computing it as a scalar and broadcasting is *slower*: XLA
     # already folds the constant-array input, and doing it by hand breaks the
     # fusion (measured 0.80x).
-    return _small_z(a, b, jnp.full_like(w, 0.5)) + _expand_from(a, b, w, 0.5)  # type: ignore[no-any-return]
+    tail = _expand_from(a, b, w, 0.5, wide_b=False)
+    return _small_z(a, b, jnp.full_like(w, 0.5)) + tail  # type: ignore[no-any-return]
 
 
 def _expand_from(
-    a: ScalarLike, b: ScalarLike, w: AnyArray, w0: AnyArrayLike, /
+    a: ScalarLike, b: ScalarLike, w: AnyArray, w0: AnyArrayLike, /, *, wide_b: bool
 ) -> AnyArray:
     r"""$\int_w^{w_0} u^{b-1}(1-u)^{a-1}\,du$, expanding $(1-u)^{a-1}$ binomially.
 
@@ -208,15 +209,19 @@ def _expand_from(
     polynomial near 0, so every :math:`b`-derivative is exact at :math:`s = 0`,
     which integer slopes do hit (e.g. :math:`\gamma = 2` in Zhao's Eq. 7).
 
-    The sum is carried divided by :math:`w_0^b` and scaled back at the end,
-    through logarithms only if :math:`w_0^b` itself would overflow -- so a very
-    negative :math:`b` cannot overflow an intermediate while the result is
-    representable.
+    The sum is carried divided by :math:`w_0^b` and scaled back at the end, so
+    a very negative :math:`b` cannot overflow an intermediate while the result
+    is representable. With ``wide_b`` (`_large_a`, where :math:`b` is
+    unbounded below) the scaling goes through logarithms if :math:`w_0^b`
+    itself would overflow, and a result past the float range is ``inf``.
+    Without it (`_large_z`: :math:`-5 \le b \le 10`, :math:`w_0 = 1/2`)
+    neither can happen, and both are skipped: they cost each point a
+    logarithm and an exponential.
 
     At :math:`w = 0` (:math:`z = 1`) there is nothing to cancel -- :math:`w^s`
-    is 0 for :math:`s > 0` -- so the direct form is used there whatever
-    :math:`s`; :math:`s \le 0` at :math:`w = 0` is the pole, which the callers
-    handle. :math:`\ln w` is taken of a safe value there, so that no
+    is 0 for :math:`s > 0` -- so the skipped term there is
+    :math:`w_0^s / s`; :math:`s \le 0` at :math:`w = 0` is the pole, which the
+    callers handle. :math:`\ln w` is taken of a safe value there, so that no
     :math:`-\infty` sits under the mask.
 
     Summed into a `jax.lax.scan` carry: the terms are batched over ``w``, so
@@ -227,20 +232,21 @@ def _expand_from(
     # concrete `b` (0.5 ** -1100) would raise `OverflowError`, not return inf.
     w0 = jnp.asarray(w0)
     log_w0 = jnp.log(w0)
-    # Where r^b = (w / w0)^b (below) is past the float range, so is the result:
-    # it is at least (1 - w0)^(a-1) (w^b - w0^b) / |b|. With w >= eps (w is
-    # 1 - z) the overflow needs |b| > 20 in float64, |b| > 5 in float32, so it
-    # happens only in `_large_a`, where w0 <= 1/5 and (1 - w0)^(a-1) >= e^-2:
-    # there (1 - w0)^(a-1) w0^b / |b| > 300 already. (`_large_z` has |b| <= 5
-    # and w0 = 1/2, and never gets here.)
-    # The expansion would make it `inf - inf`, so return `inf` and hand it a
-    # harmless w instead, so that no `nan` reaches a cotangent.
-    log_max = math.log(float(jnp.finfo(w.dtype).max))
-    overflow = (w > 0) & (-b * (log_w0 - jnp.log(jnp.where(w > 0, w, w0))) > log_max)
-    w = jnp.where(overflow, w0, w)
     at_0 = w == 0
-    w_safe = jnp.where(at_0, w0, w)
-    delta = log_w0 - jnp.log(w_safe)  # log(w0 / w) >= 0
+    # log w of a safe value at w = 0, so that no -inf sits under the masks.
+    log_w = jnp.log(jnp.where(at_0, w0, w))
+    delta = log_w0 - log_w  # log(w0 / w) >= 0
+    if wide_b:
+        # Where r^b = (w / w0)^b (below) is past the float range, so is the
+        # result: it is at least (1 - w0)^(a-1) (w^b - w0^b) / |b|. With
+        # w >= eps (w is 1 - z) the overflow needs |b| > 20 in float64, |b| > 5
+        # in float32, so it happens only in `_large_a`, where w0 <= 1/5 and
+        # (1 - w0)^(a-1) >= e^-2: there (1 - w0)^(a-1) w0^b / |b| > 300 already.
+        # The expansion would make it `inf - inf`, so return `inf`, with
+        # delta = 0 under the mask, so that no `nan` reaches a cotangent.
+        log_max = math.log(float(jnp.finfo(w.dtype).max))
+        overflow = -b * delta > log_max
+        delta = jnp.where(overflow, 0.0, delta)
     # The sum is carried divided by w0^b, which is applied at the end: each term
     # w0^(b+m) - w^(b+m) is w0^b (w0^m - r^b w^m), r = w / w0 <= 1. Unscaled, a
     # very negative b overflowed w0^b in an intermediate while the result -- a
@@ -248,42 +254,52 @@ def _expand_from(
     r_b = jnp.where(at_0, 0.0, jnp.exp(-b * delta))  # r^b; 0^b = 0 for b > 0
 
     # The one step with |s| < `_NEAR` is skipped here and added afterwards; the
-    # scan only records its coefficient and `s` (scalars). At w = 0 there is
-    # nothing to cancel -- w^s = 0 for s > 0 -- so that step is taken directly
-    # (s <= 0 at w = 0 is the pole, which the callers handle).
-    def step(
-        carry: tuple[AnyArray, AnyArray, AnyArray, ScalarLike, ScalarLike, ScalarLike],
-        m: ScalarLike,
-        /,
-    ) -> tuple[
-        tuple[AnyArray, AnyArray, AnyArray, ScalarLike, ScalarLike, ScalarLike], None
-    ]:
-        total, w0_m, w_m, coeff, near_coeff, near_s = carry  # coeff = (1-a)_m/m!
+    # scan only records its coefficient, `s` and w0^m (scalars). Everything but
+    # `total` and `w_m` is a scalar, so a step costs each point a subtraction,
+    # a division by a scalar, a multiply-add and a multiply.
+    Carry = tuple[
+        AnyArray, AnyArray, ScalarLike, ScalarLike, ScalarLike, ScalarLike, ScalarLike
+    ]
+
+    def step(carry: Carry, m: ScalarLike, /) -> tuple[Carry, None]:
+        # coeff = (1-a)_m / m!
+        total, w_m, w0_m, coeff, near_coeff, near_s, near_w0_m = carry
         s = b + m
         in_band = jnp.abs(s) < _NEAR
-        skip = in_band & ~at_0
-        s_safe = jnp.where(skip | (s == 0), 1.0, s)
-        total = total + coeff * jnp.where(skip, 0.0, (w0_m - w_m) / s_safe)
+        # Divided per point, not folded into one scalar coeff / s: reverse mode
+        # would then form the cotangent ct * (w0^m - w_m) before the 1 / s^2
+        # that tames it, and overflow where the value is finite but huge
+        # (5.7e306 at a = 12, b = -200, z = 0.97).
+        in_coeff = jnp.where(in_band, 0.0, coeff)
+        total = total + in_coeff * ((w0_m - w_m) / jnp.where(in_band, 1.0, s))
         near_coeff = jnp.where(in_band, coeff, near_coeff)
         near_s = jnp.where(in_band, s, near_s)
+        near_w0_m = jnp.where(in_band, w0_m, near_w0_m)
         next_coeff = coeff * (m + 1.0 - a) / (m + 1.0)
-        return (total, w0_m * w0, w_m * w, next_coeff, near_coeff, near_s), None
+        carry = (total, w_m * w, w0_m * w0, next_coeff, near_coeff, near_s, near_w0_m)
+        return carry, None
 
     zero = jnp.zeros_like(log_w0 * b)  # floating, weakly typed if both are
-    init = (jnp.zeros_like(w), jnp.ones_like(w), r_b, jnp.ones_like(a), zero, zero)
-    (total, _, _, _, near_coeff, near_s), _ = jax.lax.scan(
+    one = jnp.ones_like(log_w0 * b)
+    init = (jnp.zeros_like(w), r_b, one, jnp.ones_like(a), zero, zero, zero)
+    (total, _, _, _, near_coeff, near_s, near_w0_m), _ = jax.lax.scan(
         step, init, jnp.arange(_NTERMS), unroll=_UNROLL
     )
-    # The skipped step, scaled likewise: (w0^s - w^s) / s / w0^b
-    # = r^b w^m* (e^(s delta) - 1) / s = r^b w^m* delta expm1(s delta) / (s delta),
-    # which cancels for no s; m* = s - b. At w = 0 it was taken in the scan.
-    w_m_near = r_b * jnp.exp((near_s - b) * jnp.log(w_safe))
-    near = near_coeff * w_m_near * delta * _expm1_over(near_s * delta)
-    scaled = total + jnp.where(at_0, 0.0, near)
+    # The skipped step, scaled likewise: with y = -s delta,
+    # (w0^s - w^s) / s / w0^b = w0^m (1 - e^y) / s = w0^m delta expm1(y) / y,
+    # which cancels for no s. At w = 0 there is nothing to cancel -- w^s = 0 for
+    # s > 0 -- so it is w0^m / s, a scalar (s <= 0 at w = 0 is the pole, which
+    # the callers handle; `s` is guarded only to keep `nan` out of the mask).
+    near = near_coeff * near_w0_m * delta * _expm1_over(-near_s * delta)
+    near_at_0 = near_coeff * near_w0_m / jnp.where(near_s == 0, 1.0, near_s)
+    scaled = total + jnp.where(at_0, near_at_0, near)
+    log_scale = b * log_w0
+    if not wide_b:
+        # w0^b = 2^-b for b >= -5: nowhere near overflow.
+        return scaled * jnp.exp(log_scale)  # type: ignore[no-any-return]
     # Apply w0^b: directly while it is finite, and through logarithms only when
     # it would overflow (b log w0 > ~700), so as not to spend |log| * eps of
     # accuracy on a round trip the common case does not need.
-    log_scale = b * log_w0
     big = log_scale > 700.0
     direct = scaled * jnp.exp(jnp.where(big, 0.0, log_scale))
     via_log = jnp.exp(
@@ -534,7 +550,7 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     at_split = jnp.exp(log_front_s + jnp.log(_continued_fraction(a, b, split) / a))
     # At z = 1 (the pole when b <= 0) `_expand_from` takes w = 0 safely itself.
     w = jnp.where(below, w0, 1.0 - z)
-    above = at_split + _expand_from(a, b, w, w0)
+    above = at_split + _expand_from(a, b, w, w0, wide_b=True)
     return jnp.where(  # type: ignore[no-any-return]
         pole, jnp.inf, jnp.where(below, direct, above)
     )
