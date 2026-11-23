@@ -22,6 +22,9 @@ AS = [0.25, 0.5, 1.0, 1.31, 2.0, 4.5]
 BS = [-2.5, -1.0, -0.1, 0.0, 0.3, 1.31, 4.0]
 # Straddles the z = 1/2 branch switch deliberately, and both endpoints.
 ZS = [1e-6, 1e-3, 0.1, 0.3, 0.5, 0.5 + 1e-7, 0.7, 0.9, 0.99, 1 - 1e-6]
+# XLA's CPU `log1p` is off by up to 2.7e-14 on (-0.42, -0.3), and a front factor
+# (1-z)^b formed from it multiplies that by |b|: 1.2e-11 at b = -1100 here.
+LOG1P_BAND = 0.41
 
 
 def _mp_incomplete_beta(a, b, z):
@@ -64,7 +67,7 @@ def test_large_b_matches_mpmath(a, b):
     then rounding growing like ``b * eps`` out to ``b = 1e4``; the fraction
     itself has converged by then (`_CF_STEPS`).
     """
-    z = np.array([1e-8, *ZS[1:], 1.0])
+    z = np.array([1e-8, *ZS[1:], LOG1P_BAND, 1.0])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
     with mp.workdps(40):
         expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
@@ -83,7 +86,7 @@ def test_large_a_and_large_b_matches_mpmath(a, b):
 
     The tolerance is the measured worst, 2.8e-14 at ``(30, 70)``, with headroom.
     """
-    z = np.array([*ZS, 1.0])
+    z = np.array([*ZS, LOG1P_BAND, 1.0])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
     with mp.workdps(40):
         expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
@@ -241,7 +244,9 @@ def test_large_a_small_b(a, b):
     continued fraction's reflection needs ``B(a, b)``, which diverges at
     ``b <= 0``. Measured worst here 8e-14.
     """
-    z = np.array([0.01, 0.3, 0.5, 0.7, 0.9, 0.95, 0.99, 1 - 1e-6, 1 - 1e-12])
+    z = np.array(
+        [0.01, 0.3, LOG1P_BAND, 0.5, 0.7, 0.9, 0.95, 0.99, 1 - 1e-6, 1 - 1e-12]
+    )
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
     expect = np.array([_mp_hyp2f1_beta(a, b, zi) for zi in z])
     ok = np.isfinite(expect) & (expect != 0)
@@ -632,6 +637,30 @@ def test_overflow_past_the_float_range_is_inf():
     assert float(sp.incomplete_beta(2.0, -400.0, jnp.asarray(0.9))) == np.inf
 
 
+@pytest.mark.parametrize("jit", [False, True])
+@pytest.mark.parametrize(
+    ("b", "z"), [(-200.0, 0.998), (-200.0, 1 - 1e-9), (-50.0, 1 - 1e-9)]
+)
+def test_large_a_overflow_is_inf(b, z, jit):
+    """REGRESSION: `_large_a` returned ``nan`` past the float range.
+
+    Its expansion's ``(w / w0)^b`` overflowed, and the alternating sum made that
+    ``inf - inf``. The true values here are 1e540 and up; at ``a = 8`` the
+    `_negative_b` branch already returned ``inf``.
+    """
+    f = jax.jit(sp.incomplete_beta) if jit else sp.incomplete_beta
+    assert float(f(12.0, b, jnp.asarray(z))) == np.inf
+
+
+def test_z_derivative_with_traced_b_in_the_log1p_band():
+    """REGRESSION: the z-rule's ``(1-z)^(b-1)`` took `log1p`'s band error x |b|."""
+    a, b, z = 2.0, -1000.0, LOG1P_BAND
+    got = float(jax.jit(jax.grad(sp.incomplete_beta, 2))(a, b, z))
+    with mp.workdps(40):
+        expect = float(mp.mpf(z) ** (a - 1) * (1 - mp.mpf(z)) ** (b - 1))
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
 def test_mixed_partial_at_z_one_half_is_symmetric():
     """``d/dz d/db`` at exactly ``z = 1/2`` was halved: `minimum` split the tie."""
     half = jnp.asarray(0.5)
@@ -716,7 +745,7 @@ def test_very_negative_b(a, b):
     decays, so 64 terms were 6e-12 off at ``b = -10``, 8% at -50, and had no
     correct digits by -200. Measured worst here 4.4e-13 (a = 0.01, b = -200).
     """
-    z = np.array([1e-6, 0.01, 0.1, 0.3, 0.5, 0.7, 0.9, 0.999])
+    z = np.array([1e-6, 0.01, 0.1, 0.3, LOG1P_BAND, 0.5, 0.7, 0.9, 0.999])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
     expect = np.array([_mp_hyp2f1_beta(a, b, zi) for zi in z])
     ok = np.isfinite(expect) & (np.abs(expect) < 1e300) & (expect != 0)

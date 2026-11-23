@@ -226,9 +226,20 @@ def _expand_from(
     # An array, weakly typed for a Python scalar: Python float arithmetic on a
     # concrete `b` (0.5 ** -1100) would raise `OverflowError`, not return inf.
     w0 = jnp.asarray(w0)
+    log_w0 = jnp.log(w0)
+    # Where r^b = (w / w0)^b (below) is past the float range, so is the result:
+    # it is at least (1 - w0)^(a-1) (w^b - w0^b) / |b|. With w >= eps (w is
+    # 1 - z) the overflow needs |b| > 20 in float64, |b| > 5 in float32, so it
+    # happens only in `_large_a`, where w0 <= 1/5 and (1 - w0)^(a-1) >= e^-2:
+    # there (1 - w0)^(a-1) w0^b / |b| > 300 already. (`_large_z` has |b| <= 5
+    # and w0 = 1/2, and never gets here.)
+    # The expansion would make it `inf - inf`, so return `inf` and hand it a
+    # harmless w instead, so that no `nan` reaches a cotangent.
+    log_max = math.log(float(jnp.finfo(w.dtype).max))
+    overflow = (w > 0) & (-b * (log_w0 - jnp.log(jnp.where(w > 0, w, w0))) > log_max)
+    w = jnp.where(overflow, w0, w)
     at_0 = w == 0
     w_safe = jnp.where(at_0, w0, w)
-    log_w0 = jnp.log(w0)
     delta = log_w0 - jnp.log(w_safe)  # log(w0 / w) >= 0
     # The sum is carried divided by w0^b, which is applied at the end: each term
     # w0^(b+m) - w^(b+m) is w0^b (w0^m - r^b w^m), r = w / w0 <= 1. Unscaled, a
@@ -279,9 +290,8 @@ def _expand_from(
         jnp.where(big, log_scale, 0.0)
         + jnp.log(jnp.where(big & (scaled > 0), scaled, 1.0))
     )
-    return jnp.where(  # type: ignore[no-any-return]
-        big, jnp.where(scaled > 0, via_log, 0.0), direct
-    )
+    out = jnp.where(big, jnp.where(scaled > 0, via_log, 0.0), direct)
+    return jnp.where(overflow, jnp.inf, out)  # type: ignore[no-any-return]
 
 
 _CF_FROM = 10.0
@@ -377,8 +387,8 @@ def _complete_beta(a: ScalarLike, b: ScalarLike, /) -> AnyArray:
     """
     x0 = (a + 1.0) / (a + b + 2.0)
     # The front factor x^a (1-x)^b is the same for both terms, and is formed from
-    # x0 itself: `log1p(-x0)`, not `log` of a rounded `1 - x0` scaled by b.
-    log_front = a * jnp.log(x0) + b * jnp.log1p(-x0)
+    # x0 itself, by `_log1m`, not `log` of a rounded `1 - x0` scaled by b.
+    log_front = a * jnp.log(x0) + b * _log1m(x0)
     h = _continued_fraction(
         jnp.stack([a, b]),
         jnp.stack([b, a]),
@@ -398,8 +408,9 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
 
     Each term is :math:`\exp(\log(\text{front}) + \log(h / p))`, with
     :math:`p` the fraction's first parameter: the front factor
-    :math:`z^a (1-z)^b` is the same either way round and is formed from ``z``,
-    never from a rounded ``1 - z`` scaled by ``b``; and the fraction is folded
+    :math:`z^a (1-z)^b` is the same either way round and is formed from ``z``
+    by `_log1m`, never from a rounded ``1 - z`` scaled by ``b``, nor from XLA's
+    ``log1p`` where it is inaccurate; and the fraction is folded
     into the exponent, so a front factor below the smallest normal number does
     not flush to zero while the term itself is representable.
     """
@@ -418,7 +429,7 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     # parameter derivatives are zero too.
     endpoint = (z == 0) | (z == 1)
     zs = jnp.where(endpoint, 0.5, z)
-    log_front = a * jnp.log(zs) + b * jnp.log1p(-zs)
+    log_front = a * jnp.log(zs) + b * _log1m(zs)
     first = jnp.where(swap, b, a)
     h = _continued_fraction(first, jnp.where(swap, a, b), jnp.where(swap, 1.0 - zs, zs))
     term = jnp.where(endpoint, 0.0, jnp.exp(log_front + jnp.log(h / first)))
@@ -516,7 +527,7 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     # `_large_b`); above it: the fraction at the split, a scalar, plus the
     # expansion out to z.
     xs = jnp.where(below & ~at_0, z, split)
-    log_front = a * jnp.log(xs) + b * jnp.log1p(-xs)
+    log_front = a * jnp.log(xs) + b * _log1m(xs)
     direct = jnp.exp(log_front + jnp.log(_continued_fraction(a, b, xs) / a))
     direct = jnp.where(at_0, 0.0, direct)
     log_front_s = a * jnp.log(split) + b * jnp.log(w0)
@@ -555,9 +566,10 @@ def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     :math:`b \le 0` -- and none needed: for :math:`b` this negative the fraction
     converges at every :math:`z \in [0, 1)` (checked against mpmath for
     :math:`a \in [0.01, 8]`, :math:`b \in [-1100, -5]`: worst
-    :math:`6\times10^{-14}`). The term is formed in log space, as in
-    `_large_b`, so a huge value that is still representable does not overflow
-    on the way. :math:`z = 0` is a genuine zero; :math:`z = 1` the pole.
+    :math:`4.4\times10^{-13}`, at :math:`a = 0.01, b = -200`). The term is
+    formed in log space, as in `_large_b`, so a huge value that is still
+    representable does not overflow on the way. :math:`z = 0` is a genuine
+    zero; :math:`z = 1` the pole.
     """
     if jnp.dtype(z.dtype).itemsize < 4:
         f32 = jnp.float32
@@ -567,7 +579,7 @@ def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     endpoint = (z == 0) | (z == 1)
     zs = jnp.where(endpoint, 0.5, z)
     h = _continued_fraction(a, b, zs, steps=_NEG_B_STEPS)
-    term = jnp.exp(a * jnp.log(zs) + b * jnp.log1p(-zs) + jnp.log(h / a))
+    term = jnp.exp(a * jnp.log(zs) + b * _log1m(zs) + jnp.log(h / a))
     return jnp.where(  # type: ignore[no-any-return]
         z == 1, jnp.inf, jnp.where(z == 0, 0.0, term)
     )
@@ -1085,17 +1097,17 @@ def _incomplete_beta_jvp(
     if not isinstance(z_dot, SymbolicZero):
         if isinstance(b, jax.core.Tracer):
             # `b` may itself be differentiated, so write (1-z)^(b-1) so that its
-            # `b`-derivative carries `log1p(-z)`, not `log(1 - z)` of a rounded
+            # `b`-derivative carries `_log1m(z)`, not `log(1 - z)` of a rounded
             # `1 - z`, which keeps only ~1e-16 / z relative precision (GH-68).
-            # At z = 1 itself `pow` takes over, by a double `where`: `log1p(-z)` is
+            # At z = 1 itself `pow` takes over, by a double `where`: `_log1m(z)` is
             # `-inf` there, and any clamp of it differentiates as `0 * -inf`,
             # making the second and third z-derivatives `nan`. `pow` has exact
             # derivatives at a zero base, as on the concrete path.
             z_arr = jnp.asarray(z)
             inside = z_arr < 1.0
             z_in = jnp.where(inside, z_arr, 0.0)
-            via_log1p = jnp.exp((b - 1.0) * jnp.log1p(-z_in))
-            one_minus_z_pow = jnp.where(inside, via_log1p, _pow(1.0 - z_arr, b - 1.0))
+            via_log = jnp.exp((b - 1.0) * _log1m(z_in))
+            one_minus_z_pow = jnp.where(inside, via_log, _pow(1.0 - z_arr, b - 1.0))
         else:
             # A concrete `b` has no derivative to get wrong, and as a constant
             # exponent XLA can simplify `pow` (to a reciprocal at b = 0, a square
