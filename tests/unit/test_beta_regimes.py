@@ -861,28 +861,56 @@ def test_parameter_gradients_near_the_top_of_the_float_range(a, b, z):
     np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
 
 
-@pytest.mark.xfail(
-    reason="documented limit: the tail's rescale cotangent overflows within ~50x "
-    "of DBL_MAX for a >~ 6 in `_negative_b`; forward mode is exact",
-    strict=True,
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [
+        (8.0, -700.0, 0.6414),  # `_negative_b`'s tail, 3.8e307
+        (4.0, -1000.0, 0.51261),  # 1.78e308
+        (3.0, -1000.0, 0.512277),
+        (30.0, -250.0, 0.9376),  # `_large_a`'s tail, 9.8e297
+        (30.0, -250.0, 0.941189),  # 3.0e304
+        (50.0, -215.0, 0.96),
+    ],
 )
-def test_reverse_mode_in_the_negative_b_tail_near_dbl_max():
-    """3.8e307 at (8, -700, 0.6414): `jax.grad` in ``a`` is `nan` there."""
-    a, b, z = 8.0, -700.0, 0.6414
-    got = jax.grad(sp.incomplete_beta, 0)(
-        jnp.asarray(a), jnp.asarray(b), jnp.asarray(z)
-    )
-    np.testing.assert_allclose(
-        float(got), _mp_parameter_derivatives(a, b, z)[0], rtol=1e-12
-    )
+def test_reverse_mode_in_the_tail_up_to_dbl_max(a, b, z):
+    """Reverse mode as accurate as forward mode up to the top of the range.
+
+    Scaled by ``w0^b`` alone, ``(w / w0)^b`` overflowed in the sum, and reverse
+    mode multiplied the sum's intermediates by ``w0^b`` first: ``nan`` from
+    about 1e297. Measured worst 8.3e-14.
+    """
+    grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
+    got = [float(g) for g in grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
+    np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
 
 
 def test_forward_mode_in_the_negative_b_tail_near_dbl_max():
-    """The same point by `jax.jacfwd`: exact (measured 5.5e-14)."""
+    """The same at 3.8e307 by `jax.jacfwd` (measured 5.5e-14)."""
     a, b, z = 8.0, -700.0, 0.6414
     jac = jax.jacfwd(sp.incomplete_beta, (0, 1))
     got = [float(g) for g in jac(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
     np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
+
+
+def test_a_lane_past_the_range_leaves_the_others_finite():
+    """``(50, -400, 0.99)`` is past the float range; ``z = 0.3`` beside it is not.
+
+    The shared ``a`` and ``b`` sum every lane's cotangent, and the masked lane's
+    ``0 * inf`` made the finite lane's gradient ``nan``.
+    """
+    z = jnp.array([0.3, 0.99])
+    got = float(jax.grad(lambda a: sp.incomplete_beta(a, -400.0, z)[0])(50.0))
+    np.testing.assert_allclose(
+        got, _mp_parameter_derivatives(50.0, -400.0, 0.3)[0], rtol=2e-13
+    )
+    rows = np.asarray(
+        jax.jacrev(lambda a: sp.incomplete_beta(a, -1000.0, jnp.array([0.3, 1.0])))(
+            50.0
+        )
+    )
+    np.testing.assert_allclose(
+        rows[0], _mp_parameter_derivatives(50.0, -1000.0, 0.3)[0], rtol=2e-13
+    )
 
 
 @pytest.mark.parametrize(

@@ -45,6 +45,7 @@ __all__ = ["incomplete_beta"]
 import functools as ft
 import math
 from collections.abc import Callable
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -211,16 +212,19 @@ def _expand_from(
     polynomial near 0, so every :math:`b`-derivative is exact at :math:`s = 0`,
     which integer slopes do hit (e.g. :math:`\gamma = 2` in Zhao's Eq. 7).
 
-    The sum is carried divided by :math:`w_0^b` and scaled back at the end, so
-    a very negative :math:`b` cannot overflow an intermediate while the result
-    is representable. With ``wide_b`` (`_split_at`, for `_large_a` and
-    `_negative_b`, where :math:`b` is unbounded below) the scaling goes through
-    logarithms if :math:`w_0^b` itself would overflow, and a result past the
-    float range is ``inf``.
-    Without it (`_large_z`: :math:`-5 \le b \le 10`, :math:`w_0 = 1/2`, in
-    float32 or float64, since `_series` promotes half precision) neither can
-    happen, and both are skipped: they cost each point a logarithm and an
-    exponential.
+    The sum is carried divided by a scale and multiplied back at the end. For
+    `_large_z` (:math:`-5 \le b \le 10`, :math:`w_0 = 1/2`, in float32 or
+    float64, since `_series` promotes half precision) the scale is the scalar
+    :math:`w_0^b`. With ``wide_b`` (`_split_at`, for `_large_a` and
+    `_negative_b`, where :math:`b` is unbounded below) it is per point, the
+    larger of :math:`w_0^b` and :math:`w^b`, so that every term is at most 1 and
+    the sum, about :math:`1/|b|`, can neither overflow nor sink to the bottom of
+    the float range; the scale is then applied through `_exp_of_log_term`, whose
+    reverse mode stays finite up to the top of the float range. (Scaled by
+    :math:`w_0^b` alone, :math:`(w/w_0)^b` overflowed inside the sum for very
+    negative :math:`b`, and reverse mode multiplied the sum's intermediates by
+    :math:`w_0^b` before anything brought them back down: ``nan`` gradients from
+    values of about :math:`10^{297}`.)
 
     At :math:`w = 0` (:math:`z = 1`) there is nothing to cancel -- :math:`w^s`
     is 0 for :math:`s > 0` -- so the skipped term there is
@@ -232,54 +236,68 @@ def _expand_from(
     materializing them all at once would make this memory- rather than
     flop-bound.
     """
+    if wide_b:
+        parts = ft.partial(_expand_parts, per_point=True)
+        return _exp_of_log_term(parts, a, b, (w, jnp.asarray(w0)))
+    log_scale, scaled = _expand_parts(a, b, (w, w0), per_point=False)
+    # w0^b = 2^-b for b >= -5: nowhere near overflow.
+    return scaled * jnp.exp(log_scale)  # type: ignore[no-any-return]
+
+
+def _expand_parts(
+    a: AnyArrayLike,
+    b: AnyArrayLike,
+    xs: tuple[AnyArray, AnyArrayLike],
+    /,
+    *,
+    per_point: bool,
+) -> tuple[AnyArray, AnyArray]:
+    """`_expand_from`'s sum and the log of its scale: the value is ``sum * e^log``."""
+    w, w0 = xs
     # An array, weakly typed for a Python scalar: Python float arithmetic on a
     # concrete `b` (0.5 ** -1100) would raise `OverflowError`, not return inf.
     w0 = jnp.asarray(w0)
     log_w0 = jnp.log(w0)
     at_0 = w == 0
     # log w of a safe value at w = 0, so that no -inf sits under the masks.
-    log_w = jnp.log(jnp.where(at_0, w0, w))
-    delta = log_w0 - log_w  # log(w0 / w) >= 0
-    if wide_b:
-        # Where r^b = (w / w0)^b (below) is past the float range, so is the
-        # result. That needs b < 0, and with w >= eps (w is 1 - z) |b| > 19 in
-        # float64 or |b| > 5 in float32; w^b = r^b w0^b, with w0^b >= 2^|b|
-        # (w0 <= 1/2 in both callers). While r <= 1/2 (|b| up to ~1000 in
-        # float64), the integral over [w, 2w] alone is at least
-        # (1 - 2w)^(a-1) w^b (1 - 2^b) / |b|, with (1 - 2w)^(a-1) ~ 1 since w is
-        # then tiny; past that, the integral over [w, w0] is at least
-        # (1 - w0)^(a-1) w0^b / |b| (r^b - 1), with (1 - w0)^(a-1) >= 2^-7. Either
-        # way the factor over r^b is well above 1.
-        # The expansion would make it `inf - inf`, so return `inf`, with
-        # delta = 0 under the mask, so that no `nan` reaches a cotangent.
-        log_max = math.log(float(jnp.finfo(w.dtype).max))
-        overflow = -b * delta > log_max
-        delta = jnp.where(overflow, 0.0, delta)
-    # The sum is carried divided by w0^b, which is applied at the end: each term
-    # w0^(b+m) - w^(b+m) is w0^b (w0^m - r^b w^m), r = w / w0 <= 1. Unscaled, a
-    # very negative b overflowed w0^b in an intermediate while the result -- a
-    # *difference* of such terms -- was representable.
-    r_b = jnp.where(at_0, 0.0, jnp.exp(-b * delta))  # r^b; 0^b = 0 for b > 0
+    delta = log_w0 - jnp.log(jnp.where(at_0, w0, w))  # log(w0 / w) >= 0
+    log_r_b = -b * delta  # log (w / w0)^b
+    # Each term w0^(b+m) - w^(b+m) is scale * (A w0^m - B w^m), with
+    # A = w0^b / scale and B = w^b / scale; 0^b = 0 for b > 0 at w = 0.
+    if per_point:
+        # The larger of w0^b and w^b, so that A, B <= 1. The choice cancels out
+        # of the value and of every derivative, so the tie at w = w0 or b = 0
+        # does not matter.
+        up = jnp.maximum(log_r_b, 0.0)
+        log_scale = b * log_w0 + up
+        w0_factor: AnyArray | None = jnp.exp(-up)
+        w_start = jnp.where(at_0, 0.0, jnp.exp(log_r_b - up))
+    else:
+        log_scale = b * log_w0
+        w0_factor = None
+        w_start = jnp.where(at_0, 0.0, jnp.exp(log_r_b))
 
     # The one step with |s| < `_NEAR` is skipped here and added afterwards; the
     # scan only records its coefficient, `s` and w0^m (scalars). Everything but
-    # `total` and `w_m` is a scalar, so a step costs each point a subtraction,
-    # a division by a scalar, a multiply-add and a multiply.
-    Carry = tuple[
-        AnyArray, AnyArray, ScalarLike, ScalarLike, ScalarLike, ScalarLike, ScalarLike
-    ]
+    # `total` and `w_m` is a scalar (and `w0_factor`, per point), so a step costs
+    # each point a subtraction, a division by a scalar, a multiply-add and a
+    # multiply (and one more multiply per point).
+    # Scalars but for `total` and `w_m`, except inside `_exp_of_log_term`'s
+    # rule, which runs this per point.
+    Carry = tuple[AnyArrayLike, ...]
 
     def step(carry: Carry, m: ScalarLike, /) -> tuple[Carry, None]:
         # coeff = (1-a)_m / m!
         total, w_m, w0_m, coeff, near_coeff, near_s, near_w0_m = carry
         s = b + m
         in_band = jnp.abs(s) < _NEAR
+        w0_term = w0_m if w0_factor is None else w0_factor * w0_m
         # Divided per point, not folded into one scalar coeff / s: reverse mode
         # would then form the cotangent ct * (w0^m - w_m) before the 1 / s^2
         # that tames it, and overflow where the value is finite but huge
         # (5.7e306 at a = 12, b = -200, z = 0.97).
         in_coeff = jnp.where(in_band, 0.0, coeff)
-        total = total + in_coeff * ((w0_m - w_m) / jnp.where(in_band, 1.0, s))
+        total = total + in_coeff * ((w0_term - w_m) / jnp.where(in_band, 1.0, s))
         near_coeff = jnp.where(in_band, coeff, near_coeff)
         near_s = jnp.where(in_band, s, near_s)
         near_w0_m = jnp.where(in_band, w0_m, near_w0_m)
@@ -289,41 +307,24 @@ def _expand_from(
 
     zero = jnp.zeros_like(log_w0 * b)  # floating, weakly typed if both are
     one = jnp.ones_like(log_w0 * b)
-    init = (jnp.zeros_like(w), r_b, one, jnp.ones_like(a), zero, zero, zero)
+    init = (jnp.zeros_like(w), w_start, one, jnp.ones_like(a), zero, zero, zero)
     (total, _, _, _, near_coeff, near_s, near_w0_m), _ = jax.lax.scan(
         step, init, jnp.arange(_NTERMS), unroll=_UNROLL
     )
-    # The skipped step, scaled likewise: with y = -s delta,
+    # The skipped step, relative to w0^b: with y = -s delta,
     # (w0^s - w^s) / s / w0^b = w0^m (1 - e^y) / s = w0^m delta expm1(y) / y,
     # which cancels for no s. At w = 0 there is nothing to cancel -- w^s = 0 for
     # s > 0 -- so it is w0^m / s, a scalar (s <= 0 at w = 0 is the pole, which
     # the callers handle; `s` is guarded only to keep `nan` out of the mask).
+    # The scale there is w0^b, since w^b = 0.
     near = near_coeff * near_w0_m * delta * _expm1_over(-near_s * delta)
+    if w0_factor is not None:
+        near = w0_factor * near
     near_at_0 = near_coeff * near_w0_m / jnp.where(near_s == 0, 1.0, near_s)
     scaled = total + jnp.where(at_0, near_at_0, near)
     # At w = w0 the integral is exactly 0, but the sum leaves a rounding residue
-    # (3e-28 at a = 50, b = -250), which w0^b (e^814 there) overflows; `_split_at`
-    # masks those lanes, and the masked `inf` made its gradients `nan`.
-    scaled = jnp.where(w == w0, 0.0, scaled)
-    log_scale = b * log_w0
-    if not wide_b:
-        # w0^b = 2^-b for b >= -5: nowhere near overflow in float32 or float64
-        # (`_series` promotes half precision).
-        return scaled * jnp.exp(log_scale)  # type: ignore[no-any-return]
-    # Apply w0^b: directly while it is finite, and through logarithms only when
-    # it would overflow (b log w0 > log of the dtype's largest value: ~709.8 in
-    # float64, ~88.7 in float32), so as not to spend |log| * eps of accuracy on
-    # a round trip the common case does not need.
-    big = log_scale > log_max
-    direct = scaled * jnp.exp(jnp.where(big, 0.0, log_scale))
-    # Only where the sum is positive: where it is 0 an exponent of `log_scale`
-    # alone is `exp(inf)` under the mask, and its zero cotangent is `nan`.
-    via = big & (scaled > 0)
-    via_log = jnp.exp(
-        jnp.where(via, log_scale, 0.0) + jnp.log(jnp.where(via, scaled, 1.0))
-    )
-    out = jnp.where(big, jnp.where(via, via_log, 0.0), direct)
-    return jnp.where(overflow, jnp.inf, out)  # type: ignore[no-any-return]
+    # (3e-28 at a = 50, b = -250), which the scale (e^814 there) overflowed.
+    return log_scale, jnp.where(w == w0, 0.0, scaled)
 
 
 _CF_FROM = 10.0
@@ -608,12 +609,6 @@ def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     :math:`a = 0.01, b = -200, z = 1/2`. The terms are formed in log space, as
     in `_large_b`, so a huge value that is still representable does not
     overflow on the way. :math:`z = 0` is a genuine zero; :math:`z = 1` the pole.
-
-    One reverse-mode limit is left: in the tail, at :math:`a \gtrsim 6`, where
-    the value is within about 50x of the float range (from
-    :math:`4\times10^{306}`), `jax.grad` in :math:`a` or :math:`b` is ``nan``:
-    the cotangent of the rescale by :math:`w_0^b` overflows inside the sum.
-    `jax.jacfwd` is exact there.
     """
     if jnp.dtype(z.dtype).itemsize < 4:
         f32 = jnp.float32
@@ -624,47 +619,77 @@ def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     return _split_at(a, b, z, half, half, steps=_NEG_B_STEPS)
 
 
-def _log_term(
+def _fraction_parts(
     a: AnyArrayLike, b: AnyArrayLike, x: AnyArray, /, steps: int | None = None
-) -> AnyArray:
-    """``log(B(a, b, x))`` by the continued fraction, for ``x`` in (0, 1)."""
+) -> tuple[AnyArray, AnyArray]:
+    """``B(a, b, x)`` by the continued fraction as ``(log z^a (1-z)^b, h / a)``."""
     log_front = a * jnp.log(x) + b * _log1m(x)
-    return log_front + jnp.log(_continued_fraction(a, b, x, steps=steps) / a)  # type: ignore[no-any-return]
+    return log_front, _continued_fraction(a, b, x, steps=steps) / a
+
+
+Parts = Callable[[AnyArrayLike, AnyArrayLike, Any], tuple[AnyArray, AnyArray]]
+
+
+def _log_of(log_scale: AnyArray, mant: AnyArray, /) -> AnyArray:
+    """``log(mant * e^log_scale)``: ``-inf`` where ``mant`` is 0, `nan` below."""
+    pos = mant > 0
+    log_mant = jnp.log(jnp.where(pos, mant, 1.0))
+    return jnp.where(  # type: ignore[no-any-return]
+        pos, log_scale + log_mant, jnp.where(mant == 0, -jnp.inf, jnp.nan)
+    )
+
+
+def _value_of(log_scale: AnyArray, mant: AnyArray, /) -> AnyArray:
+    """``mant * e^log_scale``: as a product while the scale is moderate.
+
+    Through ``exp(log)`` only beyond that, so as not to spend ``|log| * eps``
+    of accuracy on a round trip the common case does not need.
+    """
+    half_range = 0.5 * math.log(float(jnp.finfo(jnp.result_type(mant)).max))
+    moderate = jnp.abs(log_scale) < half_range
+    product = mant * jnp.exp(jnp.where(moderate, log_scale, 0.0))
+    return jnp.where(moderate, product, jnp.exp(_log_of(log_scale, mant)))  # type: ignore[no-any-return]
 
 
 @ft.partial(jax.custom_jvp, nondiff_argnums=(0,))
 def _exp_of_log_term(
-    log_fn: Callable[[AnyArrayLike, AnyArrayLike, AnyArray], AnyArray],
-    a: ScalarLike,
-    b: ScalarLike,
-    x: AnyArray,
-    /,
+    parts: Parts, a: ScalarLike, b: ScalarLike, xs: Any, /
 ) -> AnyArray:
-    r"""``exp(log_fn(a, b, x))``, differentiated so reverse mode cannot overflow.
+    r"""``mant * exp(log_scale)`` for ``parts(a, b, xs)``, with a safe reverse mode.
 
     Autodiff of :math:`e^L` hands :math:`L`'s graph the cotangent :math:`e^L`
-    itself, which the fraction's recurrence then amplifies (by :math:`1/h` and
-    more): near the top of the float range, from about :math:`10^{305}`, the
+    itself, which the fraction's recurrence or the binomial sum then amplifies:
+    near the top of the float range, from about :math:`10^{297}`, the
     reverse-mode :math:`a`- and :math:`b`-gradients came out ``nan`` while the
     value and forward mode were fine. The tangent here is
-    :math:`e^{L/2} \cdot \dot L(e^{L/2} \dot a, e^{L/2} \dot b)` -- the same
-    number, by linearity -- so neither side of the transposed map sees more
-    than :math:`e^{L/2}`.
+    :math:`e^{L/2} \cdot \dot L(e^{L/2} \dot a, e^{L/2} \dot b)`, with
+    :math:`L` the log of the value -- the same number, by linearity -- so
+    neither side of the transposed map sees more than :math:`e^{L/2}`.
+
+    Where the value is past the float range it is ``inf``, and its tangent is 0,
+    as at the pole; that is also what keeps such a lane from making another
+    lane's reverse-mode gradient ``nan`` (``0 * inf``) through the shared
+    :math:`a` and :math:`b`.
     """
-    return jnp.exp(log_fn(a, b, x))
+    return _value_of(*parts(a, b, xs))
 
 
 @_exp_of_log_term.defjvp
 def _exp_of_log_term_jvp(
-    log_fn: Callable[[AnyArrayLike, AnyArrayLike, AnyArray], AnyArray],
-    primals: tuple[ScalarLike, ScalarLike, AnyArray],
-    tangents: tuple[ScalarLike, ScalarLike, AnyArray],
+    parts: Parts,
+    primals: tuple[ScalarLike, ScalarLike, Any],
+    tangents: tuple[ScalarLike, ScalarLike, Any],
     /,
 ) -> tuple[AnyArray, AnyArray]:
-    a, b, x = primals
-    a_dot, b_dot, x_dot = tangents
-    log_value = log_fn(a, b, x)
-    root = jnp.exp(log_value / 2.0)
+    a, b, xs = primals
+    a_dot, b_dot, xs_dot = tangents
+    log_scale, mant = parts(a, b, xs)
+    log_value = _log_of(log_scale, mant)
+    log_max = math.log(float(jnp.finfo(log_value.dtype).max))
+    # False past the float range (and where the value is `nan`); True at -inf,
+    # where the root is 0.
+    finite = log_value <= log_max
+    root = jnp.exp(jnp.where(finite, log_value, 0.0) / 2.0)
 
     def lane(
         primal: AnyArrayLike, tangent: AnyArrayLike, /
@@ -676,9 +701,18 @@ def _exp_of_log_term_jvp(
         p = primal + jnp.zeros_like(log_value)
         return p, (tangent * root).astype(p.dtype)
 
-    (a_l, a_t), (b_l, b_t), (x_l, x_t) = lane(a, a_dot), lane(b, b_dot), lane(x, x_dot)
-    _, log_dot = jax.jvp(log_fn, (a_l, b_l, x_l), (a_t, b_t, x_t))
-    return jnp.exp(log_value), (root * log_dot).astype(log_value.dtype)
+    a_l, a_t = lane(a, a_dot)
+    b_l, b_t = lane(b, b_dot)
+    pairs = jax.tree.map(lane, xs, xs_dot)
+    xs_l = jax.tree.map(lambda _, pt: pt[0], xs, pairs)
+    xs_t = jax.tree.map(lambda _, pt: pt[1], xs, pairs)
+    _, log_dot = jax.jvp(
+        lambda aa, bb, xx: _log_of(*parts(aa, bb, xx)),
+        (a_l, b_l, xs_l),
+        (a_t, b_t, xs_t),
+    )
+    tangent = jnp.where(finite, root * log_dot, 0.0)
+    return _value_of(log_scale, mant), tangent.astype(log_value.dtype)
 
 
 def _split_at(
@@ -721,7 +755,7 @@ def _split_at(
     # b, and its masked `inf` made the gradients `nan`.
     x_at_0 = 0.5 * split / (1.0 + jnp.abs(b))
     xs = jnp.where(at_0, x_at_0, jnp.where(below, z, split))
-    term = _exp_of_log_term(ft.partial(_log_term, steps=steps), a, b, xs)
+    term = _exp_of_log_term(ft.partial(_fraction_parts, steps=steps), a, b, xs)
     direct = jnp.where(at_0, 0.0, term)
     w = jnp.where(below, w0, 1.0 - z)
     tail = _expand_from(a, b, w, w0, wide_b=True)
