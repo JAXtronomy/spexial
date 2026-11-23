@@ -2,6 +2,7 @@
 
 __all__ = ["polylog"]
 
+import math
 from functools import partial
 from typing import Any, Final
 
@@ -11,7 +12,6 @@ from jax import lax
 from jax.scipy.special import gamma as _jax_gamma
 
 from .bernoulli import ORDER, bernoulli_numbers
-from .comb import comb
 from .custom_types import AnyArray, AnyArrayLike
 from .dtype import promote_integers
 from .zeta import zeta
@@ -84,14 +84,21 @@ def _bernoulli_poly(n: int, x: AnyArray) -> AnyArray:
     # and the body then widens it -- which `lax.fori_loop` rejects outright,
     # with an error naming neither `polylog` nor the dtype. Casting the table to the
     # carry's dtype keeps the loop type-stable at any input width.
+    #
+    # The binomials go into the same table, from `math.comb`, because `n` is
+    # static. They used to be `spexial.comb(n, i)` in the loop body, which kept
+    # the carry stable only while that came back *weakly* typed -- and from
+    # jax 0.12 `jax.scipy.special.betaln`, which `comb` calls, returns a strong
+    # float64 for weak input, so the complex64 carry widened to complex128.
     x_arr = (
         jnp.asarray(x) * 1.0
     )  # promotes integers; leaves a weak float at the default
-    bs = bernoulli_numbers().astype(x_arr.dtype)
+    binomials = jnp.asarray([float(math.comb(n, i)) for i in range(n + 1)])
+    coeffs = (bernoulli_numbers()[: n + 1] * binomials).astype(x_arr.dtype)
     return lax.fori_loop(
         0,
         n + 1,
-        lambda i, val: val + bs[i] * comb(n, i) * x_arr ** (n - i),
+        lambda i, val: val + coeffs[i] * x_arr ** (n - i),
         jnp.zeros_like(x_arr),
     )
 
