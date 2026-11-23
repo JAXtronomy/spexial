@@ -388,7 +388,7 @@ def _complete_beta(a: ScalarLike, b: ScalarLike, /) -> AnyArray:
     x0 = (a + 1.0) / (a + b + 2.0)
     # The front factor x^a (1-x)^b is the same for both terms, and is formed from
     # x0 itself, by `_log1m`, not `log` of a rounded `1 - x0` scaled by b.
-    log_front = a * jnp.log(x0) + b * _log1m(x0)
+    log_front = a * jnp.log(x0) + b * _log1m(jnp.asarray(x0))
     h = _continued_fraction(
         jnp.stack([a, b]),
         jnp.stack([b, a]),
