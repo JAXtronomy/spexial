@@ -115,10 +115,9 @@ def comb(N: AnyArrayLike, k: AnyArrayLike, /) -> AnyArray:
     # same, because `as_float` has already widened `float16` to float32.
     #
     # Cast only when it changes something. `astype` strips weak typing even
-    # when the dtype already matches, and a strong float64 from `comb(n, i)`
-    # with two Python ints promotes `polylog`'s complex64 scan carry to
-    # complex128 -- an error naming neither function, and the second time that
-    # exact regression has been introduced here.
+    # when the dtype already matches. (From jax 0.12 the `betaln` branch below
+    # returns a strong float64 anyway, which is why `polylog` no longer calls
+    # `comb` inside its loop.)
     compute_dtype = jnp.result_type(n_arr, k_arr)
     if n_arr.dtype != compute_dtype:
         n_arr = n_arr.astype(compute_dtype)

@@ -447,9 +447,12 @@ def test_a_eq_1_in_the_log1p_band(b):
     """REGRESSION: XLA's ``log1p`` is ~240 ulp off for ``z`` in (0.3, 0.42].
 
     The closed form multiplies that by ``|bL|``: 7e-12 at ``b = -500``. `_log1m`
-    switches to ``log(1 - z)`` there, which is exact enough.
+    switches to ``log(1 - z)`` there, with the rounding of ``1 - z`` added back:
+    without it the worst is 1.1e-13, and 1.5e-13 under jax 0.12's `log`. With
+    it, 8.0e-14 on both. A 25-point grid missed the worst point, so the grid is
+    fine enough to find it.
     """
-    z = np.linspace(0.3, 0.42, 25)
+    z = np.linspace(0.3, 0.42, 401)
     got = np.asarray(sp.incomplete_beta(1.0, b, jnp.asarray(z)))
     expect = np.array([_a_eq_1_ref(b, zi) for zi in z])
     np.testing.assert_allclose(got, expect, rtol=1e-13)

@@ -210,8 +210,9 @@ _LOG1P_UPTO = 0.3
 
 XLA's CPU ``log1p`` is off by up to ~240 ulp (2.7e-14) for arguments in
 ``(-0.42, -0.3)``, and the closed form multiplies that by ``|b L|``. From
-``z = 0.3`` up, ``1 - z`` is exact to within half an ulp, so ``log`` of it is
-good to 3e-16; below, ``log1p`` is. Either way about 2 ulp. (In float32 the
+``z = 0.3`` up, ``1 - z`` is exact to within half an ulp, and `_log1m` adds
+back that half ulp, so ``log`` of it is good to about 1 ulp; below, ``log1p``
+is. Either way about 2 ulp. (In float32 the
 switch buys nothing -- there ``log1p`` is the better of the two, 1.6 against
 2.6 ulp on that band -- but costs nothing either.)
 """
@@ -223,7 +224,17 @@ def _log1m(z: AnyArray, /) -> AnyArray:
     # Double `where`: each side only ever sees arguments it is accurate and finite
     # on, so neither puts a non-finite derivative under the other's mask.
     via_log1p = jnp.log1p(-jnp.where(small, z, 0.0))
-    via_log = jnp.log(1.0 - jnp.where(small, 0.5, z))
+    z_big = jnp.where(small, 0.5, z)
+    # `1 - z` rounds by up to half an ulp below z = 1/2, and the closed form
+    # multiplies that by |b|. `(1 - w) - z` is that rounding error, exactly
+    # (both subtractions are exact by Sterbenz), and `log(w + d) = log(w) + d/w`
+    # to far below an ulp. It halves the worst error on (0.3, 0.42]: 8e-14 at
+    # b = -500 against 1.1e-13, and 1.5e-13 once jax 0.12's `log` lost a
+    # little accuracy there. From z = 1/2 up `1 - z` is exact and `d` is 0; its
+    # divisor is then 1, so z = 1 stays `-inf` rather than `-inf + 0/0`.
+    w = 1.0 - z_big
+    d = (1.0 - w) - z_big
+    via_log = jnp.log(w) + d / jnp.where(d == 0.0, 1.0, w)
     return jnp.where(small, via_log1p, via_log)  # type: ignore[no-any-return]
 
 

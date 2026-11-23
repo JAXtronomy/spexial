@@ -253,8 +253,9 @@ def test_float16_subnormals_use_the_more_accurate_branch():
     """Delegation is the default; being more accurate is a reason to depart.
 
     Over the float16 subnormals where `jax.scipy.special.gamma` returns a
-    finite value, the `1/x` branch is better at 690 of 767 points -- worst
-    4.8e-4 against upstream's 4.2e-3. An earlier gate kept upstream's answer
+    finite value, the `1/x - gamma_E` branch is never worse, and before jax
+    0.12 it was better at 691 of 767 points -- worst 4.7e-4 against upstream's
+    4.2e-3. An earlier gate kept upstream's answer
     there, justified by a figure that had been measured backwards.
     """
     xs = jnp.asarray(
@@ -269,13 +270,18 @@ def test_float16_subnormals_use_the_more_accurate_branch():
 
 
 def test_float16_subnormals_use_the_reciprocal_branch():
-    """The substitution is applied to float16 subnormals, and is the better answer.
+    """The substitution is applied to float16 subnormals, and is never the worse answer.
 
     An earlier revision gated it on upstream returning a non-finite value, on a
     measurement that had been read backwards. Over the 767 float16 subnormals
-    where `jax.scipy.special.gamma` is finite, this branch is closer to the
-    truth at 690 of them and worse at 5, with a worst case of 4.9e-4 against
-    upstream's 4.2e-3.
+    where `jax.scipy.special.gamma` is finite, this branch, ``1/x - gamma_E``,
+    is within float16's half-ulp of 2**-11 (worst 4.7e-4) and never further
+    from the truth than upstream. Before jax 0.12 upstream was worse at 691 of
+    them, worst 4.2e-3; from 0.12 it is as good, and on Linux the two agree bit
+    for bit. So "applied" is checked against the branch's own formula, not by
+    differing from upstream. The formula is narrowed by XLA, not NumPy: on x86,
+    XLA converts float64 to float16 through float32, and that double rounding
+    sends x = 3.8e-5 to 26304 where a single rounding gives 26288.
     """
     mp.mp.dps = 40
     subnormals = np.arange(1, 1024, dtype=np.uint16).view(np.float16)
@@ -283,11 +289,15 @@ def test_float16_subnormals_use_the_reciprocal_branch():
     upstream = np.asarray(
         jax.scipy.special.gamma(jnp.asarray(subnormals)), dtype=np.float64
     )
-    assert (ours != upstream).any(), "the substitution is no longer applied"
-
+    formula = 1.0 / subnormals.astype(np.float64) - np.euler_gamma
+    branch = np.asarray(jnp.asarray(formula).astype(jnp.float16), dtype=np.float64)
     finite = np.isfinite(upstream)
+    np.testing.assert_array_equal(
+        ours[finite], branch[finite], err_msg="the substitution is no longer applied"
+    )
+
     true = np.array([float(mp.gamma(mp.mpf(float(b)))) for b in subnormals])
     ours_error = np.abs(ours[finite] - true[finite]) / np.abs(true[finite])
     upstream_error = np.abs(upstream[finite] - true[finite]) / np.abs(true[finite])
-    assert (ours_error < upstream_error).sum() > 600
-    assert ours_error.max() < upstream_error.max()
+    assert (ours_error <= upstream_error).all()
+    assert ours_error.max() < 2.0**-11

@@ -43,10 +43,11 @@ def as_float(x: AnyArrayLike, /, *, keep_weak: bool = False) -> AnyArray:
     ``keep_weak`` chooses between two things that cannot both be had, and the
     two callers need opposite ones.
 
-    `comb` needs ``True``. `polylog` calls it with plain Python ``int``
-    arguments from inside a `lax.scan`, and a *weakly* typed float64 is what
-    stops those promoting the loop carry from complex64 to complex128 -- which
-    it did, with an error naming neither function.
+    `comb` needs ``True``, so that two Python ``int`` arguments follow JAX's
+    weak-type promotion instead of forcing float64. It once kept `polylog`'s
+    complex64 loop carry from widening to complex128; `polylog` now takes its
+    binomials from `math.comb` instead, because from jax 0.12
+    `jax.scipy.special.betaln` returns a strong float64 whatever it is given.
 
     `kn` needs ``False``. Its `custom_jvp` rules are annotated `AnyArray`, and
     a weak scalar reaches them still wrapped as a Python float, which the

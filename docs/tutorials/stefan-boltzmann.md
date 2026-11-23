@@ -98,12 +98,12 @@ The accepted CODATA value is $5.670374419 \times 10^{-8}\ \mathrm{W\,m^{-2}\,K^{
 `spexial` functions are ordinary JAX functions, so `jax.grad` works on them directly. Let's ask for $\zeta'(4)$:
 
 ```pycon
->>> float(jax.grad(sp.zeta)(4.0))
--0.06891126589612538
+>>> round(float(jax.grad(sp.zeta)(4.0)), 15)
+-0.068911265896125
 
 ```
 
-Notice we did not write a derivative anywhere. JAX differentiated straight through the series that `spexial` uses to evaluate $\zeta$.
+We round to 15 places because the last digit can move by one between XLA releases. Notice we did not write a derivative anywhere. JAX differentiated straight through the series that `spexial` uses to evaluate $\zeta$.
 
 ## Step 7: compile it
 
