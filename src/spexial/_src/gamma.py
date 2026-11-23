@@ -6,7 +6,7 @@ derivative. See `gamma` for why that is worth a module.
 
 __all__ = ["gamma"]
 
-from typing import Any
+from typing import Any, Final
 
 import jax
 import jax.numpy as jnp
@@ -21,6 +21,8 @@ from .dtype import (
     positive_subnormal,
     promote_integers,
 )
+
+_EULER_GAMMA: Final = 0.57721566490153286061
 
 
 @jax.custom_jvp
@@ -102,14 +104,23 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
     # an exponent range, so `log |x| ~ -87` has no room in a dtype whose
     # spacing there is 0.5.
     wide = jnp.asarray(0.0).dtype
-    reciprocal = jnp.exp(-log_no_flush(magnitude, dtype=wide)).astype(x_arr.dtype)
-    signed = jnp.where(is_negative(x_arr), -reciprocal, reciprocal)
+    reciprocal = jnp.exp(-log_no_flush(magnitude, dtype=wide))
+    # `- gamma_E` is below the last bit of `1/x` in float32 and float64, but not
+    # in float16, whose subnormals reach up to 6.1e-5: `1/x` is then ~16400 and
+    # the shift of 0.58 decides the rounding. Without it this branch was worse
+    # than upstream at 54 of the float16 subnormals once jax 0.12 made
+    # `jax.scipy.special.gamma` accurate there, and better at none.
+    signed = (
+        jnp.where(is_negative(x_arr), -reciprocal, reciprocal) - _EULER_GAMMA
+    ).astype(x_arr.dtype)
     # Substituted across the whole subnormal band, upstream finite or not --
     # *except* where this very reciprocal overflows. Delegation is the
     # default, and being *more accurate* is a reason to depart from it:
     # measured against mpmath over all 767 float16 subnormals where
     # `jax.scipy.special.gamma` returns a finite value, this branch is better
-    # at 690 of them and worse at 5, worst 4.8e-4 against upstream's 4.2e-3. An
+    # at 691 of them before jax 0.12 and worse at none, worst 4.7e-4 against
+    # upstream's 4.2e-3; from 0.12 upstream is correctly rounded there too and
+    # the two agree, so the substitution costs nothing where it no longer helps. An
     # earlier version gated on `~isfinite(out)` to "keep upstream's answer
     # where upstream has one", justified by a 60x figure that was measured
     # backwards.
