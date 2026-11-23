@@ -275,10 +275,11 @@ def test_float16_subnormals_use_the_reciprocal_branch():
     An earlier revision gated it on upstream returning a non-finite value, on a
     measurement that had been read backwards. Over the 767 float16 subnormals
     where `jax.scipy.special.gamma` is finite, this branch, ``1/x - gamma_E``,
-    is correctly rounded (worst 4.8e-4, under float16's half-ulp of 2**-11) and
+    is correctly rounded (worst 4.7e-4, under float16's half-ulp of 2**-11) and
     never further from the truth than upstream. Before jax 0.12 upstream was
-    worse at 690 of them, worst 4.2e-3; from 0.12 it is correctly rounded too,
-    and the two agree.
+    worse at 691 of them, worst 4.2e-3; from 0.12 it is correctly rounded too,
+    and on Linux the two agree bit for bit. So "applied" is checked against the
+    branch's own formula, not by differing from upstream.
     """
     mp.mp.dps = 40
     subnormals = np.arange(1, 1024, dtype=np.uint16).view(np.float16)
@@ -286,9 +287,15 @@ def test_float16_subnormals_use_the_reciprocal_branch():
     upstream = np.asarray(
         jax.scipy.special.gamma(jnp.asarray(subnormals)), dtype=np.float64
     )
-    assert (ours != upstream).any(), "the substitution is no longer applied"
-
+    with np.errstate(over="ignore"):  # 1/x overflows float16 below 1.5e-5
+        branch = (1.0 / subnormals.astype(np.float64) - np.euler_gamma).astype(
+            np.float16
+        )
     finite = np.isfinite(upstream)
+    np.testing.assert_array_equal(
+        ours[finite], branch[finite], err_msg="the substitution is no longer applied"
+    )
+
     true = np.array([float(mp.gamma(mp.mpf(float(b)))) for b in subnormals])
     ours_error = np.abs(ours[finite] - true[finite]) / np.abs(true[finite])
     upstream_error = np.abs(upstream[finite] - true[finite]) / np.abs(true[finite])
