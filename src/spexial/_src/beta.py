@@ -833,8 +833,18 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     reflection (`_large_b`: :math:`b > 10`, or :math:`a > 8` with
     :math:`b \ge 0.1`), `_large_a` (:math:`a > 8`, :math:`b < 0.1`), and the
     continued fraction directly (`_negative_b`: :math:`a \le 8`,
-    :math:`b < -5`). The
-    :math:`z`-derivative is supplied by a `jax.custom_jvp` and is exact and
+    :math:`b < -5`).
+
+    Measured against mpmath in float64, the relative error is :math:`5 \times
+    10^{-13}` or better in those three methods for :math:`0.1 \le a \le 50`
+    and :math:`|b| \le 10^3`, including :math:`a` and :math:`b` both large
+    (:math:`3 \times 10^{-14}` at :math:`(30, 70)`). Beyond :math:`b = 10^3`
+    rounding grows like :math:`b\,\epsilon`. In the series regime the tests
+    assert :math:`10^{-11}`, about how closely the two series meet at
+    :math:`z = 1/2`. The full table is in the accuracy-and-domains reference
+    page.
+
+    The :math:`z`-derivative is supplied by a `jax.custom_jvp` and is exact and
     O(1) -- by Leibniz it is just the integrand at the endpoint,
     :math:`z^{a-1}(1-z)^{b-1}` -- rather than differentiating through 64 terms.
     It is a `custom_jvp` rather than a `custom_vjp` so that `jax.hessian`'s

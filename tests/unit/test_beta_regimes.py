@@ -71,6 +71,25 @@ def test_large_b_matches_mpmath(a, b):
     np.testing.assert_allclose(got, expect, rtol=1e-12 if b <= 100 else 1e-11)
 
 
+@pytest.mark.parametrize(
+    ("a", "b"), [(6.0, 12.0), (15.0, 35.0), (20.0, 40.0), (30.0, 70.0)]
+)
+def test_large_a_and_large_b_matches_mpmath(a, b):
+    """REGRESSION: ``a`` and ``b`` both large, as in a Zhao (1996) profile.
+
+    galax calls this with ``a = alpha (3 - gamma)`` and ``b = alpha (beta - 3)``,
+    so ``(alpha, beta, gamma) = (5, 10, 0)`` is ``(15, 35)``. At ``z = 1/2``
+    the series was 2.9e-4 off there and 6e10 off at ``(30, 70)``.
+
+    The tolerance is the measured worst, 2.8e-14 at ``(30, 70)``, with headroom.
+    """
+    z = np.array([*ZS, 1.0])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    with mp.workdps(40):
+        expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=1e-13)
+
+
 @pytest.mark.parametrize("a", [0.5, 2.0, 8.0])
 def test_continuous_across_the_large_b_switch(a):
     """Series below `_CF_FROM`, continued fraction above: they must meet."""
