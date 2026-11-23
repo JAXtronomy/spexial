@@ -387,14 +387,18 @@ def test_complex_derivative_across_the_subnormal_band(dtype, zs):
         assert got.real == pytest.approx(expect, rel=1e-6)
 
 
-@pytest.mark.parametrize("z", [1e-154, 1e-200, 1e-250])
+@pytest.mark.parametrize("z", [1e-155, 1e-200, 1e-250])
 def test_third_derivative_overflows_rather_than_nan(z):
     """REGRESSION: ``grad**3`` was `nan` below ``z = 1.5e-154``.
 
-    ``spence'''(z) ~ -1/z**2``, which has genuinely overflowed there, so
-    ``-inf`` is the answer. The fused ``1 / (z (1 - z))`` squares its
-    denominator when differentiated and underflowed to a `nan` instead;
-    splitting the reciprocal never forms that square.
+    ``spence'''(z) ~ -1/z**2``, which has genuinely overflowed below
+    ``z = 7.5e-155``, so ``-inf`` is the answer. The fused ``1 / (z (1 - z))``
+    squares its denominator when differentiated and underflowed to a `nan`
+    instead; splitting the reciprocal never forms that square.
+
+    Not ``1e-154``, where the true ``-1e308`` is finite. Before jax 0.12, JAX's
+    own rule for differentiating a division squared the divisor and returned
+    ``-inf`` there too; from 0.12 it returns ``-1e308``.
     """
     third = jax.grad(jax.grad(jax.grad(spence)))
     got = float(third(jnp.asarray(z)))

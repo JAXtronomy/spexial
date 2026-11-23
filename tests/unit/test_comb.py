@@ -361,20 +361,33 @@ def test_derivative_is_continuous_across_the_asymptotic_join():
         assert got == pytest.approx(expect, rel=1e-5)
 
 
+# Before jax 0.12, JAX differentiated `x / y` through `y**-2`, which underflows
+# long before the quotient does; from 0.12 it is `(dx - (x / y) dy) / y`. The
+# true derivative here is -1e-300, and the old rule returns -0.0.
+DIV_JVP_SQUARES = float(jax.jvp(lambda y: 1e100 / y, (1e200,), (1.0,))[1]) == 0.0
+
+
 @pytest.mark.parametrize(
     ("n", "still_negative"),
-    [(1e150, True), (1e153, True), (1e154, False), (1e200, False)],
+    [
+        (1e150, True),
+        (1e153, True),
+        (1e154, not DIV_JVP_SQUARES),
+        (1e200, not DIV_JVP_SQUARES),
+    ],
 )
 def test_second_derivative_sign_is_the_documented_floor(n, still_negative):
     """`comb`'s second derivative w.r.t. ``N`` flips sign past ``N = 1.3e154``.
 
-    Both surviving terms are of size ``1/N**2``, which is *subnormal* there, and
-    XLA flushes subnormals: `jax.grad(jax.grad(jnp.log))(1e154)` is ``-0.0``
-    where the true ``-1e-308`` is a representable denormal. The dominant
-    negative term vanishes and the positive one is left, so the magnitude is
-    right and the sign inverted. Nothing recovers it short of a rule that never
-    enters log space, which `comb` cannot have. Pinned so the boundary cannot
-    move unnoticed.
+    Only under the division rule JAX used before 0.12. Both surviving terms are
+    of size ``1/N**2``, and that rule formed ``y**-2``: subnormal there, and
+    flushed by XLA, so `jax.grad(jax.grad(jnp.log))(1e154)` is ``-0.0`` where
+    the true ``-1e-308`` is a representable denormal. The dominant negative term
+    vanished and the positive one was left, so the magnitude was right and the
+    sign inverted. From jax 0.12 the rule divides by ``y`` twice instead, the
+    product of the cotangent with ``1/N`` never goes subnormal, and the sign is
+    right until the answer itself drops below ``tiny`` at ``N = 5.5e204``.
+    Pinned under both rules so the boundary cannot move unnoticed.
     """
     hessian = jax.hessian(lambda v: sp.comb(v[0], v[1]))
     got = float(hessian(jnp.asarray([n, 0.5]))[0, 0])
