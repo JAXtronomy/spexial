@@ -119,7 +119,7 @@ def gamma(x: AnyArrayLike, /) -> AnyArray:
     # measured against mpmath over all 767 float16 subnormals where
     # `jax.scipy.special.gamma` returns a finite value, this branch is better
     # at 691 of them before jax 0.12 and worse at none, worst 4.7e-4 against
-    # upstream's 4.2e-3; from 0.12 upstream is correctly rounded there too and
+    # upstream's 4.2e-3; from 0.12 upstream is as accurate there and
     # the two agree, so the substitution costs nothing where it no longer helps. An
     # earlier version gated on `~isfinite(out)` to "keep upstream's answer
     # where upstream has one", justified by a 60x figure that was measured
