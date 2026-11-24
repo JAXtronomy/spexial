@@ -562,8 +562,8 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     :math:`(a/2)^m/m!` and cancel; here they fall like :math:`2^m/m!`
     (:math:`(a-1) w_0 < 2`), costing under a digit. Measured against mpmath over
     :math:`a \in [12, 100]`, :math:`b \in [-1000, 0.1)` and :math:`z` to
-    :math:`1 - 10^{-12}`: :math:`2\times10^{-13}` or better (:math:`1.2\times
-    10^{-13}` at :math:`(100, -50, 100/102)`), where the series was
+    :math:`1 - 10^{-12}`: :math:`2\times10^{-13}` or better (:math:`10^{-13}`
+    at :math:`(12, -50, 1 - 10^{-6})`), where the series was
     :math:`10^{-9}` at :math:`a = 24` and :math:`10^{22}` at 100.
 
     At :math:`z = 1` with :math:`b \le 0` the integral diverges: the pole is
