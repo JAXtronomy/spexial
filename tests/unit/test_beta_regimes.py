@@ -192,7 +192,7 @@ def test_mixed_partial_at_small_z(z, b):
 
 
 def test_z_derivative_with_traced_b_at_z_eq_1():
-    """With ``b`` traced, the z-rule's clamp keeps ``(1-z)^(b-1)`` exact at z = 1."""
+    """With ``b`` traced, the z-rule keeps ``(1-z)^(b-1)`` exact at z = 1."""
     one = jnp.asarray(1.0)
     dz = jax.jit(jax.grad(lambda zz, bb: sp.incomplete_beta(2.0, bb, zz)))
     assert float(dz(one, 1.0)) == 1.0
@@ -210,8 +210,8 @@ def test_large_a_matches_mpmath(a, b):
     """Above ``a = 8`` with ``b >= 0.1`` the continued fraction takes over.
 
     `_large_z` expands ``(1-u)^(a-1)``, whose coefficients cancel just as
-    ``(1-b)_k`` does for large ``b``: the series was 4e-11 at ``a = 16``,
-    2e-8 at ``24``, and wrong from about 50. Measured worst here 5e-13.
+    ``(1-b)_k`` does for large ``b``: the series was 1e-8 at ``a = 16``,
+    4e-7 at ``24``, and wrong from about 50. Measured worst here 5e-13.
     """
     z = np.array([1e-6, 0.01, 0.3, 0.7, 0.9, 0.99, 1 - 1e-6])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
@@ -321,9 +321,10 @@ def test_vmap_over_a_across_the_switch_has_finite_gradients():
 def test_higher_z_derivatives_at_z_eq_1_with_traced_b(b):
     """Traced and concrete ``b`` agree at ``z = 1`` to the third z-derivative.
 
-    The traced path writes ``(1-z)^(b-1)`` through ``log1p(-z)`` (GH-68), which
-    is ``-inf`` at ``z = 1``. A clamp there differentiates as ``0 * -inf`` and
-    made the second and third derivatives ``nan``; `pow` takes the endpoint.
+    The traced path writes ``(1-z)^(b-1)`` through ``log(1-z)`` (GH-68), which
+    is ``-inf`` at ``z = 1``. A clamp there differentiated as ``0 * -inf`` and
+    made the second and third derivatives ``nan``; a double ``where`` now hands
+    the endpoint to `pow`.
     """
     one = jnp.asarray(1.0)
     f = lambda bb, zz: sp.incomplete_beta(2.0, bb, zz)
@@ -957,6 +958,41 @@ def test_mixed_partials_at_the_split(a, b, z):
         integrand = zz ** (a - 1) * (1 - zz) ** (b - 1)
         want_a, want_b = float(mp.log(zz) * integrand), float(mp.log1p(-zz) * integrand)
     np.testing.assert_allclose([d_a, d_b], [want_a, want_b], rtol=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [(1100.0, -1100.0, 0.5), (1e4, -400.0, 0.9), (2000.0, -1500.0, 0.4)],
+)
+def test_z_derivative_where_its_factors_overflow(a, b, z):
+    """``dB/dz = z^(a-1) (1-z)^(b-1)`` where one factor alone underflows.
+
+    Formed separately, ``0.5^1099`` underflows and ``0.5^-1101`` overflows, and
+    their product was ``0 * inf = nan`` where the derivative is 4.0. Both the
+    reverse and forward z-derivative, and the forward a/b entries the `nan` met.
+    """
+    with mp.workdps(50):
+        zz = mp.mpf(z)
+        expect = float(zz ** (a - 1) * (1 - zz) ** (b - 1))
+    rev = float(jax.grad(sp.incomplete_beta, 2)(a, b, z))
+    np.testing.assert_allclose(rev, expect, rtol=1e-11)
+    fwd = jax.jacfwd(sp.incomplete_beta, (0, 1, 2))(a, b, z)
+    assert all(bool(jnp.isfinite(g)) for g in fwd), fwd
+    np.testing.assert_allclose(float(fwd[2]), expect, rtol=1e-11)
+
+
+def test_z_derivative_in_half_precision_past_a_factor_s_range():
+    """float16: ``(1-z)^-4`` at ``z = 0.95`` is 1.6e5, past float16's range.
+
+    The derivative itself, 61569, is not; the rule now works in float32 and
+    rounds once.
+    """
+    z16 = jnp.asarray(0.95, jnp.float16)
+    zf = float(z16)
+    got = jax.grad(sp.incomplete_beta, 2)(20.0, -3.0, z16)
+    assert got.dtype == jnp.float16
+    expect = float(jnp.asarray(zf**19 * (1 - zf) ** -4, jnp.float16))
+    assert float(got) == expect
 
 
 @pytest.mark.parametrize(

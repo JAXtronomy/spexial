@@ -1320,24 +1320,50 @@ def _incomplete_beta_jvp(
 
     # d/dz B(a, b, z) = z^(a-1) (1-z)^(b-1): the integrand at the endpoint.
     if not isinstance(z_dot, SymbolicZero):
-        if isinstance(b, jax.core.Tracer):
-            # `b` may itself be differentiated, so write (1-z)^(b-1) so that its
-            # `b`-derivative carries `_log1m(z)`, not `log(1 - z)` of a rounded
-            # `1 - z`, which keeps only ~1e-16 / z relative precision (GH-68).
-            # At z = 1 itself `pow` takes over, by a double `where`: `_log1m(z)` is
-            # `-inf` there, and any clamp of it differentiates as `0 * -inf`,
-            # making the second and third z-derivatives `nan`. `pow` has exact
-            # derivatives at a zero base, as on the concrete path.
-            z_arr = jnp.asarray(z)
-            inside = z_arr < 1.0
-            z_in = jnp.where(inside, z_arr, 0.0)
-            via_log = jnp.exp((b - 1.0) * _log1m(z_in))
-            one_minus_z_pow = jnp.where(inside, via_log, _pow(1.0 - z_arr, b - 1.0))
-        else:
-            # A concrete `b` has no derivative to get wrong, and as a constant
-            # exponent XLA can simplify `pow` (to a reciprocal at b = 0, a square
-            # root at b = 3/2), which `exp(... log1p)` would hide from it.
-            one_minus_z_pow = _pow(1.0 - z, b - 1.0)
-        tangent_out = tangent_out + _pow(z, a - 1.0) * one_minus_z_pow * z_dot
+        tangent_out = tangent_out + _integrand(a, b, z) * z_dot
 
     return primal_out, tangent_out
+
+
+def _integrand(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
+    """``z^(a-1) (1-z)^(b-1)``, the z-derivative of ``B(a, b, z)``.
+
+    For a traced ``a`` or ``b``, or exponents large enough for a factor to
+    leave the float range, inside the interval as one exponential,
+    ``exp((a-1) log z + (b-1) log(1-z))``:
+    formed apart, one factor underflowed and the other overflowed at large ``a``
+    and very negative ``b``, and their product was ``0 * inf = nan`` where the
+    derivative is 4.0, at (1100, -1100, 1/2). ``log(1-z)`` is `_log1m`, so the
+    ``b``-derivative keeps full precision as ``z -> 0`` (GH-68). At ``z = 0`` and
+    ``z = 1`` `_pow` takes over, whose derivatives are exact at a zero base
+    (GH-73). Each side is handed exponents of 0 where it is not selected, so
+    neither puts an ``inf`` under the other's mask. Half precision is evaluated
+    in float32 and rounded once: at float16 ``z = 0.95``, ``(1-z)^-4`` alone is
+    past float16's range while the derivative is not.
+    """
+    z = jnp.asarray(z)
+    if jnp.dtype(z.dtype).itemsize < 4:
+        f32 = jnp.float32
+        return _integrand(  # type: ignore[no-any-return]
+            jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)
+        ).astype(z.dtype)
+    # A factor can only under- or overflow while the other does the opposite
+    # if an exponent exceeds log(max) / log(2) -- one of z, 1 - z is at least
+    # 1/2. Below that, concrete a and b keep the plain product of powers, whose
+    # constant exponents XLA simplifies (to z * rsqrt(1 - z) at (2, 1.5)): the
+    # exponential costs 13x the flops of that z-gradient.
+    if not isinstance(a, jax.core.Tracer) and not isinstance(b, jax.core.Tracer):
+        limit = math.log(float(jnp.finfo(z.dtype).max)) / math.log(2.0)
+        if float(a) - 1.0 <= limit and 1.0 - float(b) <= limit:
+            return _pow(z, a - 1.0) * _pow(1.0 - z, b - 1.0)  # type: ignore[no-any-return]
+    end = (z == 0) | (z == 1)
+    inner_z = jnp.where(end, 0.5, z)
+    inner = jnp.exp(
+        jnp.where(end, 0.0, a - 1.0) * jnp.log(inner_z)
+        + jnp.where(end, 0.0, b - 1.0) * _log1m(inner_z)
+    )
+    end_z = jnp.where(end, z, 0.5)
+    at_end = _pow(end_z, jnp.where(end, a - 1.0, 0.0)) * _pow(
+        1.0 - end_z, jnp.where(end, b - 1.0, 0.0)
+    )
+    return jnp.where(end, at_end, inner)  # type: ignore[no-any-return]
