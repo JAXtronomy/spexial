@@ -1007,6 +1007,38 @@ def test_z_derivative_with_concrete_parameters_near_a_factor_s_limit(a, b, z, dt
     )
 
 
+@pytest.mark.parametrize("dtype", [jnp.float64, jnp.float32])
+@pytest.mark.parametrize("side", [-1, 1])
+def test_z_derivative_at_the_product_bound(dtype, side):
+    """Mixed-sign exponents just inside and just past ``maxexp / (nmant + 1)``.
+
+    Inside, concrete ``a`` and ``b`` take the plain product of powers, which
+    must hold even one ulp from ``z = 1``; past it, the exponential. Either way
+    the z-derivative matches the integrand wherever that is in range, and is
+    ``inf`` or 0 only where it is not.
+    """
+    info = jnp.finfo(dtype)
+    bound = info.maxexp / (info.nmant + 1)
+    e = bound * (1 + side * 1e-3)
+    a, b = 1.0 + e, 1.0 - e
+    one_ulp = 1.0 - 2.0 ** -(info.nmant + 1)
+    grad = jax.jit(jax.grad(lambda t: sp.incomplete_beta(a, b, t)))
+    for z in (one_ulp, 0.999, 0.9, 0.5, 0.1, 2.0 ** -(info.nmant + 1)):
+        zz = jnp.asarray(z, dtype)
+        got = float(grad(zz))
+        with mp.workdps(50):
+            zm = mp.mpf(float(zz))
+            want = zm ** (a - 1) * (1 - zm) ** (b - 1)
+        if want > float(info.max):
+            assert got == np.inf, (z, got)
+        elif want < float(info.tiny):
+            assert got < float(info.tiny), (z, got)
+        else:
+            np.testing.assert_allclose(
+                got, float(want), rtol=1e-10 if dtype == jnp.float64 else 1e-3
+            )
+
+
 def test_z_derivative_in_half_precision_past_a_factor_s_range():
     """float16: ``(1-z)^-4`` at ``z = 0.95`` is 1.6e5, past float16's range.
 
