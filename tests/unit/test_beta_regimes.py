@@ -960,6 +960,24 @@ def test_mixed_partials_at_the_split(a, b, z):
 
 
 @pytest.mark.parametrize(
+    ("a", "b"), [(100.0, -164.29), (100.0, -120.0), (12.0, -356.5), (9.0, -381.57)]
+)
+def test_large_a_just_above_the_split(a, b):
+    """``B(s) + int_{1-z}^{w0}`` needs ``w0 = 1 - s`` exactly.
+
+    Rounded separately, ``2/(a+2)`` and ``a/(a+2)`` miss by an ulp, and the
+    identity by about ``|b| (a+2)/2 * 5e-17`` relative: 3.7e-13 at (100,
+    -164.29), past the documented 2e-13.
+    """
+    z = float(np.nextafter(a / (a + 2.0), 2.0))
+    with mp.workdps(50):
+        zz = mp.mpf(z)
+        expect = float(zz**a / a * mp.hyp2f1(a, 1 - b, a + 1, zz))
+    got = float(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    np.testing.assert_allclose(got, expect, rtol=2e-13)
+
+
+@pytest.mark.parametrize(
     ("a", "b", "z", "dtype"),
     [
         (2.0, -300.0, 0.999, jnp.float64),  # _negative_b, above its split

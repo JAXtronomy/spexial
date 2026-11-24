@@ -581,7 +581,10 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     # at the size of the value, leaving 3e-5 relative error in d/da at
     # (21.16, -5, 1 - 1e-12).
     split = jax.lax.stop_gradient(jnp.asarray(a / (a + 2.0)))
-    w0 = jax.lax.stop_gradient(jnp.asarray(2.0 / (a + 2.0)))
+    # 1 - split, not 2/(a+2): the identity needs w0 = 1 - s exactly, and the
+    # two roundings missed by an ulp, which |b| (a+2)/2 then amplified: 3.7e-13
+    # just above the split at (100, -164.29), 5.9e-11 at a = 1e5.
+    w0 = 1.0 - split
     return _split_at(a, b, z, split, w0)
 
 
