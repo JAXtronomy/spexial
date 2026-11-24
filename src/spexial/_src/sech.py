@@ -66,8 +66,8 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
     x_arr = jnp.asarray(x)
     if not jnp.issubdtype(x_arr.dtype, jnp.inexact):
         # Integers and bools: a *strong* float of the default width. Left to
-        # `jnp.exp`, a Python int would stay weakly typed, and bool, int8 and
-        # uint8 would give float32 instead of float64.
+        # `jnp.exp`, a Python int would stay weakly typed, and bool and the
+        # narrower integer types would give float32 instead of float64.
         x_arr = x_arr.astype(jnp.result_type(float))
     # The dtype is static, so this is resolved at trace time and costs nothing.
     if jnp.iscomplexobj(x_arr):

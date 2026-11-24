@@ -52,8 +52,8 @@ def test_integer_and_bool_input_gives_a_strong_float(x):
     """An integer or bool becomes a real float, not a truncated or weak one.
 
     Left to `jnp.exp`, a Python int would stay weakly typed, which silently takes
-    the dtype of whatever it meets next, and bool, int8 and uint8 would give
-    float32 instead of float64.
+    the dtype of whatever it meets next, and bool and the narrower integer types
+    would give float32 instead of float64.
     """
     got = sp.sech(x)
     assert got.dtype == jnp.result_type(float)
@@ -166,6 +166,10 @@ def test_naive_reciprocal_cosh_gradient_is_nan():
         ("float32", 88.5),
         ("float32", 1e3),
         ("float32", 1e30),
+        ("float16", 17.0),
+        ("float16", 1e3),
+        ("bfloat16", 89.0),
+        ("bfloat16", 1e3),
     ],
 )
 def test_beyond_underflow_value_and_gradient_vanish(dtype, x):
@@ -173,7 +177,7 @@ def test_beyond_underflow_value_and_gradient_vanish(dtype, x):
 
     `1 / cosh` has a `nan` gradient from ~710 (float64) and ~89 (float32).
     """
-    tiny = float(np.finfo(dtype).tiny)
+    tiny = float(jnp.finfo(dtype).tiny)
     for sign in (1.0, -1.0):
         xj = jnp.asarray(sign * x, dtype=dtype)
         assert abs(float(sp.sech(xj))) <= tiny
@@ -187,9 +191,9 @@ def test_beyond_underflow_value_and_gradient_vanish(dtype, x):
 def test_gradient_keeps_its_relative_accuracy_float64(x):
     """The hand-written rule has no cancellation near zero.
 
-    Differentiating the value form directly gives errors of up to 1e-4 at 1e-12
-    and 1e-10 at 1e-6; this holds the rule to 4e-15 everywhere. Measured worst
-    case is 1.05e-15.
+    Differentiating the value form directly gives errors of about 2e-4 at 1e-12
+    and 2e-10 at 1e-6; this holds the rule to 4e-15 everywhere. The measured
+    worst case over the whole range is 1.1e-15, at |x| near 20.
     """
     sech_true, grad_true = _true(x)
     assert _rel(sp.sech(x), sech_true) < 4e-15
@@ -258,7 +262,7 @@ def test_higher_derivatives(x, dtype, tol, order):
     AGENTS.md asks for the second and third at any guarded point. The odd orders
     vanish at zero, so the comparison is absolute there. The overflow of
     `exp(|x|)` is covered too: a rule that differentiated `sech.fun` instead of
-    `sech` would give `nan` for the second derivative from |x| ~ 710. The
+    `sech` would give `nan` for the second derivative from |x| ~ 709. The
     smallest `tol` that passes is 2.7e-15 in float64 and 1.6e-7 in float32.
     """
     xj = jnp.asarray(x, dtype=dtype)
@@ -280,6 +284,47 @@ def test_forward_mode_matches_reverse():
     _, tangent = jax.jvp(sp.sech, (x,), (t,))
     reverse = jax.vmap(jax.grad(sp.sech))(x) * t
     np.testing.assert_allclose(tangent, reverse, rtol=1e-14)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "x"),
+    [
+        ("float64", 709.5),
+        ("float64", 800.0),
+        ("float64", 1e4),
+        ("float32", 88.5),
+        ("float32", 100.0),
+        ("float32", 1e3),
+    ],
+)
+def test_forward_mode_beyond_underflow(dtype, x):
+    """`jvp` beyond where `exp(|x|)` overflows gives 0, for both signs.
+
+    Reverse mode cannot see a term of the rule that does not depend on the
+    tangent, so a constant or `nan` substituted there needs forward mode.
+    """
+    tiny = float(jnp.finfo(dtype).tiny)
+    xj = jnp.asarray([x, -x], dtype=dtype)
+    t = jnp.asarray([0.5, 2.0], dtype=dtype)
+    value, tangent = jax.jvp(sp.sech, (xj,), (t,))
+    assert np.all(np.abs(np.asarray(value)) <= tiny)
+    assert np.all(np.abs(np.asarray(tangent)) <= tiny)
+
+
+def test_float64_moderate_range():
+    """The range between the small-argument and the grid points, both signs.
+
+    The grid and the explicit points leave (2e-8, 1) and (1, 3.4) almost empty,
+    which is where a series for small |x| with too wide a cut-off would hide.
+    """
+    pos = np.geomspace(1e-8, 3.0, 150)
+    xj = jnp.asarray(np.concatenate([pos, -pos]))
+    value = sp.sech(xj)
+    grad = jax.vmap(jax.grad(sp.sech))(xj)
+    for xi, v, g in zip(xj, value, grad, strict=True):
+        sech_true, grad_true = _true(xi)
+        assert _rel(v, sech_true) < 4e-15, float(xi)
+        assert _rel(g, grad_true) < 4e-15, float(xi)
 
 
 def test_jit_vmap_grad_agree():
@@ -326,7 +371,7 @@ def test_value_just_above_the_smallest_normal_is_not_flushed(dtype, x, rtol):
 
 @pytest.mark.parametrize(("dtype", "x"), [("float64", 1e-310), ("float32", 1e-40)])
 def test_gradient_at_a_subnormal_argument_is_flushed(dtype, x):
-    """The gradient at a subnormal `x` may be `-0.0` where the truth is `-x`.
+    """The gradient at a subnormal `x` may be zero where the truth is `-x`.
 
     XLA flushes the subnormal operand. The absolute error is below `tiny`, and
     this is recorded as a ceiling in `docs/reference/accuracy-and-domains.md`.
