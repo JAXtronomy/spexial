@@ -523,11 +523,11 @@ r"""Above this ``a``, the series give way to `_large_b` or `_large_a`.
 `_large_z` expands :math:`(1-u)^{a-1}` over :math:`u \in [w, 1/2]`, and its
 coefficients :math:`(1-a)_m/m!` cancel just as :math:`(1-b)_k/k!` do for
 large :math:`b`: measured worst over :math:`b \in [-5, 10]`, the series'
-range below the switch, :math:`2.5\times10^{-14}` at :math:`a = 8`,
-:math:`7\times10^{-11}` at 16, :math:`2\times10^{-8}` at 24, and wrong from
-about 50. (Below :math:`b = -5` it is `_negative_b`'s range: there the
-series is :math:`10^{-11}` off at :math:`a = 8, b = -10` and 8% at
-:math:`b = -50`.)
+range below the switch, just above the :math:`z = 1/2` seam,
+:math:`2\times10^{-12}` at :math:`a = 8`, :math:`10^{-8}` at 16,
+:math:`4\times10^{-7}` at 24, and wrong from about 50. (Below
+:math:`b = -5` it is `_negative_b`'s range: there the series is
+:math:`10^{-11}` off at :math:`a = 8, b = -10` and 8% at :math:`b = -50`.)
 """
 
 _CF_A_B_MIN = 0.1
@@ -535,7 +535,8 @@ r"""For large ``a``: at or above this ``b``, `_large_b`; below it, `_large_a`.
 
 `_large_b`'s reflection subtracts from the complete :math:`B(a, b) \sim 1/b`,
 so it loses about :math:`\log_{10}(1/b)` digits as :math:`b \to 0^+`
-(:math:`10^{-8}` at :math:`b = 10^{-8}`), and has no meaning at
+(:math:`5\times10^{-8}` to :math:`2\times10^{-7}` at :math:`b = 10^{-8}` for
+:math:`a \in [8.5, 50]`), and has no meaning at
 :math:`b \le 0`, where :math:`B(a, b)` diverges. From 0.1 it is
 :math:`4\times10^{-13}` or better to :math:`a = 50`; below it `_large_a`, which
 needs no reflection, takes over.
@@ -594,7 +595,7 @@ r"""Below this ``b`` (for ``a`` up to `_CF_A_FROM`), `_negative_b` replaces the 
 `_small_z`'s terms carry :math:`(1-b)_k / k!`, which for very negative
 :math:`b` grows like :math:`(|b| z)^k / k!` before it decays: 64 terms cover
 :math:`|b| z \lesssim 10`. Measured worst over :math:`a \in [0.5, 8]`:
-:math:`2\times10^{-15}` at :math:`b = -5`, :math:`6\times10^{-12}` at -10,
+:math:`2\times10^{-14}` at :math:`b = -5`, :math:`10^{-11}` at -10,
 :math:`2\times10^{-7}` at -20, 8% at -50, no correct digits by -200.
 """
 
