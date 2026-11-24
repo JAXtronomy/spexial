@@ -518,11 +518,12 @@ _ROWS: Final = (
         notes=(
             "Neither numpy, JAX nor scipy has `sech`; `1 / cosh(x)` has a `nan` "
             "gradient from |x| = 710. The row exists for correctness, not cost: "
-            "the hand-written rule keeps 3.1x less residual memory and its gradient "
-            "is faster than that of `1 / cosh` (about 0.7x at 10,000 points), but "
-            "it is about 1.6x slower at 10,000 points (about the same at 1,000) "
-            "than differentiating the value form, which loses accuracy near 0. "
-            "`benchmarks/test_derivatives.py` holds the timings."
+            "the hand-written rule keeps 3.1x less residual memory and, at 10,000 "
+            "points in the default multi-threaded XLA configuration, its gradient "
+            "is about 0.7x the time of that of `1 / cosh` and about 1.6x that of "
+            "differentiating the value form, which loses accuracy near 0. At "
+            "1,000 points, which `benchmarks/test_derivatives.py` uses, the "
+            "timings are within noise of each other."
         ),
     ),
     Coverage(

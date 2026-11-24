@@ -51,8 +51,9 @@ def test_dtype_is_preserved(dtype):
 def test_integer_and_bool_input_gives_a_strong_float(x):
     """An integer or bool becomes a real float, not a truncated or weak one.
 
-    `-jnp.abs` raises on a bool, so the conversion is what makes it work, and a
-    weakly typed result would silently take the dtype of whatever it meets next.
+    Left to `jnp.exp`, a Python int would stay weakly typed, which silently takes
+    the dtype of whatever it meets next, and bool, int8 and uint8 would give
+    float32 instead of float64.
     """
     got = sp.sech(x)
     assert got.dtype == jnp.result_type(float)
@@ -186,7 +187,7 @@ def test_beyond_underflow_value_and_gradient_vanish(dtype, x):
 def test_gradient_keeps_its_relative_accuracy_float64(x):
     """The hand-written rule has no cancellation near zero.
 
-    Differentiating the value form directly gives errors of order 1e-4 at 1e-12
+    Differentiating the value form directly gives errors of up to 1e-4 at 1e-12
     and 1e-10 at 1e-6; this holds the rule to 4e-15 everywhere. Measured worst
     case is 1.05e-15.
     """
@@ -247,7 +248,7 @@ _DERIVATIVE_CASES = [
 
 @pytest.mark.parametrize(("dtype", "tol", "order"), _DERIVATIVE_CASES)
 @pytest.mark.parametrize(
-    "x", [-4.0, -1.0, -0.3, -1e-3, 0.0, 1e-12, 1e-6, 1e-3, 0.3, 1.0, 4.0]
+    "x", [-800.0, -4.0, -1.0, -0.3, -1e-3, 0.0, 1e-12, 1e-6, 1e-3, 0.3, 1.0, 4.0, 800.0]
 )
 def test_higher_derivatives(x, dtype, tol, order):
     """The rule is written in terms of `sech`, so every order is right.
@@ -255,8 +256,10 @@ def test_higher_derivatives(x, dtype, tol, order):
     `x = 0` is the point that matters: a `where(x == 0, ...)` guard in the rule
     would give the right gradient and a wrong second derivative there, and
     AGENTS.md asks for the second and third at any guarded point. The odd orders
-    vanish at zero, so the comparison is absolute there. Measured worst case is
-    2.7e-15 in float64 and 2.1e-7 in float32.
+    vanish at zero, so the comparison is absolute there. The overflow of
+    `exp(|x|)` is covered too: a rule that differentiated `sech.fun` instead of
+    `sech` would give `nan` for the second derivative from |x| ~ 710. The
+    smallest `tol` that passes is 2.7e-15 in float64 and 1.6e-7 in float32.
     """
     xj = jnp.asarray(x, dtype=dtype)
     f = sp.sech
@@ -297,19 +300,24 @@ def test_jit_vmap_grad_agree():
     ("dtype", "x", "rtol"),
     [
         ("float64", 708.7, 4e-15),
-        ("float64", 709.0, 4e-15),
+        ("float64", 709.08, 4e-15),
         ("float32", 87.7, 1e-6),
-        ("float32", 88.0, 1e-6),
+        ("float32", 88.02, 1e-6),
+        ("float16", 10.39, 5e-3),
+        ("bfloat16", 88.0, 2e-2),
     ],
 )
 def test_value_just_above_the_smallest_normal_is_not_flushed(dtype, x, rtol):
     """The true value is between `tiny` and `2 tiny` here, and is returned.
 
     A form built on `exp(-|x|)` has a subnormal intermediate there, which XLA
-    flushes to give 0; `2 / (e + 1/e)` with `e = exp(|x|)` has none.
+    flushes to give 0. `2 / (e + 1/e)` with `e = exp(|x|)` flushes no result:
+    its one subnormal intermediate, `1/e`, is added to a far larger `e`. The
+    last two points of the first two dtypes sit within 1% of the cut-off, so a
+    guard that zeroes the result slightly early fails here.
     """
     xj = jnp.asarray(x, dtype=dtype)
-    tiny = float(np.finfo(dtype).tiny)
+    tiny = float(jnp.finfo(dtype).tiny)
     sech_true, grad_true = _true(xj)
     assert tiny <= sech_true < 2 * tiny
     assert _rel(sp.sech(xj), sech_true) < rtol

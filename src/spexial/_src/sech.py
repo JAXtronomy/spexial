@@ -31,6 +31,9 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
 
     Real input only; a complex argument raises `ValueError`.
 
+    Reference: https://dlmf.nist.gov/4.28 for the definition and
+    https://dlmf.nist.gov/4.34 for the derivative.
+
     Parameters
     ----------
     x
@@ -62,8 +65,9 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
     """
     x_arr = jnp.asarray(x)
     if not jnp.issubdtype(x_arr.dtype, jnp.inexact):
-        # Integers and bools: a *strong* float. Left to `jnp.exp`, a Python int
-        # stays weakly typed, and `-jnp.abs` raises on a bool outright.
+        # Integers and bools: a *strong* float of the default width. Left to
+        # `jnp.exp`, a Python int would stay weakly typed, and bool, int8 and
+        # uint8 would give float32 instead of float64.
         x_arr = x_arr.astype(jnp.result_type(float))
     # The dtype is static, so this is resolved at trace time and costs nothing.
     if jnp.iscomplexobj(x_arr):
