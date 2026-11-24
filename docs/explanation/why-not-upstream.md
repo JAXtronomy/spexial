@@ -76,7 +76,7 @@ is polynomial in $\hat{x}$ and $\hat{y}$ and so smooth on the axis. That is new 
 This library is three things at once, and it is worth being clear about which part is which:
 
 1. **A staging area** for functions that belong upstream but are not there yet, or are there only above a floor real users have not reached. `comb` today; more of the Bessel functions eventually.
-2. **A home for things that do not fit the `scipy.special` mirror** — `polylog`, `eval_gegenbauers`, `incomplete_beta` and the Cartesian harmonics.
+2. **A home for things that do not fit the `scipy.special` mirror** — `polylog`, `eval_gegenbauers`, `incomplete_beta`, `sech` and the Cartesian harmonics.
 3. **A small set of genuine improvements** — complex `spence`, negative `zeta`, cheaper gradients — that exist because a focused package can make choices a general one cannot.
 4. **A place to record, in executable form, where upstream is wrong** — `sph_harm_y`.
 

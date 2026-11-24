@@ -348,5 +348,5 @@ def test_eval_gegenbauers(n, alpha, x):
 @_SLOW
 @given(x=floats(-700.0, 700.0))
 def test_sech_value(x):
-    """Measured worst case 3.8e-16 relative."""
-    np.testing.assert_allclose(sp.sech(x), _ref(mp.sech, x), rtol=1e-14)
+    """Worst found 4.1e-16 relative."""
+    np.testing.assert_allclose(sp.sech(x), _ref(mp.sech, x), rtol=4e-15)

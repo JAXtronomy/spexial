@@ -94,7 +94,8 @@ def test_src_modules_declare_all():
 
 
 def test_module_docstring_flags_the_non_scipy_exports():
-    """The package docstring names the two exports scipy has no counterpart for."""
+    """The package docstring names exports scipy has no counterpart for."""
     assert sp.__doc__ is not None
     assert "`polylog`" in sp.__doc__
     assert "`eval_gegenbauers`" in sp.__doc__
+    assert "`sech`" in sp.__doc__

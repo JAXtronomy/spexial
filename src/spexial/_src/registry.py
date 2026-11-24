@@ -511,7 +511,7 @@ _ROWS: Final = (
         custom_jvp=True,
         derivative="-sech(x) tanh(x)",
         cost=Cost(
-            speed=1.7,
+            speed=1.6,
             memory=80_000 / 330_008,
             against="differentiating the stable value form",
         ),
@@ -520,7 +520,7 @@ _ROWS: Final = (
             "gradient from |x| = 710. The row exists for correctness, not cost: "
             "the hand-written rule keeps 4.1x less residual memory and its gradient "
             "is faster than that of `1 / cosh` (about 0.7x to 0.8x), but it is "
-            "about 1.7x slower at 10,000 points (about 1.2x at 1,000) than "
+            "about 1.6x slower at 10,000 points (about 1.2x at 1,000) than "
             "differentiating the value form, which loses accuracy near 0. "
             "`benchmarks/test_derivatives.py` holds the timings."
         ),

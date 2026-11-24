@@ -55,7 +55,7 @@ These are series and asymptotic expansions. In float32 the accuracy figures belo
 
 **`gamma` returns `nan` at the negative integers.** It delegates to `jax.scipy.special.gamma`, so `x = 0` gives `inf` but every negative integer gives `nan` — the two-sided limit does not exist, and this matches JAX and scipy from 1.18. Complex input works on jax >= 0.10.2. Accuracy is ~`4e-13` throughout, including close to the poles.
 
-**`sech` is real-only.** A complex argument raises `ValueError`. Its gradient is finite and accurate for every real `x`, where `1 / jnp.cosh(x)` has a `nan` gradient from about 710.
+**`sech` is real-only.** A complex argument raises `ValueError`. Its gradient is finite for every real `x` and accurate until it underflows (above about 708 in float64), where `1 / jnp.cosh(x)` has a `nan` gradient from about 710.
 
 **`polylog` broadcasts over `z`.** Call it directly on an array; `jax.vmap` also works and agrees exactly:
 

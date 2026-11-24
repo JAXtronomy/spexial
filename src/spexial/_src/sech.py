@@ -39,7 +39,8 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        :math:`\mathrm{sech}(x)`, in ``[0, 1]``. ``sech(inf)`` and
+        :math:`\mathrm{sech}(x)`, in ``[0, 1]`` up to rounding: for small :math:`|x|`
+        the result can be :math:`1 + \varepsilon`. ``sech(inf)`` and
         ``sech(-inf)`` are ``0``, and ``nan`` stays ``nan``.
 
     Examples
@@ -61,9 +62,8 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
     """
     x_arr = jnp.asarray(x)
     if not jnp.issubdtype(x_arr.dtype, jnp.inexact):
-        # Integers and bools: a *strong* float. `promote_integers` multiplies by
-        # 1.0, which leaves a Python int weakly typed, and `-jnp.abs` raises on
-        # a bool outright.
+        # Integers and bools: a *strong* float. Left to `jnp.exp`, a Python int
+        # stays weakly typed, and `-jnp.abs` raises on a bool outright.
         x_arr = x_arr.astype(jnp.result_type(float))
     # The dtype is static, so this is resolved at trace time and costs nothing.
     if jnp.iscomplexobj(x_arr):
