@@ -333,7 +333,8 @@ r"""Above this ``b``, `_large_b` replaces the two series.
 Both series expand :math:`(1-t)^{b-1}` binomially, and its coefficients
 :math:`(1-b)_k / k!` alternate and grow like :math:`b^k / k!`: at
 :math:`z = 1/2` the sum is a near-total cancellation, worst relative error
-over :math:`a \le 8` :math:`4\times10^{-15}` at :math:`b = 10`,
+over :math:`a \le 8` :math:`4\times10^{-15}` at :math:`b = 10` (:math:`7\times
+10^{-14}` just below the :math:`z = 1/2` seam),
 :math:`10^{-7}` at 30, and :math:`4\times10^{15}` at 100 (all at
 :math:`a = 8`; at :math:`a = 2`, :math:`10^{-11}` and :math:`10^{9}`). The
 continued fraction is :math:`5\times10^{-14}` from
@@ -524,8 +525,8 @@ r"""Above this ``a``, the series give way to `_large_b` or `_large_a`.
 coefficients :math:`(1-a)_m/m!` cancel just as :math:`(1-b)_k/k!` do for
 large :math:`b`: measured worst over :math:`b \in [-5, 10]`, the series'
 range below the switch, just above the :math:`z = 1/2` seam,
-:math:`2\times10^{-12}` at :math:`a = 8`, :math:`10^{-8}` at 16,
-:math:`4\times10^{-7}` at 24, and wrong from about 50. (Below
+:math:`3\times10^{-12}` at :math:`a = 8`, :math:`10^{-8}` at 16,
+:math:`10^{-4}` at 24, and wrong from about 50. (Below
 :math:`b = -5` it is `_negative_b`'s range: there the series is
 :math:`10^{-11}` off at :math:`a = 8, b = -10` and 8% at :math:`b = -50`.)
 """
@@ -565,7 +566,7 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     :math:`a \in [12, 100]`, :math:`b \in [-1000, 0.1)` and :math:`z` to
     :math:`1 - 10^{-12}`: :math:`2\times10^{-13}` or better (:math:`10^{-13}`
     at :math:`(12, -50, 1 - 10^{-6})`), where the series was
-    :math:`10^{-9}` at :math:`a = 24` and :math:`10^{22}` at 100.
+    8% off at :math:`(24, -50, 1/2)` and :math:`10^{22}` at 100.
 
     At :math:`z = 1` with :math:`b \le 0` the integral diverges: the pole is
     returned as ``inf``, with the expansion handed a harmless ``w`` there. At
@@ -595,7 +596,8 @@ r"""Below this ``b`` (for ``a`` up to `_CF_A_FROM`), `_negative_b` replaces the 
 `_small_z`'s terms carry :math:`(1-b)_k / k!`, which for very negative
 :math:`b` grows like :math:`(|b| z)^k / k!` before it decays: 64 terms cover
 :math:`|b| z \lesssim 10`. Measured worst over :math:`a \in [0.5, 8]`:
-:math:`2\times10^{-14}` at :math:`b = -5`, :math:`10^{-11}` at -10,
+:math:`3\times10^{-13}` at :math:`b = -5` (just above :math:`z = 1/2`),
+:math:`10^{-11}` at -10,
 :math:`2\times10^{-7}` at -20, 8% at -50, no correct digits by -200.
 """
 

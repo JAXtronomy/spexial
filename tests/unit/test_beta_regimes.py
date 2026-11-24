@@ -211,7 +211,8 @@ def test_large_a_matches_mpmath(a, b):
 
     `_large_z` expands ``(1-u)^(a-1)``, whose coefficients cancel just as
     ``(1-b)_k`` does for large ``b``: the series was 1e-8 at ``a = 16``,
-    4e-7 at ``24``, and wrong from about 50. Measured worst here 5e-13.
+    1e-4 at ``24`` (just above ``z = 1/2``), and wrong from about 50. Measured
+    worst here 5e-13.
     """
     z = np.array([1e-6, 0.01, 0.3, 0.7, 0.9, 0.99, 1 - 1e-6])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
@@ -240,7 +241,7 @@ def _mp_hyp2f1_beta(a, b, z):
 def test_large_a_small_b(a, b):
     """Large ``a`` with ``b < 0.1``, including ``b <= 0``: `_large_a`.
 
-    The series was 1e-9 off at ``a = 24`` and had no correct digits by 50; the
+    The series was 8% off at ``(24, -50, 1/2)`` and had no correct digits by 50; the
     continued fraction's reflection needs ``B(a, b)``, which diverges at
     ``b <= 0``. Measured worst here 8e-14.
     """
@@ -767,7 +768,7 @@ def test_very_negative_b(a, b):
     """``b < -5`` (``a <= 8``): the continued fraction, no reflection.
 
     The series' ``(1-b)_k / k!`` grows like ``(|b| z)^k / k!`` before it
-    decays, so 64 terms were 6e-12 off at ``b = -10``, 8% at -50, and had no
+    decays, so 64 terms were 1e-11 off at ``b = -10``, 8% at -50, and had no
     correct digits by -200. Measured worst here 4.4e-13 (a = 0.01, b = -200).
     """
     z = np.array([1e-6, 0.01, 0.1, 0.3, LOG1P_BAND, 0.5, 0.7, 0.9, 0.999])
