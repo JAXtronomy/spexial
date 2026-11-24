@@ -63,9 +63,9 @@ def test_large_b_matches_mpmath(a, b):
     ``a`` reaches 50, the top of the documented range for the continued
     fraction and a regime where the series fails even at small ``b``.
 
-    Tolerances are the measured worst with headroom: 2e-13 up to ``b = 100``,
-    then rounding growing like ``b * eps`` out to ``b = 1e4``; the fraction
-    itself has converged by then (`_CF_STEPS`).
+    The looser tolerance above ``b = 100`` allows for rounding, which grows like
+    ``b * eps`` out to ``b = 1e4``; the fraction itself has converged by then
+    (`_CF_STEPS`).
     """
     z = np.array([1e-8, *ZS[1:], LOG1P_BAND, 1.0])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
@@ -83,8 +83,6 @@ def test_large_a_and_large_b_matches_mpmath(a, b):
     galax calls this with ``a = alpha (3 - gamma)`` and ``b = alpha (beta - 3)``,
     so ``(alpha, beta, gamma) = (5, 10, 0)`` is ``(15, 35)``. At ``z = 1/2``
     the series was 2.9e-4 off there and 6e10 off at ``(30, 70)``.
-
-    The tolerance is the measured worst, 2.8e-14 at ``(30, 70)``, with headroom.
     """
     z = np.array([*ZS, LOG1P_BAND, 1.0])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
@@ -108,7 +106,8 @@ def test_large_b_parameter_derivatives(a, b, z):
 
     Against mpmath's derivative, not a finite difference: the ``b``-derivative
     here is ~1e-4 of the value, so a difference quotient's own rounding is
-    already a 1e-6 relative error, where autodiff is good to 1e-15.
+    already a 1e-6 relative error, where autodiff passes the 1e-12 asserted
+    here.
     """
     zz = jnp.asarray(z)
     refs = (
@@ -210,9 +209,9 @@ def test_large_a_matches_mpmath(a, b):
     """Above ``a = 8`` with ``b >= 0.1`` the continued fraction takes over.
 
     `_large_z` expands ``(1-u)^(a-1)``, whose coefficients cancel just as
-    ``(1-b)_k`` does for large ``b``: the series was 1e-8 at ``a = 16``,
-    1e-4 at ``24`` (just above ``z = 1/2``), and wrong from about 50. Measured
-    worst here 5e-13.
+    ``(1-b)_k`` does for large ``b``: the series was about 1e-8 off at
+    ``a = 16``, about 1e-4 at ``24`` (just above ``z = 1/2``), and wrong from
+    about 50.
     """
     z = np.array([1e-6, 0.01, 0.3, 0.7, 0.9, 0.99, 1 - 1e-6])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
@@ -241,9 +240,9 @@ def _mp_hyp2f1_beta(a, b, z):
 def test_large_a_small_b(a, b):
     """Large ``a`` with ``b < 0.1``, including ``b <= 0``: `_large_a`.
 
-    The series was 8% off at ``(24, -50, 1/2)`` and had no correct digits by 50; the
-    continued fraction's reflection needs ``B(a, b)``, which diverges at
-    ``b <= 0``. Measured worst here 8e-14.
+    The series was about 9% off at ``(24, -50, 1/2)`` and had no correct digits
+    by 50; the continued fraction's reflection needs ``B(a, b)``, which
+    diverges at ``b <= 0``.
     """
     z = np.array(
         [0.01, 0.3, LOG1P_BAND, 0.5, 0.7, 0.9, 0.95, 0.99, 1 - 1e-6, 1 - 1e-12]
@@ -740,7 +739,7 @@ def test_large_a_endpoint_gradients():
 def test_continued_fraction_converged_near_x0():
     """64 steps: the slowest fraction, just above ``x0`` at small ``a``.
 
-    6e-15 at 64 steps; 48 left 5e-14.
+    64 steps pass the 2e-14 asserted here; 48 left 5e-14.
     """
     a, b = 0.1, 1e3
     x0 = (a + 1) / (a + b + 2)
@@ -754,7 +753,7 @@ def test_large_a_takes_large_a_below_b_one_tenth():
     """Just below ``b = 0.1``, large ``a`` goes to `_large_a`, not the reflection.
 
     At ``a = 50, b = 0.07`` the reflection is 6.4e-14 off (it loses digits as
-    ``b -> 0``); `_large_a` is 4e-15.
+    ``b -> 0``); `_large_a` passes the 2e-14 asserted here.
     """
     z = np.array([0.5, 0.9, 50 / 52 * 0.999, 0.99])
     got = np.asarray(sp.incomplete_beta(50.0, 0.07, jnp.asarray(z)))
@@ -768,8 +767,8 @@ def test_very_negative_b(a, b):
     """``b < -5`` (``a <= 8``): the continued fraction, no reflection.
 
     The series' ``(1-b)_k / k!`` grows like ``(|b| z)^k / k!`` before it
-    decays, so 64 terms were 1e-11 off at ``b = -10``, 8% at -50, and had no
-    correct digits by -200. Measured worst here 4.4e-13 (a = 0.01, b = -200).
+    decays, so 64 terms were around 1e-11 off at ``b = -10``, wrong by
+    percents at -50, and had no correct digits by -200.
     """
     z = np.array([1e-6, 0.01, 0.1, 0.3, LOG1P_BAND, 0.5, 0.7, 0.9, 0.999])
     got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
@@ -837,7 +836,7 @@ def _mp_parameter_derivatives(a, b, z):
     ],
 )
 def test_parameter_gradients_large_a_and_negative_b(a, b, z):
-    """Reverse-mode a- and b-gradients against mpmath; measured worst 5e-14."""
+    """Reverse-mode a- and b-gradients against mpmath."""
     grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
     got = [float(g) for g in grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
     np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
@@ -876,8 +875,7 @@ def test_parameter_gradients_near_the_top_of_the_float_range(a, b, z):
     """Values from 5e294 to 6e304: reverse mode as accurate as forward mode.
 
     The cotangent of ``exp(L)`` is the value itself, which the fraction's
-    recurrence amplified past the float range from about 1e305. Measured worst
-    6.6e-14.
+    recurrence amplified past the float range from about 1e305.
     """
     grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
     got = [float(g) for g in grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
@@ -900,7 +898,7 @@ def test_reverse_mode_in_the_tail_up_to_dbl_max(a, b, z):
 
     Scaled by ``w0^b`` alone, ``(w / w0)^b`` overflowed in the sum, and reverse
     mode multiplied the sum's intermediates by ``w0^b`` first: ``nan`` from
-    about 1e297. Measured worst 8.3e-14.
+    about 1e297.
     """
     grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
     got = [float(g) for g in grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
@@ -908,7 +906,7 @@ def test_reverse_mode_in_the_tail_up_to_dbl_max(a, b, z):
 
 
 def test_forward_mode_in_the_negative_b_tail_near_dbl_max():
-    """The same at 3.8e307 by `jax.jacfwd` (measured 5.5e-14)."""
+    """The same at 3.8e307 by `jax.jacfwd`."""
     a, b, z = 8.0, -700.0, 0.6414
     jac = jax.jacfwd(sp.incomplete_beta, (0, 1))
     got = [float(g) for g in jac(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
@@ -1031,7 +1029,7 @@ def test_large_a_just_above_the_split(a, b):
 
     Rounded separately, ``2/(a+2)`` and ``a/(a+2)`` miss by an ulp, and the
     identity by about ``|b| (a+2)/2 * 5e-17`` relative: 3.7e-13 at (100,
-    -164.29), past the documented 2e-13.
+    -164.29), past the 2e-13 asserted here.
     """
     z = float(np.nextafter(a / (a + 2.0), 2.0))
     with mp.workdps(50):

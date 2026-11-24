@@ -58,8 +58,8 @@ _NTERMS = 64
 """Series length. Both series below converge like 2^-k, so this is ~1e-19.
 
 Not worth trimming: measured over a in [0.2, 8], b in [-2.5, 6] and z up to
-1 - 1e-8, dropping to 48 terms costs an order of magnitude of accuracy at
-moderate `a` (5e-14 -> 6e-13) and 40 breaks the 1e-11 the tests assert, to
+1 - 1e-8, dropping to 48 terms costs about an order of magnitude of accuracy
+at moderate `a`, and 40 breaks the 1e-11 the tests assert, to
 save a fraction of a loop that `_UNROLL` already cut four-fold. Above
 a ~ 16 the error stops improving with term count at all -- it is cancellation
 between large alternating terms, not truncation -- so more terms would not
@@ -332,13 +332,15 @@ r"""Above this ``b``, `_large_b` replaces the two series.
 
 Both series expand :math:`(1-t)^{b-1}` binomially, and its coefficients
 :math:`(1-b)_k / k!` alternate and grow like :math:`b^k / k!`: at
-:math:`z = 1/2` the sum is a near-total cancellation, worst relative error
-over :math:`a \le 8` :math:`4\times10^{-15}` at :math:`b = 10` (:math:`7\times
-10^{-14}` just below the :math:`z = 1/2` seam),
-:math:`10^{-7}` at 30, and :math:`4\times10^{15}` at 100 (all at
-:math:`a = 8`; at :math:`a = 2`, :math:`10^{-11}` and :math:`10^{9}`). The
-continued fraction is :math:`5\times10^{-14}` from
-:math:`b = 0.1` up, so the switch can sit wherever the series is still exact.
+:math:`z = 1/2` the sum is a near-total cancellation. Over :math:`a \le 8` the
+series is still accurate at :math:`b = 10`
+(`test_continuous_across_the_large_b_switch` holds it to the continued fraction
+there at rtol :math:`10^{-13}`), loses about half its digits by :math:`b = 30`,
+and all of them by 100. The continued fraction is accurate from :math:`b = 0.1` up
+(tested to rtol :math:`10^{-12}` from :math:`b = 0.1` at large ``a`` in
+`test_large_a_matches_mpmath`, and above :math:`b = 10` in
+`test_large_b_matches_mpmath`), so the switch can sit wherever the series is
+still accurate.
 """
 
 _CF_UNROLL = 1
@@ -356,11 +358,13 @@ r"""Double steps of the continued fraction (each an even and an odd term).
 
 The slowest case is the reflected fraction -- large first parameter -- just
 above its switch point, at small ``a``: at :math:`a = 0.1, b = 10^3` it is
-:math:`10^{-11}` at 32 steps, :math:`5\times10^{-14}` at 48 and
-:math:`6\times10^{-15}` at 64, past which nothing changes. What remains is
-rounding, growing like :math:`b\,\epsilon`: worst over
-:math:`a \in [0.1, 50]`, :math:`4\times10^{-12}` at :math:`b = 10^5`,
-:math:`5\times10^{-10}` at :math:`10^7`.
+about :math:`10^{-11}` off at 32 steps and still short of rounding at 48; at 64
+it is within the :math:`2\times10^{-14}` that
+`test_continued_fraction_converged_near_x0` asserts, and more steps change
+nothing. What remains is rounding, growing like :math:`b\,\epsilon`: tested to
+rtol :math:`10^{-11}` out to :math:`b = 10^4` (`test_large_b_matches_mpmath`)
+and :math:`10^{-12}` at :math:`a = 0.1` out to :math:`10^5`
+(`test_large_b_small_a`).
 """
 
 
@@ -483,7 +487,7 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     out = jnp.where(swap, reflected, term)
     # Past b ~ 1/eps the switch point x0 is below eps, `1 - x0` rounds to 1, and
     # the reflected fraction's first denominator is exactly zero. Long before
-    # that the b*eps rounding has taken every digit (0.1 relative by b ~ 1e15),
+    # that the b*eps rounding has taken every digit (all of them by b ~ 1e15),
     # so say so with `nan` rather than return a confident `inf` or `0`.
     return jnp.where(1.0 - x0 == 1.0, jnp.nan, out)  # type: ignore[no-any-return]
 
@@ -523,24 +527,23 @@ r"""Above this ``a``, the series give way to `_large_b` or `_large_a`.
 
 `_large_z` expands :math:`(1-u)^{a-1}` over :math:`u \in [w, 1/2]`, and its
 coefficients :math:`(1-a)_m/m!` cancel just as :math:`(1-b)_k/k!` do for
-large :math:`b`: measured worst over :math:`b \in [-5, 10]`, the series'
-range below the switch, just above the :math:`z = 1/2` seam,
-:math:`3\times10^{-12}` at :math:`a = 8`, :math:`10^{-8}` at 16,
-:math:`10^{-4}` at 24, and wrong from about 50. (Below
-:math:`b = -5` it is `_negative_b`'s range: there the series is
-:math:`10^{-11}` off at :math:`a = 8, b = -10` and 8% at :math:`b = -50`.)
+large :math:`b`. Over :math:`b \in [-5, 10]`, the series' range below the
+switch, its worst error sits just above the :math:`z = 1/2` seam: below
+:math:`10^{-11}` at :math:`a = 8`, about :math:`10^{-8}` at 16, about
+:math:`10^{-4}` at 24, and wrong from about 50. (Below :math:`b = -5` it is
+`_negative_b`'s range: there the series is around :math:`10^{-11}` off at
+:math:`b = -10` and wrong by percents at :math:`b = -50`.)
 """
 
 _CF_A_B_MIN = 0.1
 r"""For large ``a``: at or above this ``b``, `_large_b`; below it, `_large_a`.
 
 `_large_b`'s reflection subtracts from the complete :math:`B(a, b) \sim 1/b`,
-so it loses about :math:`\log_{10}(1/b)` digits as :math:`b \to 0^+`
-(:math:`5\times10^{-8}` to :math:`2\times10^{-7}` at :math:`b = 10^{-8}` for
-:math:`a \in [8.5, 50]`), and has no meaning at
-:math:`b \le 0`, where :math:`B(a, b)` diverges. From 0.1 it is
-:math:`4\times10^{-13}` or better to :math:`a = 50`; below it `_large_a`, which
-needs no reflection, takes over.
+so it loses about :math:`\log_{10}(1/b)` digits as :math:`b \to 0^+`, and has
+no meaning at :math:`b \le 0`, where :math:`B(a, b)` diverges. From 0.1 it is
+tested to rtol :math:`10^{-12}` up to :math:`a = 50`
+(`test_large_a_matches_mpmath`); below it `_large_a`, which needs no
+reflection, takes over.
 """
 
 
@@ -562,11 +565,13 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     the second term by `_expand_from` with :math:`w_0 = 2/(a+2)`. That is the
     expansion `_large_z` uses from :math:`w_0 = 1/2`, where its terms grow like
     :math:`(a/2)^m/m!` and cancel; here they fall like :math:`2^m/m!`
-    (:math:`(a-1) w_0 < 2`), costing under a digit. Measured against mpmath over
-    :math:`a \in [12, 100]`, :math:`b \in [-1000, 0.1)` and :math:`z` to
-    :math:`1 - 10^{-12}`: :math:`2\times10^{-13}` or better (:math:`10^{-13}`
-    at :math:`(12, -50, 1 - 10^{-6})`), where the series was
-    8% off at :math:`(24, -50, 1/2)` and :math:`10^{22}` at 100.
+    (:math:`(a-1) w_0 < 2`), costing under a digit. Tested against mpmath to
+    rtol :math:`5\times10^{-13}` over :math:`a \in [12, 100]`,
+    :math:`b \in [-50, 0.1)` and :math:`z` to :math:`1 - 10^{-12}`
+    (`test_large_a_small_b`), and to :math:`2\times10^{-13}` just above the
+    split for :math:`b` down to -381.57 (`test_large_a_just_above_the_split`),
+    where the series was about 9% off at :math:`(24, -50, 1/2)` and wrong by
+    orders of magnitude at 100.
 
     At :math:`z = 1` with :math:`b \le 0` the integral diverges: the pole is
     returned as ``inf``, with the expansion handed a harmless ``w`` there. At
@@ -595,10 +600,12 @@ r"""Below this ``b`` (for ``a`` up to `_CF_A_FROM`), `_negative_b` replaces the 
 
 `_small_z`'s terms carry :math:`(1-b)_k / k!`, which for very negative
 :math:`b` grows like :math:`(|b| z)^k / k!` before it decays: 64 terms cover
-:math:`|b| z \lesssim 10`. Measured worst over :math:`a \in [0.5, 8]`:
-:math:`3\times10^{-13}` at :math:`b = -5` (just above :math:`z = 1/2`),
-:math:`10^{-11}` at -10,
-:math:`2\times10^{-7}` at -20, 8% at -50, no correct digits by -200.
+:math:`|b| z \lesssim 10`. Over :math:`a \in [0.5, 8]` the series is still
+accurate at :math:`b = -5` (`test_continuous_across_the_negative_b_switch`
+holds it to the continued fraction there at rtol :math:`10^{-13}`); its worst
+error, just above :math:`z = 1/2`, is around :math:`10^{-11}` at -10, about
+half the digits by -20, wrong by percents at -50, and no correct digits by
+-200.
 """
 
 _NEG_B_STEPS = 128
@@ -606,8 +613,8 @@ _NEG_B_STEPS = 128
 
 At very negative ``b`` and small ``a`` the fraction converges more slowly than
 in `_large_b`: at ``a = 0.5, b = -1100``, 64 steps leave 5e-9 at ``z = 0.3``
-and 2.4e-5 at ``z = 0.45``; 128 give 7e-15 and 1.5e-13 there, and 256 change
-nothing.
+and 2.4e-5 at ``z = 0.45``. 128 converge there, and 256 change nothing;
+`test_very_negative_b` covers ``a = 0.5, b = -1100`` at rtol 2e-12.
 """
 
 
@@ -616,16 +623,17 @@ def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
 
     No reflection -- it would need :math:`B(a, b)`, which diverges for
     :math:`b \le 0` -- and none needed: for :math:`b` this negative the fraction
-    converges at every :math:`z \in [0, 1)` (checked against mpmath for
-    :math:`a \in [0.01, 8]`, :math:`b \in [-1100, -5]`: worst
-    :math:`4.4\times10^{-13}`, at :math:`a = 0.01, b = -200`). It is used up to
+    converges at every :math:`z \in [0, 1)` (tested against mpmath to rtol
+    :math:`2\times10^{-12}` for :math:`a \in [0.01, 8]`,
+    :math:`b \in [-1100, -5.5]` in `test_very_negative_b`). It is used up to
     :math:`z = 1/2`, and above that `_split_at` adds the binomial tail from
     :math:`w_0 = 1/2`, as `_large_z` does: the value is no better for it, but
     the fraction's :math:`a`-derivative lost up to :math:`1.6\times10^{-5}` near
-    :math:`z = 1` (:math:`(0.16, -8.716, 1 - 10^{-9})`), and the tail's is good
-    to :math:`10^{-14}`. Below :math:`z = 1/2` the fraction's :math:`a`-derivative
-    still loses digits as :math:`1/a` grows: :math:`2\times10^{-11}` at
-    :math:`a = 0.01, b = -200, z = 1/2`. The terms are formed in log space, as
+    :math:`z = 1` (:math:`(0.16, -8.716, 1 - 10^{-9})`), and the tail's is tested
+    to rtol :math:`2\times10^{-13}` there
+    (`test_parameter_gradients_large_a_and_negative_b`). Below :math:`z = 1/2`
+    the fraction's :math:`a`-derivative still loses digits as :math:`1/a` grows,
+    several of them by :math:`a = 0.01`. The terms are formed in log space, as
     in `_large_b`, so a huge value that is still representable does not
     overflow on the way. :math:`z = 0` is a genuine zero; :math:`z = 1` the pole.
     """
@@ -849,8 +857,10 @@ def _incomplete_beta_impl(
 _EXPRL_BAND = 0.5
 """Below this ``|x|``, `_a_eq_1` sums ``expm1(x) / x`` as a series.
 
-Above it the direct quotient is accurate to working precision in value and in
-its first three derivatives; below it, those derivatives cancel.
+Above it the direct quotient is accurate in value and in its first three
+derivatives (tested to rtol 1e-12 either side of the band in
+`test_a_eq_1_higher_b_derivatives_across_the_series_band`); below it, those
+derivatives cancel.
 """
 
 
@@ -877,9 +887,10 @@ def _log1m(z: AnyArray, /) -> AnyArray:
     # `1 - z` rounds by up to half an ulp below z = 1/2, and the closed form
     # multiplies that by |b|. `(1 - w) - z` is that rounding error, exactly
     # (both subtractions are exact by Sterbenz), and `log(w + d) = log(w) + d/w`
-    # to far below an ulp. It halves the worst error on (0.3, 0.42]: 8e-14 at
-    # b = -500 against 1.1e-13, and 1.5e-13 once jax 0.12's `log` lost a
-    # little accuracy there. From z = 1/2 up `1 - z` is exact and `d` is 0; its
+    # to far below an ulp. It keeps the closed form at a = 1 within the 1e-13
+    # that `test_a_eq_1_in_the_log1p_band` asserts on (0.3, 0.42] at b = -500;
+    # without it the error there was 1.1e-13, and 1.5e-13 once jax 0.12's `log`
+    # lost a little accuracy. From z = 1/2 up `1 - z` is exact and `d` is 0; its
     # divisor is then 1, so z = 1 stays `-inf` rather than `-inf + 0/0`.
     w = 1.0 - z_big
     d = (1.0 - w) - z_big
@@ -1058,14 +1069,16 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     continued fraction without reflection (`_negative_b`: :math:`a \le 8`,
     :math:`b < -5`).
 
-    Measured against mpmath in float64, the relative error is :math:`5 \times
-    10^{-13}` or better in those three methods for :math:`0.1 \le a \le 50`
-    and :math:`|b| \le 10^3`, including :math:`a` and :math:`b` both large
-    (:math:`3 \times 10^{-14}` at :math:`(30, 70)`). Beyond :math:`b = 10^3`
-    rounding grows like :math:`b\,\epsilon`. In the series regime the tests
-    assert :math:`10^{-11}`, about how closely the two series meet at
-    :math:`z = 1/2`. The full table is in the accuracy-and-domains reference
-    page.
+    The tests check those three methods against mpmath in float64: to rtol
+    :math:`10^{-12}` for :math:`b \in (10, 100]` and for :math:`a \in (8, 50]`
+    with :math:`b \ge 0.1`, :math:`5 \times 10^{-13}` for
+    :math:`a \in (8, 100]` with :math:`b \in [-50, 0.1)`,
+    :math:`2 \times 10^{-12}` for :math:`a \le 8` with
+    :math:`b \in [-1100, -5)`, and :math:`10^{-11}` for :math:`b` up to
+    :math:`10^4`, beyond which rounding grows like :math:`b\,\epsilon`. In the
+    series regime they assert :math:`10^{-11}`, about how closely the two
+    series meet at :math:`z = 1/2`. The full table is in the
+    accuracy-and-domains reference page.
 
     The :math:`z`-derivative is supplied by a `jax.custom_jvp` and is exact and
     O(1) -- by Leibniz it is just the integrand at the endpoint,
@@ -1081,9 +1094,8 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     continued fraction; see `_a_eq_1`. It carries the same exact
     :math:`z`-derivative rule, and its ``b``-derivative is autodiff of the
     closed form, which is elementary. A traced ``a`` cannot be inspected and
-    takes the branch dispatch below even at 1: as accurate there (measured
-    :math:`1.5\times10^{-13}` or better for :math:`b` from -1000 to
-    :math:`10^4`), but slower, so keep ``a`` concrete for the closed form.
+    takes the branch dispatch below even at 1: as accurate there as the branch
+    it takes, but slower, so keep ``a`` concrete for the closed form.
 
     Examples
     --------

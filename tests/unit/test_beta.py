@@ -104,11 +104,8 @@ def test_branch_switch_is_continuous(a, b):
     them, so a step here would be invisible to every other test -- they sample
     both sides but never the seam.
 
-    The tolerance is the *measured* step, not machine precision: the two
-    series truncate differently, so they meet to about 1e-11 relative rather
-    than exactly. Worst over this grid is 2.9e-11, at ``a = 4.5, b = -2.5``,
-    which is comfortably inside the 1e-11 rtol the reference tests assert
-    against `hyp2f1` -- the seam is not the accuracy-limiting feature.
+    The tolerance is looser than machine precision: the two series truncate
+    differently, so they meet to about 1e-11 relative rather than exactly.
     """
     below = float(sp.incomplete_beta(a, b, jnp.asarray(0.5 - 1e-12)))
     above = float(sp.incomplete_beta(a, b, jnp.asarray(0.5 + 1e-12)))
@@ -423,7 +420,7 @@ def test_a_eq_1_higher_b_derivatives_across_the_series_band(side, n):
     """The 2nd and 3rd ``b``-derivatives are right on both sides of the band.
 
     The direct quotient's derivatives cancel as ``|x| -> 0``; `_EXPRL_BAND` is
-    where they are still accurate (3e-15 / 8e-14 at ``|x| = 1/2``). Narrowed to
+    where they are still accurate, within the 1e-12 asserted here. Narrowed to
     0.05 they were 2e-12 / 2e-10, which the first derivative alone did not show.
     """
     z = 0.9
@@ -460,7 +457,8 @@ def test_a_eq_1_in_the_log1p_band(b):
     The closed form multiplies that by ``|bL|``: 7e-12 at ``b = -500``. `_log1m`
     switches to ``log(1 - z)`` there, with the rounding of ``1 - z`` added back:
     without it the worst is 1.1e-13, and 1.5e-13 under jax 0.12's `log`. With
-    it, 8.0e-14 on both. A 25-point grid missed the worst point, so the grid is
+    it, both pass the 1e-13 asserted here. A 25-point grid missed the worst
+    point, so the grid is
     fine enough to find it.
     """
     z = np.linspace(0.3, 0.42, 401)
