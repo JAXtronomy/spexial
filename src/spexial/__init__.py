@@ -52,6 +52,7 @@ __all__ = [
     "k2",
     "k2e",
     "polylog",
+    "sech",
     "spence",
     "sph_harm_y",
     "sph_harm_y_cart",
@@ -72,6 +73,7 @@ with _install_import_hook("spexial"):
     from ._src.gegenbauer import eval_gegenbauer, eval_gegenbauers
     from ._src.kn import k0, k0e, k1, k1e, k2, k2e
     from ._src.polylog import polylog
+    from ._src.sech import sech
     from ._src.spence import spence
     from ._src.sph_harm import (
         sph_harm_y,

@@ -26,6 +26,7 @@ _ORIGINS = {
     "sph_harm_y_cart_all": "spexial._src.sph_harm",
     "sph_harm_y_cart_all_terms": "spexial._src.sph_harm",
     "sph_legendre_p": "spexial._src.sph_harm",
+    "sech": "spexial._src.sech",
     "spence": "spexial._src.spence",
     "spherical_jn": "spexial._src.spherical_bessel",
     "spherical_jn_all": "spexial._src.spherical_bessel",

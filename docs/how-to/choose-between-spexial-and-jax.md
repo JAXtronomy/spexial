@@ -1,6 +1,6 @@
 # How to choose between `spexial` and `jax.scipy.special`
 
-Fourteen of the nineteen functions `spexial` exports have no counterpart in JAX at any version, so for those there is nothing to decide. This page is about the other five, where both libraries have something and the right answer depends on what you need.
+Seventeen of the twenty-two functions `spexial` exports have no counterpart in JAX at any version, so for those there is nothing to decide. This page is about the other five, where both libraries have something and the right answer depends on what you need.
 
 The short version: **use JAX unless one of the reasons below applies to you** — with one exception, `sph_harm_y`, where JAX's returns wrong values. Fewer dependencies is worth something, and for two of the five the only difference is a gradient you may not be taking.
 
@@ -52,6 +52,7 @@ There is no decision to make for these — JAX has nothing at any version:
 | `k0`, `k1`, `k2` | modified Bessel functions of the second kind |
 | `k0e`, `k1e`, `k2e` | the same, scaled by $e^z$ — **the only ones that work past $z \approx 705$** |
 | `polylog` | the polylogarithm (compare `mpmath.polylog`) |
+| `sech` | the hyperbolic secant, with a gradient that stays finite and accurate where `1 / cosh(x)` gives `nan` (compare `mpmath.sech`) |
 | `eval_gegenbauer` | Gegenbauer polynomials |
 | `eval_gegenbauers` | every order up to `n` in one pass; no counterpart anywhere |
 | `incomplete_beta` | the **unregularized** $B(a,b,z)$ — `betainc` is the regularized $I_z(a,b)$, and `beta * betainc` is `nan` for $b \le 0$ |
@@ -76,10 +77,10 @@ The table above is generated from a registry that ships with the package, and it
 >>> unique[4:9]
 ['k0e', 'k1', 'k1e', 'k2', 'k2e']
 >>> unique[9:14]
-['polylog', 'sph_harm_y_cart', 'sph_harm_y_cart_all',
- 'sph_harm_y_cart_all_terms', 'sph_legendre_p']
+['polylog', 'sech', 'sph_harm_y_cart', 'sph_harm_y_cart_all',
+ 'sph_harm_y_cart_all_terms']
 >>> unique[14:]
-['spherical_jn', 'spherical_jn_all']
+['sph_legendre_p', 'spherical_jn', 'spherical_jn_all']
 
 ```
 

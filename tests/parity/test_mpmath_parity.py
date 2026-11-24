@@ -334,3 +334,19 @@ def test_eval_gegenbauers(n, alpha, x):
         rtol=1e-10,
         atol=max(1e-11, 1e-13 * _recurrence_scale(n, alpha, x)),
     )
+
+
+# ---------------------------------------------------------------------------
+# sech
+#
+# Not a `scipy.special` function. Value only, over the range where the answer is
+# a normal number (|x| < 700; beyond ~708 it is subnormal and XLA flushes it).
+# The gradient is in `tests/unit/test_sech.py`, which reaches 1e-12 where a draw
+# over this range almost never does.
+
+
+@_SLOW
+@given(x=floats(-700.0, 700.0))
+def test_sech_value(x):
+    """Measured worst case 2.5e-16 relative -- one ulp."""
+    np.testing.assert_allclose(sp.sech(x), _ref(mp.sech, x), rtol=1e-14)

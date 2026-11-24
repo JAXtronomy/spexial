@@ -32,6 +32,7 @@ import spexial as sp
 | `k0(z)`, `k1(z)`, `k2(z)` | `k0`, `k1`, `kn` | modified Bessel, 2nd kind |
 | `k0e(z)`, `k1e(z)`, `k2e(z)` | `k0e`, `k1e`, `kve` | the same, scaled by `e^z`; **the only ones that work past `z = 705`** |
 | `polylog(n, z)` | -- | polylogarithm |
+| `sech(x)` | -- | `1 / cosh(x)` with a finite, accurate gradient; real only |
 | `zeta(n)` | `zeta` | handles negative integers |
 
 ## Enable x64 before anything else

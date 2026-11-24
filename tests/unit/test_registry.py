@@ -39,6 +39,7 @@ _JVP_OBJECT = {
     "gamma": sp.gamma,
     "incomplete_beta": _incomplete_beta_core,
     "polylog": _li_core,
+    "sech": sp.sech,
     "spence": sp.spence,
     "spherical_jn": _band,
     "spherical_jn_all": _band,
@@ -68,6 +69,7 @@ _PROBES = {
         jax.vmap(lambda t: _li_core(3, t)),
         jax.vmap(lambda t: _li_core.fun(3, t)),
     ),
+    "sech": (sp.sech, sp.sech.fun),
     "spence": (sp.spence, sp.spence.fun),
     "spherical_jn": (
         lambda z: sp.spherical_jn(5, z),

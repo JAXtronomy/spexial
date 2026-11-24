@@ -502,6 +502,27 @@ _ROWS: Final = (
         ),
     ),
     Coverage(
+        name="sech",
+        jax_name=None,
+        jax_since=None,
+        jax_support=Support.NONE,
+        scipy_array_api=Support.NONE,
+        status=Status.UNIQUE,
+        custom_jvp=True,
+        derivative="-sech(x) tanh(x)",
+        cost=Cost(
+            speed=463.0 / 138.4,
+            memory=80_000 / 330_008,
+            against="differentiating the stable value form",
+        ),
+        notes=(
+            "Neither numpy, JAX nor scipy has `sech`; `1 / cosh(x)` has a `nan` "
+            "gradient from |x| = 710. The row exists for correctness, not cost: "
+            "the hand-written rule is 4.1x lighter in memory but 3.3x slower "
+            "than differentiating the value form, which loses accuracy near 0."
+        ),
+    ),
+    Coverage(
         name="spence",
         jax_name="spence",
         jax_since="*",

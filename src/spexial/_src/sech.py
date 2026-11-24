@@ -1,0 +1,76 @@
+"""The hyperbolic secant, with a gradient that stays finite and accurate.
+
+Neither NumPy, `jax.numpy` nor `scipy.special` has `sech`, so it is usually
+written ``1 / jnp.cosh(x)``. That is right in value but not in gradient; see
+`sech` for what goes wrong and what this does instead.
+"""
+
+__all__ = ["sech"]
+
+from typing import Any
+
+import jax
+import jax.numpy as jnp
+
+from .custom_types import AnyArray, AnyArrayLike
+from .dtype import promote_integers
+
+
+@jax.custom_jvp
+def sech(x: AnyArrayLike, /) -> AnyArray:
+    r"""Compute the hyperbolic secant :math:`\mathrm{sech}(x) = 1/\cosh(x)`.
+
+    Written ``1 / jnp.cosh(x)`` the value is fine at any `x`, but the gradient
+    is ``inf / inf = nan`` from :math:`|x| \approx 710` in float64 (90 in
+    float32), and wrong before that. This evaluates :math:`2e/(1 + e^2)` with
+    :math:`e = \exp(-|x|)`, which cannot overflow, and supplies the derivative
+    :math:`-\mathrm{sech}(x)\tanh(x)` by hand: differentiating the value form
+    directly loses the gradient's relative accuracy near zero, where
+    :math:`1 - e^2` cancels. See `accuracy-and-domains` for the numbers.
+
+    Real input only; a complex argument raises `ValueError`.
+
+    Parameters
+    ----------
+    x
+        Argument, of any shape. Evaluated elementwise. Integers are promoted to
+        floating point; a floating argument keeps its dtype.
+
+    Returns
+    -------
+    Array
+        :math:`\mathrm{sech}(x)`, in ``(0, 1]``. ``sech(inf)`` and
+        ``sech(-inf)`` are ``0``, and ``nan`` stays ``nan``.
+
+    Examples
+    --------
+    >>> import jax
+    >>> import jax.numpy as jnp
+    >>> import spexial as sp
+
+    >>> float(sp.sech(0.0))
+    1.0
+
+    The gradient is finite where ``1 / jnp.cosh`` gives `nan`:
+
+    >>> float(jax.grad(lambda x: 1 / jnp.cosh(x))(800.0))
+    nan
+    >>> float(jax.grad(sp.sech)(800.0))
+    -0.0
+
+    """
+    x_arr = promote_integers(x)
+    # The dtype is static, so this is resolved at trace time and costs nothing.
+    if jnp.iscomplexobj(x_arr):
+        msg = f"sech is only implemented for real x, got dtype {x_arr.dtype}"
+        raise ValueError(msg)
+    e = jnp.exp(-jnp.abs(x_arr))
+    return 2 * e / (1 + e * e)
+
+
+@sech.defjvp
+def _sech_jvp(primals: tuple[Any], tangents: tuple[Any]) -> tuple[AnyArray, AnyArray]:
+    r""":math:`\mathrm{sech}'(x) = -\mathrm{sech}(x)\tanh(x)`."""
+    (x,), (dx,) = primals, tangents
+    s = sech(x)
+    return s, -s * jnp.tanh(x) * dx
