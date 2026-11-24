@@ -957,7 +957,10 @@ def _a_eq_1_jvp(
     b, z = primals
     b_dot, z_dot = tangents
 
-    primal_out = _a_eq_1(b, z)
+    # Through the custom JVP, so that differentiated again the primal takes
+    # this rule too, not autodiff of the closed form's (1-z)^b (as in
+    # `_incomplete_beta_jvp`).
+    primal_out = _a_eq_1_core(b, z)
     tangent_out = jnp.zeros_like(primal_out)
 
     # The integrand at the endpoint, as for the series -- here (1-z)^(b-1).
@@ -972,12 +975,14 @@ def _a_eq_1_jvp(
             z_arr = jnp.asarray(z)
             inside = z_arr != 1.0
             via_log = jnp.exp((b - 1.0) * _log1m(jnp.where(inside, z_arr, 0.0)))
-            integrand = jnp.where(inside, via_log, (1.0 - z_arr) ** (b - 1.0))
+            integrand = jnp.where(inside, via_log, _pow(1.0 - z_arr, b - 1.0))
         else:
             # A concrete `b` has no derivative to get wrong, and as a constant
             # exponent XLA can simplify `pow` (to a reciprocal at b = 0, a square
             # root at b = 3/2), which `exp(... log1p)` would hide from it.
-            integrand = (1.0 - z) ** (b - 1.0)
+            # `_pow`, not `**`: its z-derivatives at z = 1 are exact for an
+            # integer b - 1 >= 0, where `**` made them `nan` (GH-73).
+            integrand = _pow(1.0 - z, b - 1.0)
         tangent_out = tangent_out + integrand * z_dot
 
     # Elementary, so autodiff of the closed form is cheap and exact; the series

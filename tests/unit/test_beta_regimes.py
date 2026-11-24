@@ -352,6 +352,10 @@ def _mp_integrand_derivative(a, b, z, order):
         (1.0, 3.0, 0.0),
         (2.0, 3.0, 0.0),
         (2.0, 1.5, 0.0),
+        # a == 1 takes the closed form, with its own z-rule.
+        (1.0, 1.0, 1.0),
+        (1.0, 2.0, 1.0),
+        (1.0, 3.0, 1.0),
     ],
 )
 def test_z_derivatives_at_an_integer_exponent_endpoint(a, b, z, traced):
