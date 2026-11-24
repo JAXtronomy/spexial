@@ -1329,8 +1329,9 @@ def _incomplete_beta_jvp(
 def _integrand(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
     """``z^(a-1) (1-z)^(b-1)``, the z-derivative of ``B(a, b, z)``.
 
-    For a traced ``a`` or ``b``, or exponents large enough for a factor to
-    leave the float range, inside the interval as one exponential,
+    For a traced ``a`` or ``b``, or exponents for which one factor could leave
+    the float range while the product does not, inside the interval as one
+    exponential,
     ``exp((a-1) log z + (b-1) log(1-z))``:
     formed apart, one factor underflowed and the other overflowed at large ``a``
     and very negative ``b``, and their product was ``0 * inf = nan`` where the
@@ -1348,14 +1349,22 @@ def _integrand(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArray:
         return _integrand(  # type: ignore[no-any-return]
             jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)
         ).astype(z.dtype)
-    # A factor can only under- or overflow while the other does the opposite
-    # if an exponent exceeds log(max) / log(2) -- one of z, 1 - z is at least
-    # 1/2. Below that, concrete a and b keep the plain product of powers, whose
-    # constant exponents XLA simplifies (to z * rsqrt(1 - z) at (2, 1.5)): the
-    # exponential costs 13x the flops of that z-gradient.
+    # Concrete a and b keep the plain product of powers where it is safe, as
+    # its constant exponents XLA simplifies (to z * rsqrt(1 - z) at (2, 1.5)):
+    # the exponential costs 13x the flops of that z-gradient. Safe means either
+    # exponents of one sign -- both factors <= 1, or both >= 1, so a factor
+    # leaves the float range only where the product does too -- or exponents
+    # too small for a factor to leave it where the other differs from 1: the
+    # nearest z gets to 1 is an ulp, 2^-(nmant+1), so |q| <= maxexp / (nmant+1)
+    # keeps (1-z)^q in range (19 in float64, 5 in float32), and z^p with |p|
+    # that small leaves it only below 2^-(nmant+1), where 1 - z is exactly 1. A
+    # bound of log(max)/log 2 instead left (1-z)^-1023 at z = 0.502 to overflow
+    # while z^1023 could not bring it back: inf where the derivative is 3583.
     if not isinstance(a, jax.core.Tracer) and not isinstance(b, jax.core.Tracer):
-        limit = math.log(float(jnp.finfo(z.dtype).max)) / math.log(2.0)
-        if float(a) - 1.0 <= limit and 1.0 - float(b) <= limit:
+        p, q = float(a) - 1.0, float(b) - 1.0
+        info = jnp.finfo(z.dtype)
+        small = info.maxexp / (info.nmant + 1)
+        if p * q >= 0 or (abs(p) <= small and abs(q) <= small):
             return _pow(z, a - 1.0) * _pow(1.0 - z, b - 1.0)  # type: ignore[no-any-return]
     end = (z == 0) | (z == 1)
     inner_z = jnp.where(end, 0.5, z)

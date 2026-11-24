@@ -981,6 +981,33 @@ def test_z_derivative_where_its_factors_overflow(a, b, z):
     np.testing.assert_allclose(float(fwd[2]), expect, rtol=1e-11)
 
 
+@pytest.mark.parametrize(
+    ("a", "b", "z", "dtype"),
+    [
+        (1024.0, -1022.0, 0.502, jnp.float64),
+        (1024.0, -1022.0, 0.5007, jnp.float64),
+        (100.0, -120.0, 0.52, jnp.float32),
+        (128.0, -126.0, 0.502, jnp.float32),
+    ],
+)
+def test_z_derivative_with_concrete_parameters_near_a_factor_s_limit(a, b, z, dtype):
+    """Concrete ``a`` and ``b`` that keep the plain product of powers must be safe.
+
+    Below an exponent of ``log(max) / log 2`` a factor could still leave the
+    float range while the derivative is moderate: ``(1-z)^-1023`` overflows at
+    ``z = 0.502`` while ``z^1023`` does not bring it back, so the z-gradient was
+    ``inf`` where it is 3583; in float32, ``0.502^127`` flushed to 0.
+    """
+    zz = jnp.asarray(z, dtype)
+    with mp.workdps(50):
+        zm = mp.mpf(float(zz))
+        expect = float(zm ** (a - 1) * (1 - zm) ** (b - 1))
+    got = float(jax.jit(jax.grad(lambda t: sp.incomplete_beta(a, b, t)))(zz))
+    np.testing.assert_allclose(
+        got, expect, rtol=1e-11 if dtype == jnp.float64 else 1e-4
+    )
+
+
 def test_z_derivative_in_half_precision_past_a_factor_s_range():
     """float16: ``(1-z)^-4`` at ``z = 0.95`` is 1.6e5, past float16's range.
 
