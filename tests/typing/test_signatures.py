@@ -65,6 +65,14 @@ def test_zeta_signature() -> None:
     assert from_array.shape == (2,)
 
 
+def test_sech_signature() -> None:
+    """`sech(x, /)` takes one array-like and returns an Array."""
+    from_scalar: Out = sp.sech(0.5)
+    from_array: Out = sp.sech(jnp.asarray([0.5, 1.0]))
+    assert from_scalar.shape == ()
+    assert from_array.shape == (2,)
+
+
 def test_polylog_signature() -> None:
     """`polylog(n, z, /)` takes a static `int` order and an array-like `z`."""
     order: int = 2

@@ -52,6 +52,21 @@ def test_grad_gamma_jax(benchmark: BenchmarkFixture) -> None:
     benchmark(warm(jax.grad(lambda a: jss.gamma(a).sum()), X))
 
 
+def test_grad_sech_custom_jvp(benchmark: BenchmarkFixture) -> None:
+    """`spexial.sech`, through its hand-written derivative -- what ships."""
+    benchmark(warm(jax.grad(lambda a: sp.sech(a).sum()), X))
+
+
+def test_grad_sech_autodiff(benchmark: BenchmarkFixture) -> None:
+    """The stable value form differentiated directly, which loses accuracy near 0."""
+    benchmark(warm(jax.grad(lambda a: sp.sech.fun(a).sum()), X))
+
+
+def test_grad_sech_one_over_cosh(benchmark: BenchmarkFixture) -> None:
+    """`1 / cosh`, whose gradient is `nan` from |x| = 710."""
+    benchmark(warm(jax.grad(lambda a: (1 / jnp.cosh(a)).sum()), X))
+
+
 def test_grad_zeta_spexial(benchmark: BenchmarkFixture) -> None:
     """`spexial.zeta`, which also covers the negative line JAX does not."""
     benchmark(warm(jax.grad(lambda a: sp.zeta(a).sum()), N))

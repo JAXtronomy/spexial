@@ -13,7 +13,6 @@ import jax
 import jax.numpy as jnp
 
 from .custom_types import AnyArray, AnyArrayLike
-from .dtype import promote_integers
 
 
 @jax.custom_jvp
@@ -39,7 +38,7 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        :math:`\mathrm{sech}(x)`, in ``(0, 1]``. ``sech(inf)`` and
+        :math:`\mathrm{sech}(x)`, in ``[0, 1]``. ``sech(inf)`` and
         ``sech(-inf)`` are ``0``, and ``nan`` stays ``nan``.
 
     Examples
@@ -59,7 +58,12 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
     -0.0
 
     """
-    x_arr = promote_integers(x)
+    x_arr = jnp.asarray(x)
+    if not jnp.issubdtype(x_arr.dtype, jnp.inexact):
+        # Integers and bools: a *strong* float. `promote_integers` multiplies by
+        # 1.0, which leaves the result weakly typed, and nothing downstream of
+        # `exp` would make it strong again.
+        x_arr = x_arr.astype(jnp.result_type(float))
     # The dtype is static, so this is resolved at trace time and costs nothing.
     if jnp.iscomplexobj(x_arr):
         msg = f"sech is only implemented for real x, got dtype {x_arr.dtype}"

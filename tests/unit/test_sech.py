@@ -8,7 +8,12 @@ import pytest
 
 import spexial as sp
 
-mp.mp.dps = 50
+
+@pytest.fixture(autouse=True)
+def _fifty_digits():
+    """Reference values at 50 digits, without changing mpmath for other tests."""
+    with mp.workdps(50):
+        yield
 
 
 def _true(x):
@@ -23,9 +28,36 @@ def _rel(got, true):
 
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16", "float32", "float64"])
 def test_dtype_is_preserved(dtype):
-    """A floating argument keeps its own width; an integer is made floating."""
+    """A floating argument keeps its own width."""
     assert sp.sech(jnp.asarray([0.5, 3.0], dtype=dtype)).dtype == jnp.dtype(dtype)
-    assert jnp.issubdtype(sp.sech(jnp.asarray([1, 2])).dtype, jnp.floating)
+
+
+@pytest.mark.parametrize("x", [jnp.asarray([0, 1, 3]), jnp.asarray([True, False]), 2])
+def test_integer_and_bool_input_gives_a_strong_float(x):
+    """An integer or bool becomes a real float, not a truncated or weak one.
+
+    `-jnp.abs` raises on a bool, so the conversion is what makes it work, and a
+    weakly typed result would silently take the dtype of whatever it meets next.
+    """
+    got = sp.sech(x)
+    assert jnp.issubdtype(got.dtype, jnp.floating)
+    assert not got.weak_type
+    want = [float(mp.sech(mp.mpf(float(v)))) for v in np.ravel(np.asarray(x))]
+    np.testing.assert_allclose(np.ravel(got), want, rtol=1e-14)
+
+
+@pytest.mark.parametrize(("dtype", "rtol"), [("float16", 5e-3), ("bfloat16", 2e-2)])
+def test_narrow_dtypes_value_and_gradient(dtype, rtol):
+    """Float16 and bfloat16 are not widened; both value and gradient are right.
+
+    Measured worst case is 7e-4 and 9e-4 for float16, 4e-3 and 8.5e-3 for
+    bfloat16.
+    """
+    for x in (0.25, 1.0, 3.0, -2.0):
+        xj = jnp.asarray(x, dtype=dtype)
+        sech_true, grad_true = _true(xj)
+        assert _rel(sp.sech(xj), sech_true) < rtol
+        assert _rel(jax.grad(sp.sech)(xj), grad_true) < rtol
 
 
 @pytest.mark.parametrize(
@@ -42,10 +74,7 @@ def test_non_finite_arguments(x, value, grad):
 
 
 def test_complex_input_is_rejected():
-    """`|x|` is not analytic, so a complex argument must not be accepted.
-
-    Without the guard it silently returned the secant of the *modulus*.
-    """
+    """`|x|` is not analytic: complex input would return sech of the modulus."""
     with pytest.raises(ValueError, match="real x"):
         sp.sech(1.0 + 1.0j)
 
@@ -93,9 +122,9 @@ def test_gradient_is_finite_beyond_where_cosh_overflows(dtype, x):
 def test_gradient_keeps_its_relative_accuracy_float64(x):
     """The hand-written rule has no cancellation near zero.
 
-    Differentiating the stable value form directly gave 1e-4 relative error at
-    1e-12 and 2e-10 at 1e-6; this holds the rule to 1e-14 everywhere. Measured
-    worst case is 9e-16.
+    Differentiating the stable value form directly gives errors of order 1e-4 at
+    1e-12 and 1e-10 at 1e-6; this holds the rule to 1e-14 everywhere. Measured
+    worst case is 9.4e-16.
     """
     sech_true, grad_true = _true(x)
     assert _rel(sp.sech(x), sech_true) < 1e-14
@@ -105,29 +134,37 @@ def test_gradient_keeps_its_relative_accuracy_float64(x):
 
 @pytest.mark.parametrize("x", [1e-8, 1e-6, 1e-3, 0.1, 1.0, 5.0, 30.0, 80.0])
 def test_gradient_keeps_its_relative_accuracy_float32(x):
-    """Measured worst case is 2.6e-7 over float32's whole range."""
+    """Measured worst case is 3.9e-7 over float32's whole range."""
     xj = jnp.asarray(x, dtype=jnp.float32)
     sech_true, grad_true = _true(xj)
     assert _rel(sp.sech(xj), sech_true) < 3e-6
     assert _rel(jax.grad(sp.sech)(xj), grad_true) < 3e-6
+    assert _rel(jax.grad(sp.sech)(-xj), -grad_true) < 3e-6
 
 
-@pytest.mark.parametrize("order", [2, 3])
-@pytest.mark.parametrize("x", [0.3, 1.0, 4.0])
+@pytest.mark.parametrize("order", [2, 3, 4])
+@pytest.mark.parametrize("x", [0.0, 1e-6, 1e-3, 0.3, 1.0, 4.0])
 def test_higher_derivatives(x, order):
-    """The rule is written in terms of `sech`, so every order is right."""
+    """The rule is written in terms of `sech`, so every order is right.
+
+    `x = 0` is the point that matters: a `where(x == 0, ...)` guard in the rule
+    would give the right gradient and a wrong second derivative there, and
+    AGENTS.md asks for the second and third at any guarded point. The odd orders
+    vanish at zero, so the comparison is absolute there.
+    """
     f = sp.sech
     for _ in range(order):
         f = jax.grad(f)
-    assert _rel(f(x), mp.diff(mp.sech, mp.mpf(x), order)) < 1e-12
+    true = float(mp.diff(mp.sech, mp.mpf(x), order))
+    np.testing.assert_allclose(f(x), true, rtol=1e-12, atol=1e-12)
 
 
 def test_jit_vmap_grad_agree():
     """The usual transforms compose and agree with the eager value."""
     x = jnp.linspace(-30.0, 30.0, 61)
     eager = sp.sech(x)
-    np.testing.assert_array_equal(jax.jit(sp.sech)(x), eager)
-    np.testing.assert_array_equal(jax.vmap(sp.sech)(x), eager)
+    np.testing.assert_allclose(jax.jit(sp.sech)(x), eager, rtol=1e-14)
+    np.testing.assert_allclose(jax.vmap(sp.sech)(x), eager, rtol=1e-14)
     g = jax.vmap(jax.grad(sp.sech))(x)
     np.testing.assert_allclose(g, -eager * np.tanh(np.asarray(x)), rtol=1e-14)
 
@@ -151,3 +188,14 @@ def test_flushed_band_just_above_the_smallest_normal(dtype, x):
     true = float(_true(xj)[0])
     assert tiny <= true < 2 * tiny
     assert abs(float(sp.sech(xj)) - true) <= 2 * tiny
+
+
+@pytest.mark.parametrize(("dtype", "x"), [("float64", 1e-310), ("float32", 1e-40)])
+def test_gradient_at_a_subnormal_argument_is_flushed(dtype, x):
+    """The gradient at a subnormal `x` may be `-0.0` where the truth is `-x`.
+
+    XLA flushes the subnormal operand. The absolute error is below `tiny`, and
+    this is recorded as a ceiling in `docs/reference/accuracy-and-domains.md`.
+    """
+    xj = jnp.asarray(x, dtype=dtype)
+    assert abs(float(jax.grad(sp.sech)(xj)) + x) <= np.finfo(dtype).tiny

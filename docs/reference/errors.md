@@ -16,6 +16,7 @@ What `spexial` raises, when, and what it deliberately does not raise. For the do
 | --- | --- | --- |
 | `polylog(0, z)`, `polylog(-1, z)` | `ValueError` | `polylog is only implemented for integer order n >= 1, got 0` |
 | `polylog(n, z)` with complex `z` | `ValueError` | `polylog is only implemented for real z, got dtype complex128` |
+| `sech(x)` with complex `x` | `ValueError` | `sech is only implemented for real x, got dtype complex128` |
 | `polylog(2.0, z)` — non-integer order | `TypeError` | see [below](#a-non-integer-order) |
 | `polylog(n, z)` with array `z` | `TypeError` | `pow got incompatible shapes for broadcasting: (2,), (59,)` |
 | `eval_gegenbauers(n, alpha, x)` with array `x` | `TypeError` | `Cannot concatenate arrays with different numbers of dimensions` |
@@ -65,6 +66,7 @@ These are **not** errors. Each is a documented value, and each is what `scipy.sp
 | `gamma` below `x ≈ -170.6` | `0` — SciPy returns a denormal here |
 | `zeta` in the critical strip `0 < n ≤ 1` | `nan` — not implemented |
 | `zeta` at a negative non-integer, or odd `n ≤ -60` | `nan` — outside the Bernoulli table |
+| `sech` above $\lvert x \rvert \approx 708$ (float64) or $87$ (float32) | `0` — the true value is subnormal and XLA flushes it |
 | `polylog(n, z)` with `n > 60` and $\lvert z \rvert \ge 2$ | `nan` — the inversion branch needs $B_{60}$ |
 | `comb` with `k > N`, `k < 0` or `N < 0` | `0` |
 | Any function given `nan` | `nan`, except `comb(nan, k)`, which is `0` as in SciPy |
