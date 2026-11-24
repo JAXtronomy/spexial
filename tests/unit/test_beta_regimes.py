@@ -1149,3 +1149,29 @@ def test_a_eq_1_dtype_includes_a_strong_a(a, z):
     got = sp.incomplete_beta(a, -10.0, z)
     other = sp.incomplete_beta(a + np.asarray(1e-4, a.dtype), -10.0, z)
     assert got.dtype == other.dtype == jnp.result_type(a, -10.0, z)
+
+
+@pytest.mark.parametrize(("a", "b"), [(2.0, 50.0), (2.0, 200.0), (12.0, -5.0)])
+def test_closed_over_concrete_array_parameters_under_jit(a, b):
+    """REGRESSION: concrete jax-array ``a``, ``b`` closed over in `jit` raised.
+
+    The static branch choice compared them with `>`, which an enclosing `jit`
+    stages into a tracer, so the comparison raised `TracerBoolConversionError`.
+    """
+    z = jnp.asarray([0.3, 0.7])
+    aa, bb = jnp.asarray(a), jnp.asarray(b)
+    got = jax.jit(lambda zz: sp.incomplete_beta(aa, bb, zz))(z)
+    np.testing.assert_allclose(got, sp.incomplete_beta(a, b, z), rtol=1e-14)
+
+
+@pytest.mark.parametrize("b", [np.float32(-3), jnp.asarray(-3.0, jnp.float16)])
+def test_a_eq_1_casts_a_lower_precision_b_up(b):
+    """REGRESSION: at ``a == 1`` a strong low-precision ``b`` set the precision.
+
+    The closed form ran ``log|b|`` and ``1/|b|`` in ``b``'s dtype, 1e-5 off in
+    float16, while the other paths cast ``b`` to the common dtype. ``b = -3`` is
+    exact in every dtype, and ``B(1, -3, 1/2) = 7/3``.
+    """
+    got = sp.incomplete_beta(1.0, b, jnp.asarray(0.5, jnp.float64))
+    assert got.dtype == jnp.float64
+    np.testing.assert_allclose(float(got), 7 / 3, rtol=1e-15)

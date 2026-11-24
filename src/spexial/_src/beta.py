@@ -282,8 +282,6 @@ def _expand_parts(
     # `total` and `w_m` is a scalar (and `w0_factor`, per point), so a step costs
     # each point a subtraction, a division by a scalar, a multiply-add and a
     # multiply (and one more multiply per point).
-    # Scalars but for `total` and `w_m`, except inside `_exp_of_log_term`'s
-    # rule, which runs this per point.
     Carry = tuple[AnyArrayLike, ...]
 
     def step(carry: Carry, m: ScalarLike, /) -> tuple[Carry, None]:
@@ -369,7 +367,7 @@ and :math:`10^{-12}` at :math:`a = 0.1` out to :math:`10^5`
 
 
 def _continued_fraction(
-    a: AnyArrayLike, b: AnyArrayLike, x: AnyArray, /, steps: int | None = None
+    a: AnyArrayLike, b: AnyArrayLike, x: AnyArray, /, steps: int = _CF_STEPS
 ) -> AnyArray:
     r"""Evaluate the DLMF 8.17.22 continued fraction by the modified Lentz method.
 
@@ -408,7 +406,7 @@ def _continued_fraction(
     (_, _, h), _ = jax.lax.scan(
         step,
         init,
-        jnp.arange(1, (_CF_STEPS if steps is None else steps) + 1),
+        jnp.arange(1, steps + 1),
         unroll=_CF_UNROLL,
     )
     return h  # type: ignore[no-any-return]
@@ -454,13 +452,6 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     into the exponent, so a front factor below the smallest normal number does
     not flush to zero while the term itself is representable.
     """
-    if jnp.dtype(z.dtype).itemsize < 4:
-        # Half precision has too few bits for Lentz's recurrence to settle; work
-        # in float32 and round the result once.
-        f32 = jnp.float32
-        return _large_b(jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)).astype(
-            z.dtype
-        )
     x0 = (a + 1.0) / (a + b + 2.0)
     swap = z >= x0
     # z = 0 and z = 1 make the term exactly zero (the direct one at 0, the
@@ -497,15 +488,6 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
 
 def _series(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     """$B(a, b, z)$ by `_small_z` and `_large_z`, switched at $z = 1/2$."""
-    if jnp.dtype(z.dtype).itemsize < 4:
-        # Half precision has too few bits for the series' cancellations (8% off
-        # at (4, 9.5, 0.9) in float16), and its range is too short for
-        # `_large_z`'s unguarded rescale (nan at (2, -5)); work in float32 and
-        # round the result once, as the other methods do.
-        f32 = jnp.float32
-        return _series(jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)).astype(
-            z.dtype
-        )
     # For b <= 0 the integral diverges at z = 1: a genuine pole, +inf (GH-67).
     # `_large_z` cannot see it -- at w = 1 - z = 0 its expansion is `inf - inf`
     # -- so the pole is returned directly, and the series is handed a harmless
@@ -580,11 +562,6 @@ def _large_a(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     returned as ``inf``, with the expansion handed a harmless ``w`` there. At
     :math:`z = 0` the term is a genuine zero, guarded as in `_large_b`.
     """
-    if jnp.dtype(z.dtype).itemsize < 4:
-        f32 = jnp.float32
-        return _large_a(jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)).astype(
-            z.dtype
-        )
     # Arrays, weakly typed when ``a`` is a Python scalar, so `z` sets the dtype.
     # The result does not depend on where the split sits, so it carries no
     # a-derivative: differentiated, the two pieces' derivatives through it cancel
@@ -640,17 +617,12 @@ def _negative_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     in `_large_b`, so a huge value that is still representable does not
     overflow on the way. :math:`z = 0` is a genuine zero; :math:`z = 1` the pole.
     """
-    if jnp.dtype(z.dtype).itemsize < 4:
-        f32 = jnp.float32
-        return _negative_b(
-            jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32)
-        ).astype(z.dtype)
     half = jnp.asarray(0.5)
     return _split_at(a, b, z, half, half, steps=_NEG_B_STEPS)
 
 
 def _fraction_parts(
-    a: AnyArrayLike, b: AnyArrayLike, x: AnyArray, /, steps: int | None = None
+    a: AnyArrayLike, b: AnyArrayLike, x: AnyArray, /, steps: int = _CF_STEPS
 ) -> tuple[AnyArray, AnyArray]:
     """``B(a, b, x)`` by the continued fraction as ``(log z^a (1-z)^b, h / a)``."""
     log_front = a * jnp.log(x) + b * _log1m(x)
@@ -752,7 +724,7 @@ def _split_at(
     split: AnyArray,
     w0: AnyArray,
     /,
-    steps: int | None = None,
+    steps: int = _CF_STEPS,
 ) -> AnyArray:
     r"""Sum the fraction below ``split``; above it, the fraction there and the tail.
 
@@ -833,8 +805,9 @@ def _branch(a: ScalarLike, b: ScalarLike, /) -> int:
     """
     if isinstance(a, jax.core.Tracer) or isinstance(b, jax.core.Tracer):
         return _EITHER
-    # Plain Python, mirroring `_branch_index`: `jnp` ops here would be staged
-    # into an enclosing `jit` trace even on concrete inputs.
+    # Plain Python floats, mirroring `_branch_index`: comparing a concrete jax
+    # array would be staged into an enclosing `jit` trace and give a tracer.
+    a, b = float(a), float(b)
     if b > _CF_FROM:
         return _CONTINUED_FRACTION
     if a > _CF_A_FROM:
@@ -845,21 +818,21 @@ def _branch(a: ScalarLike, b: ScalarLike, /) -> int:
 def _incomplete_beta_impl(
     a: ScalarLike, b: ScalarLike, z: AnyArrayLike, branch: int, /
 ) -> AnyArray:
-    r"""$B(a, b, z)$ for $a > 0$, any real $b$, and $z \in [0, 1]$."""
+    r"""$B(a, b, z)$ for $a > 0$, any real $b$, and $z \in [0, 1]$.
+
+    The arguments are already promoted (`_promote`).
+    """
     z = jnp.asarray(z)
-    if not jnp.issubdtype(z.dtype, jnp.inexact):
-        # An integer `z` would otherwise carry its dtype into the continued
-        # fraction's switch point, (a+1)/(a+b+2), and truncate it to zero.
-        z = z.astype(jnp.promote_types(z.dtype, float))
-    # Promote `z` to the common type of all three, as any elementwise op would
-    # (GH-66): a float32 `z` with a strong float64 `b` otherwise starts a `scan`
-    # carry in float32 that the first step promotes to float64, which `scan`
-    # rejects. Weak (Python) scalars do not promote, so the common case keeps
-    # `z`'s own dtype and weak type.
-    dtype = jnp.result_type(a, b, z)
-    if dtype != z.dtype:
-        z = z.astype(dtype)
-    return (_series, _large_b, _large_a, _negative_b)[branch](a, b, z)
+    method = (_series, _large_b, _large_a, _negative_b)[branch]
+    if jnp.dtype(z.dtype).itemsize < 4:
+        # Half precision has too few bits for Lentz's recurrence or the series'
+        # cancellations (8% off at (4, 9.5, 0.9) in float16), and too little
+        # range for `_large_z`'s rescale (nan at (2, -5)): work in float32 and
+        # round the result once.
+        f32 = jnp.float32
+        out = method(jnp.asarray(a, f32), jnp.asarray(b, f32), z.astype(f32))
+        return out.astype(z.dtype)  # type: ignore[no-any-return]
+    return method(a, b, z)  # type: ignore[no-any-return]
 
 
 _EXPRL_BAND = 0.5
@@ -1080,7 +1053,7 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     The tests check those three methods against mpmath in float64: to rtol
     :math:`10^{-12}` for :math:`b \in (10, 100]` and for :math:`a \in (8, 50]`
     with :math:`b \ge 0.1`, :math:`5 \times 10^{-13}` for
-    :math:`a \in (8, 100]` with :math:`b \in [-50, 0.1)`,
+    :math:`a \in [12, 100]` with :math:`b \in [-50, 0.1)`,
     :math:`2 \times 10^{-12}` for :math:`a \le 8` with
     :math:`b \in [-1100, -5)`, and :math:`10^{-11}` for :math:`b` up to
     :math:`10^4`, beyond which rounding grows like :math:`b\,\epsilon`. In the
@@ -1147,16 +1120,10 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
             # its `scan`); say so here too, rather than answer for some `a` only.
             msg = f"incomplete_beta: `b` must be a scalar, got shape {np.shape(b)}"
             raise TypeError(msg)
-        # An integer `z` promotes to float, as on the other paths; against `b`
-        # the closed form's own arithmetic promotes it as any elementwise op.
-        z = jnp.asarray(z)
-        if not jnp.issubdtype(z.dtype, jnp.inexact):
-            z = z.astype(jnp.promote_types(z.dtype, float))
-        # A strong `a` takes part in the dtype, as on the other paths
-        # (`result_type(a, b, z)`), so it does not depend on whether a is 1.
-        out_dtype = jnp.result_type(a, b, z)
-        if out_dtype != z.dtype:
-            z = z.astype(out_dtype)
+        # Promoted as on the other paths, so a strong lower-precision `b` is
+        # cast up rather than running the closed form in its precision.
+        _, b, z = _promote(a, b, z)
+        out_dtype = z.dtype
         if jnp.dtype(out_dtype).itemsize < 4:
             # Half precision in float32, rounded once, as on the other paths:
             # in bfloat16 the closed form was 4% off at (-10, 0.6).
@@ -1183,35 +1150,12 @@ def _dispatch(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     transpose, so ``grad`` of a `vmap` over ``a`` or ``b`` raised.
     """
     index = _branch_index(a, b)
-    # `a` and `b` are scalars, so `switch` runs one branch. Under `vmap` it
-    # becomes a `select` that runs every branch, on every lane. An unselected
-    # branch may then return `nan` or `inf` -- the series at large `b`, the
-    # reflection at `b <= 0` -- and autodiff multiplies its Jacobian by the
-    # zero cotangent `select` gives it, `0 * inf = nan`. The `where(mine, ...)`
-    # on each branch's inputs hands an unselected branch parameters it is
-    # finite and cheap for, and its transpose zeroes that lane's cotangent.
-    # With the current JAX the batched `switch` already selects each lane's
-    # cotangent after the branches' transposes: removing the masks changed no
-    # value or gradient in any probe or test (vmap over b in {-2, 0, 1e17,
-    # +-1e300}, a in {1e-300, 1e300}), so they are a guard, not a fix any test
-    # pins. `z` is left unmasked for the same reason.
-    safe = (
-        (1.0, 1.0),  # series
-        (1.0, 2.0 * _CF_FROM),  # continued fraction
-        (2.0 * _CF_A_FROM, 0.0),  # large a
-        (1.0, 2.0 * _NEG_B_FROM),  # negative b
-    )
-
-    def run(k: int, /) -> Callable[[], AnyArray]:
-        def go() -> AnyArray:
-            mine = index == k
-            ak = jnp.where(mine, a, safe[k][0])
-            bk = jnp.where(mine, b, safe[k][1])
-            return _incomplete_beta_core(ak, bk, z, k)  # type: ignore[no-any-return]
-
-        return go
-
-    return jax.lax.switch(index, [run(k) for k in range(len(safe))])  # type: ignore[no-any-return]
+    # Under `vmap` the `switch` becomes a `select` that runs every branch on
+    # every lane; the batched `switch` selects each lane's cotangent after the
+    # branches' transposes, so an unselected branch's `nan` does not reach the
+    # gradients (`test_vmap_over_b_across_the_switch_has_finite_gradients`).
+    branches = [ft.partial(_incomplete_beta_core, a, b, z, k) for k in range(4)]
+    return jax.lax.switch(index, branches)  # type: ignore[no-any-return]
 
 
 def _promote(
