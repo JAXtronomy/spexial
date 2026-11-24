@@ -33,7 +33,7 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
 | `spherical_jn` | -- | -- | -- | yes | -- | -- | only here |
 | `spherical_jn_all` | -- | -- | -- | yes | -- | -- | only here |
 | `incomplete_beta` | -- | -- | -- | yes | 0.007x (142.9x better) | 0.0144x (69.4x better) | only here |
-| `sech` | -- | -- | -- | yes | 1.6x (1.6x worse) | 0.242x (4.1x better) | only here |
+| `sech` | -- | -- | -- | yes | 1.6x (1.6x worse) | 0.32x (3.1x better) | only here |
 | `spence` | yes (all >= 0.7.2) | value + autodiff | value + autodiff | yes | 0.2x (5.0x better) | 0.026x (38.5x better) | extends upstream |
 | `zeta` | yes (all >= 0.7.2) | value + autodiff | -- | -- | 1.08x (1.1x worse) | -- | extends upstream |
 | `comb` | yes (>= 0.10.2) | value + autodiff | -- | -- | 1.07x (1.1x worse) | -- | redundant above floor |
@@ -131,11 +131,11 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
     Gradient cost vs differentiating our own series: speed 0.007x (142.9x better), memory 0.0144x (69.4x better).
 
 `sech`
-:   Neither numpy, JAX nor scipy has `sech`; `1 / cosh(x)` has a `nan` gradient from |x| = 710. The row exists for correctness, not cost: the hand-written rule keeps 4.1x less residual memory and its gradient is faster than that of `1 / cosh` (about 0.7x to 0.8x), but it is about 1.6x slower at 10,000 points (about 1.2x at 1,000) than differentiating the value form, which loses accuracy near 0. `benchmarks/test_derivatives.py` holds the timings.
+:   Neither numpy, JAX nor scipy has `sech`; `1 / cosh(x)` has a `nan` gradient from |x| = 710. The row exists for correctness, not cost: the hand-written rule keeps 3.1x less residual memory and its gradient is faster than that of `1 / cosh` (about 0.7x at 10,000 points), but it is about 1.6x slower at 10,000 points (about the same at 1,000) than differentiating the value form, which loses accuracy near 0. `benchmarks/test_derivatives.py` holds the timings.
 
     Derivative: `-sech(x) tanh(x)`.
 
-    Gradient cost vs differentiating the stable value form: speed 1.6x (1.6x worse), memory 0.242x (4.1x better).
+    Gradient cost vs differentiating the stable value form: speed 1.6x (1.6x worse), memory 0.32x (3.1x better).
 
 `spence`
 :   JAX has had `spence` since before our floor, but it is real-only and raises on complex input; this accepts both, which is the reason the row exists. It also wins on both cost columns -- 5.0x faster on 38.5x less residual -- because the analytic derivative log(z)/(1-z) is simply the integrand of the definition. The custom JVP is not merely an optimisation here: `lax.select` evaluates every branch, so differentiating the implementation yields `nan` -- and JAX's own `spence` differentiates to `nan` across roughly 1 < x < 2, where ours is exact. Contributed by Colm Talbot, translated from scipy's Cython implementation.

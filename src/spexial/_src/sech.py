@@ -19,14 +19,15 @@ from .custom_types import AnyArray, AnyArrayLike
 def sech(x: AnyArrayLike, /) -> AnyArray:
     r"""Compute the hyperbolic secant :math:`\mathrm{sech}(x) = 1/\cosh(x)`.
 
-    Written ``1 / jnp.cosh(x)`` the value is fine at any `x`, but the gradient
-    is `nan` from :math:`|x| \approx 710` in float64 (89 in float32), and
-    wrong before that. This evaluates :math:`2e/(1 + e^2)` with
-    :math:`e = \exp(-|x|)`, which cannot overflow, and supplies the derivative
-    :math:`-\mathrm{sech}(x)\tanh(x)` by hand: differentiating the value form
-    directly loses the gradient's relative accuracy near zero, where
-    :math:`1 - e^2` cancels. See *Accuracy and domains* in the documentation
-    for the numbers.
+    Written ``1 / jnp.cosh(x)`` the value is only good to about :math:`5\times10^{-14}`
+    in float64 and the gradient is `nan` from :math:`|x| \approx 710` (89 in
+    float32), and wrong before that. This evaluates :math:`2/(e + 1/e)` with
+    :math:`e = \exp(|x|)`, which loses nothing to the overflow of `e`: it gives
+    the correct limit 0. The derivative :math:`-\mathrm{sech}(x)\tanh(x)` is
+    supplied by hand, because differentiating the value form directly loses
+    the gradient's relative accuracy near zero, where its derivative contains
+    a cancellation. See *Accuracy and domains* in the documentation for the
+    numbers.
 
     Real input only; a complex argument raises `ValueError`.
 
@@ -39,8 +40,7 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
     Returns
     -------
     Array
-        :math:`\mathrm{sech}(x)`, in ``[0, 1]`` up to rounding: for small :math:`|x|`
-        the result can be :math:`1 + \varepsilon`. ``sech(inf)`` and
+        :math:`\mathrm{sech}(x)`, in ``[0, 1]``. ``sech(inf)`` and
         ``sech(-inf)`` are ``0``, and ``nan`` stays ``nan``.
 
     Examples
@@ -69,8 +69,8 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
     if jnp.iscomplexobj(x_arr):
         msg = f"sech is only implemented for real x, got dtype {x_arr.dtype}"
         raise ValueError(msg)
-    e = jnp.exp(-jnp.abs(x_arr))
-    return 2 * e / (1 + e * e)
+    e = jnp.exp(jnp.abs(x_arr))
+    return 2 / (e + 1 / e)
 
 
 @sech.defjvp

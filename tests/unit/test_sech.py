@@ -97,8 +97,9 @@ def test_shapes():
 def test_narrow_dtypes_value_and_gradient(dtype, rtol):
     """Float16 and bfloat16 are not widened; both value and gradient are right.
 
-    Measured worst case, over every argument where the result is a normal
-    number, is 1.4e-3 for float16 and 1e-2 for bfloat16, gradient included.
+    Measured worst case, over every argument where the result is at least
+    `2 tiny`, is about 1.4e-3 for float16 and 1e-2 for bfloat16, gradient
+    included.
     """
     for x in (0.25, 1.0, 3.0, -2.0, 10.0):
         xj = jnp.asarray(x, dtype=dtype)
@@ -180,38 +181,40 @@ def test_beyond_underflow_value_and_gradient_vanish(dtype, x):
 
 @pytest.mark.parametrize(
     "x",
-    [1e-12, 1e-8, 1e-6, 1e-3, 0.1, 1.0, 5.0, 30.0, 300.0, 400.0, 700.0, 705.0, 708.0],
+    [1e-12, 1e-8, 1e-6, 1e-3, 0.1, 1.0, 5.0, 30.0, 300.0, 400.0, 700.0, 708.0, 709.0],
 )
 def test_gradient_keeps_its_relative_accuracy_float64(x):
     """The hand-written rule has no cancellation near zero.
 
-    Differentiating the stable value form directly gives errors of order 1e-4 at
-    1e-12 and 1e-10 at 1e-6; this holds the rule to 1e-14 everywhere. Measured
-    worst case is 1.05e-15.
+    Differentiating the value form directly gives errors of order 1e-4 at 1e-12
+    and 1e-10 at 1e-6; this holds the rule to 4e-15 everywhere. Measured worst
+    case is 1.05e-15.
     """
     sech_true, grad_true = _true(x)
-    assert _rel(sp.sech(x), sech_true) < 1e-14
-    assert _rel(jax.grad(sp.sech)(x), grad_true) < 1e-14
-    assert _rel(jax.grad(sp.sech)(-x), -grad_true) < 1e-14
+    assert _rel(sp.sech(x), sech_true) < 4e-15
+    assert _rel(jax.grad(sp.sech)(x), grad_true) < 4e-15
+    assert _rel(jax.grad(sp.sech)(-x), -grad_true) < 4e-15
 
 
-@pytest.mark.parametrize("x", [1e-8, 1e-6, 1e-3, 0.1, 1.0, 5.0, 30.0, 80.0, 85.0, 87.0])
+@pytest.mark.parametrize(
+    "x", [1e-8, 1e-6, 1e-3, 0.1, 1.0, 5.0, 30.0, 80.0, 85.0, 87.0, 88.0]
+)
 def test_gradient_keeps_its_relative_accuracy_float32(x):
     """Measured worst case is 4.4e-7 over float32's whole range."""
     xj = jnp.asarray(x, dtype=jnp.float32)
     sech_true, grad_true = _true(xj)
-    assert _rel(sp.sech(xj), sech_true) < 1.5e-6
-    assert _rel(jax.grad(sp.sech)(xj), grad_true) < 1.5e-6
-    assert _rel(jax.grad(sp.sech)(-xj), -grad_true) < 1.5e-6
+    assert _rel(sp.sech(xj), sech_true) < 1e-6
+    assert _rel(jax.grad(sp.sech)(xj), grad_true) < 1e-6
+    assert _rel(jax.grad(sp.sech)(-xj), -grad_true) < 1e-6
 
 
-# Per dtype: the range in |x| over which the result is a normal number, and the
-# tolerance, which is a few times the measured worst case.
+# Per dtype: the range in |x| to test over (points whose true result is below
+# `2 tiny` are skipped), and the tolerance, a few times the measured worst case.
 _GRIDS = {
-    "float64": (1e-300, 708.0, 1e-14),
-    "float32": (1e-30, 87.0, 1.5e-6),
+    "float64": (1e-300, 709.0, 4e-15),
+    "float32": (1e-30, 88.0, 1e-6),
     "float16": (1e-4, 17.0, 5e-3),
-    "bfloat16": (1e-4, 87.0, 2e-2),
+    "bfloat16": (1e-4, 88.0, 2e-2),
 }
 
 
@@ -232,17 +235,28 @@ def test_value_and_gradient_over_the_whole_range(dtype):
             assert _rel(g, grad_true) < rtol, (dtype, float(xi))
 
 
-@pytest.mark.parametrize("order", [2, 3, 4])
-@pytest.mark.parametrize("x", [-4.0, -1.0, -0.3, -1e-3, 0.0, 1e-6, 1e-3, 0.3, 1.0, 4.0])
-@pytest.mark.parametrize(("dtype", "tol"), [("float64", 1e-14), ("float32", 3e-6)])
-def test_higher_derivatives(x, order, dtype, tol):
+_DERIVATIVE_CASES = [
+    (dtype, tol, order)
+    for dtype, tol, orders in (
+        ("float64", 8e-15, (2, 3, 4, 5)),
+        ("float32", 1e-6, (2, 3, 4)),
+    )
+    for order in orders
+]
+
+
+@pytest.mark.parametrize(("dtype", "tol", "order"), _DERIVATIVE_CASES)
+@pytest.mark.parametrize(
+    "x", [-4.0, -1.0, -0.3, -1e-3, 0.0, 1e-12, 1e-6, 1e-3, 0.3, 1.0, 4.0]
+)
+def test_higher_derivatives(x, dtype, tol, order):
     """The rule is written in terms of `sech`, so every order is right.
 
     `x = 0` is the point that matters: a `where(x == 0, ...)` guard in the rule
     would give the right gradient and a wrong second derivative there, and
     AGENTS.md asks for the second and third at any guarded point. The odd orders
     vanish at zero, so the comparison is absolute there. Measured worst case is
-    9.5e-16 in float64 and 4.8e-7 in float32.
+    2.7e-15 in float64 and 2.1e-7 in float32.
     """
     xj = jnp.asarray(x, dtype=dtype)
     f = sp.sech
@@ -276,25 +290,30 @@ def test_jit_vmap_grad_agree():
 
 
 # ---------------------------------------------------------------------------
-# The documented ceilings.
+# The documented ceiling.
 
 
-@pytest.mark.parametrize(("dtype", "x"), [("float64", 708.7), ("float32", 87.7)])
-def test_flushed_band_just_above_the_smallest_normal(dtype, x):
-    """In a band of width ln 2 the value and gradient may be flushed to 0.
+@pytest.mark.parametrize(
+    ("dtype", "x", "rtol"),
+    [
+        ("float64", 708.7, 4e-15),
+        ("float64", 709.0, 4e-15),
+        ("float32", 87.7, 1e-6),
+        ("float32", 88.0, 1e-6),
+    ],
+)
+def test_value_just_above_the_smallest_normal_is_not_flushed(dtype, x, rtol):
+    """The true value is between `tiny` and `2 tiny` here, and is returned.
 
-    `exp(-|x|)` is subnormal there and XLA on CPU flushes it, while the true
-    value is still between `tiny` and `2 tiny`. The result is therefore either
-    right or 0, and the absolute error is at most `2 tiny`; this is a ceiling,
-    recorded in `docs/reference/accuracy-and-domains.md`, not a tolerance
-    widened to pass.
+    A form built on `exp(-|x|)` has a subnormal intermediate there, which XLA
+    flushes to give 0; `2 / (e + 1/e)` with `e = exp(|x|)` has none.
     """
     xj = jnp.asarray(x, dtype=dtype)
     tiny = float(np.finfo(dtype).tiny)
-    true = float(_true(xj)[0])
-    assert tiny <= true < 2 * tiny
-    assert abs(float(sp.sech(xj)) - true) <= 2 * tiny
-    assert abs(float(jax.grad(sp.sech)(xj)) + true) <= 2 * tiny
+    sech_true, grad_true = _true(xj)
+    assert tiny <= sech_true < 2 * tiny
+    assert _rel(sp.sech(xj), sech_true) < rtol
+    assert _rel(jax.grad(sp.sech)(xj), grad_true) < rtol
 
 
 @pytest.mark.parametrize(("dtype", "x"), [("float64", 1e-310), ("float32", 1e-40)])
