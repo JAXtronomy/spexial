@@ -423,6 +423,23 @@ def test_large_b_no_premature_underflow(a, b):
     np.testing.assert_allclose(got, expect, rtol=1e-12)
 
 
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [(301.0, 1000.0, 0.255), (300.0, 1000.0, 0.26), (300.0, 1000.0, 0.3)],
+)
+def test_large_b_reflection_with_a_subnormal_subtrahend(a, b, z):
+    """``B(a, b) - B(b, a, 1-z)`` with ``B(a, b)`` near the smallest normal.
+
+    The subtrahend is then subnormal, which XLA flushes to zero, so a result
+    that is itself normal came back as ``B(a, b)``: 2.4% off at (301, 1000,
+    0.255). The difference is taken in logarithms instead.
+    """
+    with mp.workdps(80):
+        expect = float(mp.beta(a, b) - mp.betainc(b, a, 0, 1 - mp.mpf(z)))
+    got = float(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
 @pytest.mark.parametrize("z", [0.0, 1.0])
 def test_large_b_parameter_gradients_at_the_endpoints(z):
     """``a``/``b`` gradients at ``z = 0`` and ``z = 1``, with ``b > 10``.

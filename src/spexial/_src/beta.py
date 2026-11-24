@@ -468,8 +468,15 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     log_front = a * jnp.log(zs) + b * _log1m(zs)
     first = jnp.where(swap, b, a)
     h = _continued_fraction(first, jnp.where(swap, a, b), jnp.where(swap, 1.0 - zs, zs))
-    term = jnp.where(endpoint, 0.0, jnp.exp(log_front + jnp.log(h / first)))
-    reflected = jnp.exp(_complete_beta(a, b)) - term
+    log_term = log_front + jnp.log(h / first)
+    term = jnp.where(endpoint, 0.0, jnp.exp(log_term))
+    # B(a, b) - term, as B(a, b) (1 - term / B(a, b)) with the ratio from the
+    # logarithms: near the bottom of the float range the term alone is
+    # subnormal, which XLA flushes to 0, and B(301, 1000, 0.255) came back as
+    # B(301, 1000), 2.4% high. The endpoint's term is a genuine 0.
+    log_complete = _complete_beta(a, b)
+    ratio = jnp.where(endpoint, -jnp.inf, log_term - log_complete)
+    reflected = -jnp.exp(log_complete) * jnp.expm1(ratio)
     out = jnp.where(swap, reflected, term)
     # Past b ~ 1/eps the switch point x0 is below eps, `1 - x0` rounds to 1, and
     # the reflected fraction's first denominator is exactly zero. Long before
