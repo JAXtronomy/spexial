@@ -489,7 +489,10 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     # the reflected fraction's first denominator is exactly zero. Long before
     # that the b*eps rounding has taken every digit (all of them by b ~ 1e15),
     # so say so with `nan` rather than return a confident `inf` or `0`.
-    return jnp.where(1.0 - x0 == 1.0, jnp.nan, out)  # type: ignore[no-any-return]
+    # Judged in z's dtype: a float64 x0 from Python-float a and b let float32
+    # past 1/eps32 through, -1.5e-16 at (2, 1e8, 3.3e-8) where it is 8.4e-17.
+    too_large = jnp.asarray(x0, z.dtype) < jnp.finfo(z.dtype).eps
+    return jnp.where(too_large, jnp.nan, out)  # type: ignore[no-any-return]
 
 
 def _series(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:

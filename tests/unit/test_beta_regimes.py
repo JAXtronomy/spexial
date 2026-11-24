@@ -1042,6 +1042,19 @@ def test_z_derivative_at_the_product_bound(dtype, side):
             )
 
 
+@pytest.mark.parametrize("strong", [False, True])
+def test_large_b_past_one_over_eps_in_float32(strong):
+    """Past ``b ~ 1/eps`` of ``z``'s dtype the result is `nan`, not a wrong number.
+
+    The guard looked at the switch point in float64 when ``a`` and ``b`` were
+    Python floats, so float32 at ``b = 1e8`` returned -1.5e-16 (truth 8.4e-17).
+    """
+    b = jnp.asarray(1e8, jnp.float32) if strong else 1e8
+    got = sp.incomplete_beta(2.0, b, jnp.asarray(3.3e-8, jnp.float32))
+    assert got.dtype == jnp.float32
+    assert bool(jnp.isnan(got))
+
+
 def test_z_derivative_in_half_precision_past_a_factor_s_range():
     """float16: ``(1-z)^-4`` at ``z = 0.95`` is 1.6e5, past float16's range.
 
