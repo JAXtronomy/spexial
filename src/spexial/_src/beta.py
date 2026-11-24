@@ -333,8 +333,10 @@ r"""Above this ``b``, `_large_b` replaces the two series.
 Both series expand :math:`(1-t)^{b-1}` binomially, and its coefficients
 :math:`(1-b)_k / k!` alternate and grow like :math:`b^k / k!`: at
 :math:`z = 1/2` the sum is a near-total cancellation, worst relative error
-:math:`2\times10^{-15}` at :math:`b = 10`, :math:`10^{-11}` at 30, and
-:math:`10^{7}` at 100. The continued fraction is :math:`5\times10^{-14}` from
+over :math:`a \le 8` :math:`4\times10^{-15}` at :math:`b = 10`,
+:math:`10^{-7}` at 30, and :math:`4\times10^{15}` at 100 (all at
+:math:`a = 8`; at :math:`a = 2`, :math:`10^{-11}` and :math:`10^{9}`). The
+continued fraction is :math:`5\times10^{-14}` from
 :math:`b = 0.1` up, so the switch can sit wherever the series is still exact.
 """
 
@@ -520,9 +522,12 @@ r"""Above this ``a``, the series give way to `_large_b` or `_large_a`.
 
 `_large_z` expands :math:`(1-u)^{a-1}` over :math:`u \in [w, 1/2]`, and its
 coefficients :math:`(1-a)_m/m!` cancel just as :math:`(1-b)_k/k!` do for
-large :math:`b`: measured worst over :math:`b \in [-50, 10]`,
-:math:`6\times10^{-14}` at :math:`a = 8`, :math:`4\times10^{-11}` at 16,
-:math:`2\times10^{-8}` at 24, and wrong from about 50.
+large :math:`b`: measured worst over :math:`b \in [-5, 10]`, the series'
+range below the switch, :math:`2.5\times10^{-14}` at :math:`a = 8`,
+:math:`7\times10^{-11}` at 16, :math:`2\times10^{-8}` at 24, and wrong from
+about 50. (Below :math:`b = -5` it is `_negative_b`'s range: there the
+series is :math:`10^{-11}` off at :math:`a = 8, b = -10` and 8% at
+:math:`b = -50`.)
 """
 
 _CF_A_B_MIN = 0.1
@@ -594,8 +599,9 @@ _NEG_B_STEPS = 128
 """Double steps of the continued fraction in `_negative_b`.
 
 At very negative ``b`` and small ``a`` the fraction converges more slowly than
-in `_large_b`: 64 steps leave 5e-9 at ``a = 0.5, b = -1100``; 128 give 7e-15,
-and 256 change nothing.
+in `_large_b`: at ``a = 0.5, b = -1100``, 64 steps leave 5e-9 at ``z = 0.3``
+and 2.4e-5 at ``z = 0.45``; 128 give 7e-15 and 1.5e-13 there, and 256 change
+nothing.
 """
 
 
@@ -1150,13 +1156,14 @@ def _dispatch(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     # becomes a `select` that runs every branch, on every lane. An unselected
     # branch may then return `nan` or `inf` -- the series at large `b`, the
     # reflection at `b <= 0` -- and autodiff multiplies its Jacobian by the
-    # zero cotangent `select` gives it, `0 * inf = nan`. What stops that
-    # reaching `a` and `b` is the `where(mine, ...)` on each branch's inputs,
-    # whose own transpose zeroes the unselected lane's cotangent. The
-    # substituted values matter only in that they keep the unselected branches
-    # cheap and finite; any value would do for correctness. `z` needs no mask:
-    # its cotangent is selected per lane after each branch's transpose, so an
-    # unselected branch's infinite (1-z)^(b-1) at z = 1 is discarded.
+    # zero cotangent `select` gives it, `0 * inf = nan`. The `where(mine, ...)`
+    # on each branch's inputs hands an unselected branch parameters it is
+    # finite and cheap for, and its transpose zeroes that lane's cotangent.
+    # With the current JAX the batched `switch` already selects each lane's
+    # cotangent after the branches' transposes: removing the masks changed no
+    # value or gradient in any probe or test (vmap over b in {-2, 0, 1e17,
+    # +-1e300}, a in {1e-300, 1e300}), so they are a guard, not a fix any test
+    # pins. `z` is left unmasked for the same reason.
     safe = (
         (1.0, 1.0),  # series
         (1.0, 2.0 * _CF_FROM),  # continued fraction
