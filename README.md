@@ -67,7 +67,7 @@ Array([-1.    ,  0.4375, -0.    , -0.4375,  1.    ], dtype=float64)
 | `k0`, `k1`, `k2` | `k0`, `k1`, `kn` |
 | `k0e`, `k1e`, `k2e` | `k0e`, `k1e`, `kve` — scaled by `e^z`, no upper limit |
 | `polylog` | -- the polylogarithm |
-| `sech` | -- the hyperbolic secant, with a gradient that stays finite and accurate; `1 / cosh(x)` gives `nan` |
+| `sech` | -- the hyperbolic secant, with a gradient that stays finite and accurate; `1 / cosh(x)` has a `nan` gradient at large `x` |
 | `spence` | `spence` — complex too, which JAX rejects |
 | `spherical_jn` | `spherical_jn` |
 | `spherical_jn_all` | -- every order up to `n` |

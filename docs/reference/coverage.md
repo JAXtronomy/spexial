@@ -131,7 +131,7 @@ It is also the roadmap. A function upstream covers everywhere `spexial` supports
     Gradient cost vs differentiating our own series: speed 0.007x (142.9x better), memory 0.0144x (69.4x better).
 
 `sech`
-:   Neither numpy, JAX nor scipy has `sech`; `1 / cosh(x)` has a `nan` gradient from |x| = 710. The row exists for correctness, not cost: the hand-written rule keeps 4.1x less residual memory and costs about what the gradient of `1 / cosh` does, but is about 1.7x slower (1.6x to 2.4x across runs) than differentiating the value form, which loses accuracy near 0. `benchmarks/test_derivatives.py` holds the timings.
+:   Neither numpy, JAX nor scipy has `sech`; `1 / cosh(x)` has a `nan` gradient from |x| = 710. The row exists for correctness, not cost: the hand-written rule keeps 4.1x less residual memory and its gradient is faster than that of `1 / cosh` (about 0.7x to 0.8x), but it is about 1.7x slower at 10,000 points (about 1.2x at 1,000) than differentiating the value form, which loses accuracy near 0. `benchmarks/test_derivatives.py` holds the timings.
 
     Derivative: `-sech(x) tanh(x)`.
 

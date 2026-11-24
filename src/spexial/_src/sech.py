@@ -20,12 +20,13 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
     r"""Compute the hyperbolic secant :math:`\mathrm{sech}(x) = 1/\cosh(x)`.
 
     Written ``1 / jnp.cosh(x)`` the value is fine at any `x`, but the gradient
-    is ``inf / inf = nan`` from :math:`|x| \approx 710` in float64 (90 in
-    float32), and wrong before that. This evaluates :math:`2e/(1 + e^2)` with
+    is `nan` from :math:`|x| \approx 710` in float64 (89 in float32), and
+    wrong before that. This evaluates :math:`2e/(1 + e^2)` with
     :math:`e = \exp(-|x|)`, which cannot overflow, and supplies the derivative
     :math:`-\mathrm{sech}(x)\tanh(x)` by hand: differentiating the value form
     directly loses the gradient's relative accuracy near zero, where
-    :math:`1 - e^2` cancels. See `accuracy-and-domains` for the numbers.
+    :math:`1 - e^2` cancels. See *Accuracy and domains* in the documentation
+    for the numbers.
 
     Real input only; a complex argument raises `ValueError`.
 
@@ -61,8 +62,8 @@ def sech(x: AnyArrayLike, /) -> AnyArray:
     x_arr = jnp.asarray(x)
     if not jnp.issubdtype(x_arr.dtype, jnp.inexact):
         # Integers and bools: a *strong* float. `promote_integers` multiplies by
-        # 1.0, which leaves the result weakly typed, and nothing downstream of
-        # `exp` would make it strong again.
+        # 1.0, which leaves a Python int weakly typed, and `-jnp.abs` raises on
+        # a bool outright.
         x_arr = x_arr.astype(jnp.result_type(float))
     # The dtype is static, so this is resolved at trace time and costs nothing.
     if jnp.iscomplexobj(x_arr):

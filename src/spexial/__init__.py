@@ -4,13 +4,15 @@ r"""``spexial``: `scipy.special` in JAX.
 with `jax.jit`, `jax.vmap` and `jax.grad`. Where a `scipy.special` counterpart
 exists the name, call signature and return values follow it.
 
-Two exports have **no** `scipy.special` counterpart:
+Several exports have **no** `scipy.special` counterpart, among them:
 
 - `polylog`, the polylogarithm :math:`\mathrm{Li}_n(z)` (compare `mpmath.polylog`).
 - `eval_gegenbauers`, which returns the Gegenbauer polynomial of degree ``n``
   *and every lower degree*, as a by-product of the recurrence.
+- `sech`, the hyperbolic secant, whose gradient stays finite and accurate where
+  that of ``1 / cosh`` is `nan`.
 
-The remaining exports do have one, but are not always drop-in replacements --
+Most of the others do have one, but are not always drop-in replacements --
 `k0`/`k1`/`k2` are accurate to ~2e-7 rather than to machine precision, and
 `comb` is the ``exact=False`` variant, so it returns a float that is only
 close to the integer. Each docstring states its own domain and accuracy.

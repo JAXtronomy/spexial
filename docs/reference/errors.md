@@ -66,7 +66,7 @@ These are **not** errors. Each is a documented value, and each is what `scipy.sp
 | `gamma` below `x ≈ -170.6` | `0` — SciPy returns a denormal here |
 | `zeta` in the critical strip `0 < n ≤ 1` | `nan` — not implemented |
 | `zeta` at a negative non-integer, or odd `n ≤ -60` | `nan` — outside the Bernoulli table |
-| `sech` above $\lvert x \rvert \approx 708$ (float64) or $87$ (float32) | `0` — the true value is subnormal and XLA flushes it |
+| `sech` above $\lvert x \rvert \approx 708$ (float64) or $87$ (float32) | `0` — the true value is subnormal there, and XLA flushes it a little below that too |
 | `polylog(n, z)` with `n > 60` and $\lvert z \rvert \ge 2$ | `nan` — the inversion branch needs $B_{60}$ |
 | `comb` with `k > N`, `k < 0` or `N < 0` | `0` |
 | Any function given `nan` | `nan`, except `comb(nan, k)`, which is `0` as in SciPy |

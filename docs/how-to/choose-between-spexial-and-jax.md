@@ -52,7 +52,7 @@ There is no decision to make for these — JAX has nothing at any version:
 | `k0`, `k1`, `k2` | modified Bessel functions of the second kind |
 | `k0e`, `k1e`, `k2e` | the same, scaled by $e^z$ — **the only ones that work past $z \approx 705$** |
 | `polylog` | the polylogarithm (compare `mpmath.polylog`) |
-| `sech` | the hyperbolic secant, with a gradient that stays finite and accurate where `1 / cosh(x)` gives `nan` (compare `mpmath.sech`) |
+| `sech` | the hyperbolic secant, with a gradient that stays finite and accurate where `1 / cosh(x)` has a `nan` gradient (compare `mpmath.sech`) |
 | `eval_gegenbauer` | Gegenbauer polynomials |
 | `eval_gegenbauers` | every order up to `n` in one pass; no counterpart anywhere |
 | `incomplete_beta` | the **unregularized** $B(a,b,z)$ — `betainc` is the regularized $I_z(a,b)$, and `beta * betainc` is `nan` for $b \le 0$ |

@@ -28,8 +28,9 @@ def _rel(got, true):
 
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16", "float32", "float64"])
 def test_dtype_is_preserved(dtype):
-    """A floating argument keeps its own width."""
+    """A floating argument keeps its own width, and a Python float stays weak."""
     assert sp.sech(jnp.asarray([0.5, 3.0], dtype=dtype)).dtype == jnp.dtype(dtype)
+    assert sp.sech(0.5).weak_type
 
 
 @pytest.mark.parametrize("x", [jnp.asarray([0, 1, 3]), jnp.asarray([True, False]), 2])
@@ -50,10 +51,10 @@ def test_integer_and_bool_input_gives_a_strong_float(x):
 def test_narrow_dtypes_value_and_gradient(dtype, rtol):
     """Float16 and bfloat16 are not widened; both value and gradient are right.
 
-    Measured worst case is 7e-4 and 9e-4 for float16, 4e-3 and 8.5e-3 for
-    bfloat16.
+    Measured worst case over every argument is 1.4e-3 for float16 and 1e-2 for
+    bfloat16, gradient included.
     """
-    for x in (0.25, 1.0, 3.0, -2.0):
+    for x in (0.25, 1.0, 3.0, -2.0, 10.0):
         xj = jnp.asarray(x, dtype=dtype)
         sech_true, grad_true = _true(xj)
         assert _rel(sp.sech(xj), sech_true) < rtol
@@ -62,10 +63,15 @@ def test_narrow_dtypes_value_and_gradient(dtype, rtol):
 
 @pytest.mark.parametrize(
     ("x", "value", "grad"),
-    [(jnp.inf, 0.0, 0.0), (-jnp.inf, 0.0, 0.0), (jnp.nan, jnp.nan, jnp.nan)],
+    [
+        (-0.0, 1.0, 0.0),
+        (jnp.inf, 0.0, 0.0),
+        (-jnp.inf, 0.0, 0.0),
+        (jnp.nan, jnp.nan, jnp.nan),
+    ],
 )
-def test_non_finite_arguments(x, value, grad):
-    """The limits at infinity are 0, in value and gradient, and `nan` stays.
+def test_special_arguments(x, value, grad):
+    """`-0.0` is 0 and the limits at infinity are 0, in value and gradient.
 
     `tanh` saturates, so the gradient at infinity is 0, not `nan`.
     """
@@ -94,7 +100,7 @@ def test_naive_reciprocal_cosh_gradient_is_nan():
     assert jnp.isnan(naive(800.0))
     assert jnp.isnan(naive(jnp.float32(100.0)))
     # ...and it is wrong well before it is `nan`: the denominator has
-    # overflowed, so the gradient is 0 where the true value is 1e-154.
+    # overflowed, so the gradient is 0 where the true value is 3.8e-174.
     assert float(naive(400.0)) == 0.0
 
 
@@ -117,14 +123,15 @@ def test_gradient_is_finite_beyond_where_cosh_overflows(dtype, x):
 
 
 @pytest.mark.parametrize(
-    "x", [1e-12, 1e-8, 1e-6, 1e-3, 0.1, 1.0, 5.0, 30.0, 300.0, 400.0, 700.0]
+    "x",
+    [1e-12, 1e-8, 1e-6, 1e-3, 0.1, 1.0, 5.0, 30.0, 300.0, 400.0, 700.0, 705.0, 708.0],
 )
 def test_gradient_keeps_its_relative_accuracy_float64(x):
     """The hand-written rule has no cancellation near zero.
 
     Differentiating the stable value form directly gives errors of order 1e-4 at
     1e-12 and 1e-10 at 1e-6; this holds the rule to 1e-14 everywhere. Measured
-    worst case is 9.4e-16.
+    worst case is 1.03e-15.
     """
     sech_true, grad_true = _true(x)
     assert _rel(sp.sech(x), sech_true) < 1e-14
@@ -132,9 +139,9 @@ def test_gradient_keeps_its_relative_accuracy_float64(x):
     assert _rel(jax.grad(sp.sech)(-x), -grad_true) < 1e-14
 
 
-@pytest.mark.parametrize("x", [1e-8, 1e-6, 1e-3, 0.1, 1.0, 5.0, 30.0, 80.0])
+@pytest.mark.parametrize("x", [1e-8, 1e-6, 1e-3, 0.1, 1.0, 5.0, 30.0, 80.0, 85.0, 87.0])
 def test_gradient_keeps_its_relative_accuracy_float32(x):
-    """Measured worst case is 3.9e-7 over float32's whole range."""
+    """Measured worst case is 4.4e-7 over float32's whole range."""
     xj = jnp.asarray(x, dtype=jnp.float32)
     sech_true, grad_true = _true(xj)
     assert _rel(sp.sech(xj), sech_true) < 3e-6
@@ -143,20 +150,23 @@ def test_gradient_keeps_its_relative_accuracy_float32(x):
 
 
 @pytest.mark.parametrize("order", [2, 3, 4])
-@pytest.mark.parametrize("x", [0.0, 1e-6, 1e-3, 0.3, 1.0, 4.0])
-def test_higher_derivatives(x, order):
+@pytest.mark.parametrize("x", [-4.0, -1.0, -0.3, -1e-3, 0.0, 1e-6, 1e-3, 0.3, 1.0, 4.0])
+@pytest.mark.parametrize(("dtype", "tol"), [("float64", 1e-14), ("float32", 3e-6)])
+def test_higher_derivatives(x, order, dtype, tol):
     """The rule is written in terms of `sech`, so every order is right.
 
     `x = 0` is the point that matters: a `where(x == 0, ...)` guard in the rule
     would give the right gradient and a wrong second derivative there, and
     AGENTS.md asks for the second and third at any guarded point. The odd orders
-    vanish at zero, so the comparison is absolute there.
+    vanish at zero, so the comparison is absolute there. Measured worst case is
+    4e-16 in float64 and 3e-7 in float32.
     """
+    xj = jnp.asarray(x, dtype=dtype)
     f = sp.sech
     for _ in range(order):
         f = jax.grad(f)
-    true = float(mp.diff(mp.sech, mp.mpf(x), order))
-    np.testing.assert_allclose(f(x), true, rtol=1e-12, atol=1e-12)
+    true = float(mp.diff(mp.sech, mp.mpf(float(xj)), order))
+    np.testing.assert_allclose(f(xj), true, rtol=tol, atol=tol)
 
 
 def test_jit_vmap_grad_agree():
