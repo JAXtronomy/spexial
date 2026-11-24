@@ -941,6 +941,9 @@ def test_a_lane_past_the_range_leaves_the_others_finite():
         (20.0, -5.0, 20.0 / 22.0),  # _large_a, at its split a/(a+2)
         (9.0, -1.0, 9.0 / 11.0),
         (30.0, -2.0, 30.0 / 32.0),  # 1 - split == w0 exactly
+        # An ulp or two above the split, where the tail's sum rounds to <= 0.
+        (12.0, -0.5, 0.8571428571428572),
+        (9.0, -1.0, 0.8181818181818185),
     ],
 )
 def test_mixed_partials_at_the_split(a, b, z):

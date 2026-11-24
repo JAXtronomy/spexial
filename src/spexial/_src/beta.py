@@ -774,23 +774,28 @@ def _split_at(
     At :math:`z = 0` the term is a genuine zero; ``log(0)`` is kept out of it,
     so that no ``0 * -inf`` reaches the parameter derivatives.
     """
-    # The split itself, and any z whose tail 1 - z rounds to no length (or one
-    # ulp of negative length), go to the fraction: there the tail's value is 0
-    # and its tangent with it, while the fraction was held at the split, so
-    # d/dz d/da and d/dz d/db came out 0 at z = 1/2 for (2, -20), not -7.3e5.
-    below = (z <= split) | (1.0 - z >= w0)
     pole = (z == 1.0) & (b <= 0)
+    above = z > split
+    w = jnp.where(above, 1.0 - z, w0)
+    tail = _expand_from(a, b, w, w0, wide_b=True)
+    # A point whose tail is not positive goes to the fraction, at z itself:
+    # the first ulps above the split, where the tail's alternating sum rounds
+    # to 0 or below. There its value and tangent are 0, while the fraction is
+    # held at the split, so d/dz d/da and d/dz d/db came out 0 -- an ulp above
+    # 12/14 at (12, -0.5). The fraction converges there: past the split, but
+    # below its own switch point. Not the pole (z = 1, b <= 0), which keeps its
+    # own handling below: at the fraction its log(1 - z) put `nan` into the
+    # batch's shared a/b gradients. The tail is the one computed for the sum.
+    above = above & ((jax.lax.stop_gradient(tail) > 0) | pole)
     at_0 = z == 0
     # At z = 0, a point below the split where z^a (1-z)^b cannot overflow
     # (|b| x <= 1/2): at the split itself (1 - s)^b overflowed for very negative
     # b, and its masked `inf` made the gradients `nan`.
     x_at_0 = 0.5 * split / (1.0 + jnp.abs(b))
-    xs = jnp.where(at_0, x_at_0, jnp.where(below, z, split))
+    xs = jnp.where(at_0, x_at_0, jnp.where(above, split, z))
     term = _exp_of_log_term(ft.partial(_fraction_parts, steps=steps), a, b, xs)
     direct = jnp.where(at_0, 0.0, term)
-    w = jnp.where(below, w0, 1.0 - z)
-    tail = _expand_from(a, b, w, w0, wide_b=True)
-    total = direct + jnp.where(below, 0.0, tail)
+    total = direct + jnp.where(above, tail, 0.0)
     # Past the float range the value is `inf` and its tangent 0, as at the pole.
     # The tail's own tangent is 0 there, but the fraction's, at the split, is
     # finite and passed through the sum: the a- and b-gradients at (2, -300,
