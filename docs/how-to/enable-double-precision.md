@@ -1,6 +1,6 @@
 # How to enable double precision
 
-JAX creates 32-bit arrays by default. `spexial`'s accuracy figures all assume 64-bit, so turn double precision on before you create any array.
+JAX creates 32-bit arrays by default. `spexial`'s accuracy figures assume 64-bit (all but `sech`'s, which hold in float32 as well), so turn double precision on before you create any array.
 
 ## In a script or notebook
 

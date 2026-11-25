@@ -31,7 +31,7 @@
 
 - Functions are pure and JAX-transformable: `jit`, `vmap`, `grad`.
 - Out-of-domain _array_ inputs return `nan`/`inf` rather than raising -- traced code cannot raise. A static Python parameter can still be validated eagerly, and is: `polylog` raises `ValueError` for a non-integer or non-positive order. See [About domain edges](../explanation/edges.md).
-- Double precision is assumed. Accuracy claims hold with `jax_enable_x64`.
+- Double precision is assumed. Accuracy claims hold with `jax_enable_x64`, and for `sech` without it as well.
 
 ## Docstrings
 

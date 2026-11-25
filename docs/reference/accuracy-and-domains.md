@@ -2,7 +2,7 @@
 
 The supported input domain and measured accuracy of every public function. This page is the canonical home for these facts; other pages link here rather than restating them.
 
-Every function is tested against a reference implementation — `scipy.special` where a counterpart exists, `mpmath` where it does not. All entries assume double precision ([how to enable it](../how-to/enable-double-precision.md)).
+Every function is tested against a reference implementation — `scipy.special` where a counterpart exists, `mpmath` where it does not. All entries assume double precision ([how to enable it](../how-to/enable-double-precision.md)), except `sech`, whose figures hold in float32 as well.
 
 ## Functions
 
