@@ -32,7 +32,7 @@ pip install spexial
 
 - **[Explanation](explanation/index.md)**
 
-  Why double precision is mandatory, why bad input returns `nan`, and why one gradient lies.
+  Why double precision is mandatory (`sech` excepted), why bad input returns `nan`, and why one gradient lies.
 
 </div>
 

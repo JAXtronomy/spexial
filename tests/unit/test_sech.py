@@ -60,6 +60,9 @@ def test_integer_and_bool_input_gives_a_strong_float(x):
     assert not got.weak_type
     want = [float(mp.sech(mp.mpf(float(v)))) for v in np.ravel(np.asarray(x))]
     np.testing.assert_allclose(np.ravel(got), want, rtol=1e-14)
+    # The conversion must also work while tracing.
+    assert jax.jit(sp.sech)(x).dtype == jnp.result_type(float)
+    assert jax.vmap(sp.sech)(jnp.atleast_1d(x)).dtype == jnp.result_type(float)
 
 
 def test_integer_input_without_x64_is_a_strong_float32():
@@ -94,6 +97,7 @@ def test_shapes():
     np.testing.assert_allclose(sp.sech(x), 1 / np.cosh(np.asarray(x)), rtol=1e-14)
 
 
+@pytest.mark.parametrize("dtype", ["float16", "bfloat16", "float32", "float64"])
 @pytest.mark.parametrize(
     ("x", "value", "grad"),
     [
@@ -103,16 +107,38 @@ def test_shapes():
         (jnp.nan, jnp.nan, jnp.nan),
     ],
 )
-def test_special_arguments(x, value, grad):
+def test_special_arguments(x, value, grad, dtype):
     """`sech(-0.0)` is 1, the limits at infinity are 0, and `nan` stays.
 
-    `tanh` saturates, so the gradient at infinity is 0, not `nan`.
+    `tanh` saturates, so the gradient at infinity is 0, not `nan`. Compared as
+    float64, because `np.testing` mishandles a bfloat16 `nan`.
     """
-    np.testing.assert_array_equal(sp.sech(x), value)
-    np.testing.assert_array_equal(jax.grad(sp.sech)(x), grad)
-    xa = jnp.asarray(x)
+    xa = jnp.asarray(x, dtype=dtype)
     _, tangent = jax.jvp(sp.sech, (xa,), (jnp.ones_like(xa),))
-    np.testing.assert_array_equal(tangent, grad)
+    for got, want in (
+        (sp.sech(xa), value),
+        (jax.grad(sp.sech)(xa), grad),
+        (tangent, grad),
+    ):
+        np.testing.assert_array_equal(np.asarray(got, dtype=float), want)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "x"),
+    [
+        ("float16", 12.0),
+        ("float16", -800.0),
+        ("bfloat16", 100.0),
+        ("bfloat16", -800.0),
+    ],
+)
+def test_half_dtype_second_derivative_vanishes_beyond_overflow(dtype, x):
+    """Past the overflow of `exp(|x|)` the second derivative is 0, not `nan`.
+
+    The overflow is at 11.09 in float16 and 88.7 in bfloat16.
+    """
+    xj = jnp.asarray(x, dtype=dtype)
+    assert float(jax.grad(jax.grad(sp.sech))(xj)) == 0.0
 
 
 @pytest.mark.parametrize(
@@ -120,13 +146,21 @@ def test_special_arguments(x, value, grad):
     [
         (jnp.asarray([1.0 + 1.0j, 2.0], dtype="complex64"), "complex64"),
         (jnp.asarray([1.0 + 1.0j, 2.0], dtype="complex128"), "complex128"),
+        (jnp.asarray([2.0 + 0.0j], dtype="complex128"), "complex128"),
         (1.0 + 1.0j, "complex128"),
+        (1.0 + 0.0j, "complex128"),
     ],
 )
 def test_complex_input_is_rejected(x, dtype):
-    """`|x|` is not analytic: complex input would return sech of the modulus."""
+    """`|x|` is not analytic: complex input would return sech of the modulus.
+
+    Rejected by dtype, so a zero imaginary part is rejected too, and the same
+    `ValueError` is raised while tracing.
+    """
     with pytest.raises(ValueError, match=f"real x, got dtype {dtype}"):
         sp.sech(x)
+    with pytest.raises(ValueError, match=f"real x, got dtype {dtype}"):
+        jax.jit(sp.sech)(x)
 
 
 # ---------------------------------------------------------------------------
