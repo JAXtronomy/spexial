@@ -59,7 +59,7 @@ def test_integer_and_bool_input_gives_a_strong_float(x):
     assert got.dtype == jnp.result_type(float)
     assert not got.weak_type
     want = [float(mp.sech(mp.mpf(float(v)))) for v in np.ravel(np.asarray(x))]
-    np.testing.assert_allclose(np.ravel(got), want, rtol=1e-14)
+    np.testing.assert_allclose(np.ravel(got), want, rtol=4e-15)
     # The conversion must also work while tracing.
     assert jax.jit(sp.sech)(x).dtype == jnp.result_type(float)
     assert jax.vmap(sp.sech)(jnp.atleast_1d(x)).dtype == jnp.result_type(float)
@@ -94,7 +94,7 @@ def test_shapes():
     """Empty and N-d arrays keep their shape and are evaluated elementwise."""
     assert sp.sech(jnp.zeros((0, 3))).shape == (0, 3)
     x = jnp.linspace(-3.0, 3.0, 24).reshape(2, 3, 4)
-    np.testing.assert_allclose(sp.sech(x), 1 / np.cosh(np.asarray(x)), rtol=1e-14)
+    np.testing.assert_allclose(sp.sech(x), 1 / np.cosh(np.asarray(x)), rtol=4e-15)
 
 
 @pytest.mark.parametrize("dtype", ["float16", "bfloat16", "float32", "float64"])
@@ -249,15 +249,20 @@ _GRIDS = {
 }
 
 
+@pytest.mark.parametrize("wrap", [lambda f: f, jax.jit], ids=["eager", "jit"])
 @pytest.mark.parametrize("dtype", list(_GRIDS))
-def test_value_and_gradient_over_the_whole_range(dtype):
-    """A dense grid, both signs, so an error confined to a sub-range cannot hide."""
+def test_value_and_gradient_over_the_whole_range(dtype, wrap):
+    """A dense grid, both signs, so an error confined to a sub-range cannot hide.
+
+    Run eagerly and under `jax.jit`, since a regression can exist only while
+    tracing, where XLA also decides what to flush.
+    """
     lo, hi, rtol = _GRIDS[dtype]
     tiny = float(jnp.finfo(dtype).tiny)
     pos = np.concatenate([np.geomspace(lo, 1.0, 40), np.linspace(1.0, hi, 300)])
     xj = jnp.asarray(np.concatenate([pos, -pos]), dtype=dtype)
-    value = sp.sech(xj)
-    grad = jax.vmap(jax.grad(sp.sech))(xj)
+    value = wrap(sp.sech)(xj)
+    grad = wrap(jax.vmap(jax.grad(sp.sech)))(xj)
     for xi, v, g in zip(xj, value, grad, strict=True):
         sech_true, grad_true = _true(xi)
         if abs(sech_true) >= 2 * tiny:
@@ -309,7 +314,7 @@ def test_forward_mode_matches_reverse():
     t = jnp.linspace(0.5, 2.0, 61)
     _, tangent = jax.jvp(sp.sech, (x,), (t,))
     reverse = jax.vmap(jax.grad(sp.sech))(x) * t
-    np.testing.assert_allclose(tangent, reverse, rtol=1e-14)
+    np.testing.assert_allclose(tangent, reverse, rtol=4e-15)
 
 
 @pytest.mark.parametrize(
@@ -410,10 +415,10 @@ def test_jit_vmap_grad_agree():
     """The usual transforms compose and agree with the eager value."""
     x = jnp.linspace(-30.0, 30.0, 61)
     eager = sp.sech(x)
-    np.testing.assert_allclose(jax.jit(sp.sech)(x), eager, rtol=1e-14)
-    np.testing.assert_allclose(jax.vmap(sp.sech)(x), eager, rtol=1e-14)
+    np.testing.assert_allclose(jax.jit(sp.sech)(x), eager, rtol=4e-15)
+    np.testing.assert_allclose(jax.vmap(sp.sech)(x), eager, rtol=4e-15)
     g = jax.vmap(jax.grad(sp.sech))(x)
-    np.testing.assert_allclose(g, -eager * np.tanh(np.asarray(x)), rtol=1e-14)
+    np.testing.assert_allclose(g, -eager * np.tanh(np.asarray(x)), rtol=4e-15)
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +436,8 @@ def test_jit_vmap_grad_agree():
         ("bfloat16", 88.0, 2e-2),
     ],
 )
-def test_value_just_above_the_smallest_normal_is_not_flushed(dtype, x, rtol):
+@pytest.mark.parametrize("wrap", [lambda f: f, jax.jit], ids=["eager", "jit"])
+def test_value_just_above_the_smallest_normal_is_not_flushed(dtype, x, rtol, wrap):
     """The true value is between `tiny` and `2 tiny` here, and is returned.
 
     A form built on `exp(-|x|)` has a subnormal intermediate there, which XLA
@@ -445,8 +451,8 @@ def test_value_just_above_the_smallest_normal_is_not_flushed(dtype, x, rtol):
     tiny = float(jnp.finfo(dtype).tiny)
     sech_true, grad_true = _true(xj)
     assert tiny <= sech_true < 2 * tiny
-    assert _rel(sp.sech(xj), sech_true) < rtol
-    assert _rel(jax.grad(sp.sech)(xj), grad_true) < rtol
+    assert _rel(wrap(sp.sech)(xj), sech_true) < rtol
+    assert _rel(wrap(jax.grad(sp.sech))(xj), grad_true) < rtol
 
 
 @pytest.mark.parametrize(("dtype", "x"), [("float64", 1e-310), ("float32", 1e-40)])

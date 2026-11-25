@@ -20,6 +20,9 @@ from .custom_types import AnyArray, AnyArrayLike
 def sech(x: AnyArrayLike, /) -> AnyArray:
     r"""Compute the hyperbolic secant :math:`\mathrm{sech}(x) = 1/\cosh(x)`.
 
+    There is no `scipy.special` counterpart; `mpmath.sech` is the reference the
+    test suite uses.
+
     Written ``1 / jnp.cosh(x)`` the value is only good to about :math:`5\times10^{-14}`
     in float64 and the gradient is `nan` from :math:`|x| \approx 710` (89 in
     float32), and wrong before that. This evaluates :math:`2/(e + 1/e)` with
