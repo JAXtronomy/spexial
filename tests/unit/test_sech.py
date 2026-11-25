@@ -110,6 +110,9 @@ def test_special_arguments(x, value, grad):
     """
     np.testing.assert_array_equal(sp.sech(x), value)
     np.testing.assert_array_equal(jax.grad(sp.sech)(x), grad)
+    xa = jnp.asarray(x)
+    _, tangent = jax.jvp(sp.sech, (xa,), (jnp.ones_like(xa),))
+    np.testing.assert_array_equal(tangent, grad)
 
 
 @pytest.mark.parametrize(
@@ -153,6 +156,7 @@ def test_naive_reciprocal_cosh_gradient_is_nan():
         ("float32", 1e30),
         ("float16", 17.0),
         ("float16", 1e3),
+        ("bfloat16", 88.5),
         ("bfloat16", 89.0),
         ("bfloat16", 1e3),
     ],
@@ -285,6 +289,7 @@ def test_forward_mode_matches_reverse():
         ("float32", 1e3),
         ("float16", 12.0),
         ("float16", 1e3),
+        ("bfloat16", 88.5),
         ("bfloat16", 89.0),
         ("bfloat16", 1e3),
     ],
@@ -320,8 +325,22 @@ def test_forward_mode_matches_reverse_whole_range(dtype, hi):
     reverse = jax.vmap(jax.grad(sp.sech))(x) * t
     eps = float(jnp.finfo(dtype).eps)
     np.testing.assert_allclose(
-        np.asarray(forward, float), np.asarray(reverse, float), rtol=8 * eps, atol=0
+        np.asarray(forward, float), np.asarray(reverse, float), rtol=4 * eps, atol=0
     )
+
+
+@pytest.mark.parametrize("x", [10.5, 11.0])
+def test_float16_gradient_in_the_subnormal_band(x):
+    """The float16 result is a subnormal between 10.4 and 11.09, and so is its gradient.
+
+    Compared absolutely, to the spacing of float16 subnormals (6e-8), in both
+    reverse and forward mode.
+    """
+    xj = jnp.asarray(x, dtype="float16")
+    _, grad_true = _true(xj)
+    assert abs(float(jax.grad(sp.sech)(xj)) - float(grad_true)) < 2e-7
+    _, tangent = jax.jvp(sp.sech, (xj,), (jnp.asarray(1.0, dtype="float16"),))
+    assert abs(float(tangent) - float(grad_true)) < 2e-7
 
 
 def test_float16_overflow_edge():
