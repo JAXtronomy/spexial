@@ -69,9 +69,9 @@ def test_integer_input_without_x64_is_a_strong_float32():
     float64 would be identical under the suite and wrong here.
     """
     script = (
+        "import jax.numpy as jnp, spexial as sp\n"
         "import warnings\n"
         "warnings.simplefilter('error')\n"
-        "import jax.numpy as jnp, spexial as sp\n"
         "for x in (2, jnp.asarray([0, 1, 3]), jnp.asarray([True, False])):\n"
         "    out = sp.sech(x)\n"
         "    print(out.dtype, out.weak_type)\n"
@@ -92,21 +92,6 @@ def test_shapes():
     assert sp.sech(jnp.zeros((0, 3))).shape == (0, 3)
     x = jnp.linspace(-3.0, 3.0, 24).reshape(2, 3, 4)
     np.testing.assert_allclose(sp.sech(x), 1 / np.cosh(np.asarray(x)), rtol=1e-14)
-
-
-@pytest.mark.parametrize(("dtype", "rtol"), [("float16", 5e-3), ("bfloat16", 2e-2)])
-def test_narrow_dtypes_value_and_gradient(dtype, rtol):
-    """Float16 and bfloat16 are not widened; both value and gradient are right.
-
-    Measured worst case, over every argument where the result is at least
-    `2 tiny`, is about 1.4e-3 for float16 and 1e-2 for bfloat16, gradient
-    included.
-    """
-    for x in (0.25, 1.0, 3.0, -2.0, 10.0):
-        xj = jnp.asarray(x, dtype=dtype)
-        sech_true, grad_true = _true(xj)
-        assert _rel(sp.sech(xj), sech_true) < rtol
-        assert _rel(jax.grad(sp.sech)(xj), grad_true) < rtol
 
 
 @pytest.mark.parametrize(
@@ -173,7 +158,7 @@ def test_naive_reciprocal_cosh_gradient_is_nan():
     ],
 )
 def test_beyond_underflow_value_and_gradient_vanish(dtype, x):
-    """Past where the value is subnormal, value and gradient are 0, not just finite.
+    """Past where the value is subnormal, value and gradient vanish, not just finite.
 
     `1 / cosh` has a `nan` gradient from ~710 (float64) and ~89 (float32).
     """
@@ -215,6 +200,9 @@ def test_gradient_keeps_its_relative_accuracy_float32(x):
 
 # Per dtype: the range in |x| to test over (points whose true result is below
 # `2 tiny` are skipped), and the tolerance, a few times the measured worst case.
+# That worst case, for value and gradient together, is about 1.1e-15 in float64,
+# 4.4e-7 in float32, 1.4e-3 in float16 and 1e-2 in bfloat16. The last two are
+# computed in their own width, not widened.
 _GRIDS = {
     "float64": (1e-300, 709.0, 4e-15),
     "float32": (1e-30, 88.0, 1e-6),
@@ -295,10 +283,14 @@ def test_forward_mode_matches_reverse():
         ("float32", 88.5),
         ("float32", 100.0),
         ("float32", 1e3),
+        ("float16", 12.0),
+        ("float16", 1e3),
+        ("bfloat16", 89.0),
+        ("bfloat16", 1e3),
     ],
 )
 def test_forward_mode_beyond_underflow(dtype, x):
-    """`jvp` beyond where `exp(|x|)` overflows gives 0, for both signs.
+    """`jvp` beyond where the value underflows gives 0, for both signs.
 
     Reverse mode cannot see a term of the rule that does not depend on the
     tangent, so a constant or `nan` substituted there needs forward mode.
@@ -309,6 +301,39 @@ def test_forward_mode_beyond_underflow(dtype, x):
     value, tangent = jax.jvp(sp.sech, (xj,), (t,))
     assert np.all(np.abs(np.asarray(value)) <= tiny)
     assert np.all(np.abs(np.asarray(tangent)) <= tiny)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "hi"),
+    [("float64", 709.0), ("float32", 88.0), ("float16", 10.3), ("bfloat16", 87.0)],
+)
+def test_forward_mode_matches_reverse_whole_range(dtype, hi):
+    """`jvp` and `grad` agree over each dtype's whole range, both signs.
+
+    Reverse mode transposes away any term of the rule that does not depend on
+    the tangent, so an error confined to forward mode in a sub-range needs this.
+    """
+    pos = np.concatenate([np.geomspace(1e-3, 1.0, 40), np.linspace(1.0, hi, 400)])
+    x = jnp.asarray(np.concatenate([-pos, pos]), dtype=dtype)
+    t = jnp.asarray(np.linspace(0.5, 2.0, x.size), dtype=dtype)
+    _, forward = jax.jvp(sp.sech, (x,), (t,))
+    reverse = jax.vmap(jax.grad(sp.sech))(x) * t
+    eps = float(jnp.finfo(dtype).eps)
+    np.testing.assert_allclose(
+        np.asarray(forward, float), np.asarray(reverse, float), rtol=8 * eps, atol=0
+    )
+
+
+def test_float16_overflow_edge():
+    """Float16 is computed in its own width: `exp(|x|)` overflows at 11.09.
+
+    So the result is a subnormal until then and 0 from there, in both signs,
+    where computing in float32 and rounding back would return the subnormal
+    out to 16.6. Recorded in `docs/reference/accuracy-and-domains.md`.
+    """
+    for sign in (1.0, -1.0):
+        assert float(sp.sech(jnp.asarray(sign * 11.0, dtype="float16"))) > 0
+        assert float(sp.sech(jnp.asarray(sign * 11.2, dtype="float16"))) == 0
 
 
 def test_float64_moderate_range():
@@ -356,7 +381,8 @@ def test_value_just_above_the_smallest_normal_is_not_flushed(dtype, x, rtol):
     """The true value is between `tiny` and `2 tiny` here, and is returned.
 
     A form built on `exp(-|x|)` has a subnormal intermediate there, which XLA
-    flushes to give 0. `2 / (e + 1/e)` with `e = exp(|x|)` flushes no result:
+    flushes to give 0 (in float64, float32 and bfloat16). `2 / (e + 1/e)` with
+    `e = exp(|x|)` flushes no result:
     its one subnormal intermediate, `1/e`, is added to a far larger `e`. The
     last two points of the first two dtypes sit within 1% of the cut-off, so a
     guard that zeroes the result slightly early fails here.
