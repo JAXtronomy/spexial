@@ -1,8 +1,9 @@
 """The hyperbolic secant, with a gradient that stays finite and accurate.
 
 Neither NumPy, `jax.numpy` nor `scipy.special` has `sech`, so it is usually
-written ``1 / jnp.cosh(x)``. That is right in value but not in gradient; see
-`sech` for what goes wrong and what this does instead.
+written ``1 / jnp.cosh(x)``. That is only good to about 5e-14 in value and has
+a gradient that is wrong or `nan` at large `x`; see `sech` for what goes wrong
+and what this does instead.
 """
 
 __all__ = ["sech"]

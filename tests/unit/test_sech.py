@@ -321,7 +321,8 @@ def test_forward_mode_matches_reverse_whole_range(dtype, hi):
     pos = np.concatenate([np.geomspace(1e-3, 1.0, 40), np.linspace(1.0, hi, 400)])
     x = jnp.asarray(np.concatenate([-pos, pos]), dtype=dtype)
     t = jnp.asarray(np.linspace(0.5, 2.0, x.size), dtype=dtype)
-    _, forward = jax.jvp(sp.sech, (x,), (t,))
+    primal, forward = jax.jvp(sp.sech, (x,), (t,))
+    np.testing.assert_array_equal(primal, sp.sech(x))
     reverse = jax.vmap(jax.grad(sp.sech))(x) * t
     eps = float(jnp.finfo(dtype).eps)
     np.testing.assert_allclose(
@@ -348,7 +349,7 @@ def test_float16_overflow_edge():
 
     So the result is a subnormal until then and 0 from there, in both signs,
     where computing in float32 and rounding back would return the subnormal
-    out to 16.6. Recorded in `docs/reference/accuracy-and-domains.md`.
+    out to about 18. Recorded in `docs/reference/accuracy-and-domains.md`.
     """
     for sign in (1.0, -1.0):
         assert float(sp.sech(jnp.asarray(sign * 11.0, dtype="float16"))) > 0
@@ -401,10 +402,10 @@ def test_value_just_above_the_smallest_normal_is_not_flushed(dtype, x, rtol):
 
     A form built on `exp(-|x|)` has a subnormal intermediate there, which XLA
     flushes to give 0 (in float64, float32 and bfloat16). `2 / (e + 1/e)` with
-    `e = exp(|x|)` flushes no result:
-    its one subnormal intermediate, `1/e`, is added to a far larger `e`. The
-    last two points of the first two dtypes sit within 1% of the cut-off, so a
-    guard that zeroes the result slightly early fails here.
+    `e = exp(|x|)` flushes no result: its one subnormal intermediate, `1/e`, is
+    added to a far larger `e`. The second point of each of the first two dtypes
+    sits within 1% of the cut-off, so a guard that zeroes the result slightly
+    early fails here.
     """
     xj = jnp.asarray(x, dtype=dtype)
     tiny = float(jnp.finfo(dtype).tiny)
