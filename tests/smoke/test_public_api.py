@@ -26,6 +26,7 @@ _ORIGINS = {
     "sph_harm_y_cart_all": "spexial._src.sph_harm",
     "sph_harm_y_cart_all_terms": "spexial._src.sph_harm",
     "sph_legendre_p": "spexial._src.sph_harm",
+    "sech": "spexial._src.sech",
     "spence": "spexial._src.spence",
     "spherical_jn": "spexial._src.spherical_bessel",
     "spherical_jn_all": "spexial._src.spherical_bessel",
@@ -93,7 +94,8 @@ def test_src_modules_declare_all():
 
 
 def test_module_docstring_flags_the_non_scipy_exports():
-    """The package docstring names the two exports scipy has no counterpart for."""
+    """The package docstring names exports scipy has no counterpart for."""
     assert sp.__doc__ is not None
     assert "`polylog`" in sp.__doc__
     assert "`eval_gegenbauers`" in sp.__doc__
+    assert "`sech`" in sp.__doc__

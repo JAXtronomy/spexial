@@ -32,6 +32,7 @@ import spexial as sp
 | `k0(z)`, `k1(z)`, `k2(z)` | `k0`, `k1`, `kn` | modified Bessel, 2nd kind |
 | `k0e(z)`, `k1e(z)`, `k2e(z)` | `k0e`, `k1e`, `kve` | the same, scaled by `e^z`; **the only ones that work past `z = 705`** |
 | `polylog(n, z)` | -- | polylogarithm |
+| `sech(x)` | -- | `1 / cosh(x)` with a finite, accurate gradient; real only |
 | `zeta(n)` | `zeta` | handles negative integers |
 
 ## Enable x64 before anything else
@@ -42,7 +43,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 ```
 
-These are series and asymptotic expansions. In float32 the accuracy figures below are meaningless — you will lose most of your digits to the accumulation, not the algorithm. Set this at program start, before any array is created.
+Most of these are series and asymptotic expansions. In float32 the accuracy figures below are meaningless — you will lose most of your digits to the accumulation, not the algorithm. (`sech` is the exception: it is a closed form and meets its figures in float32.) Set this at program start, before any array is created.
 
 ## The traps
 
@@ -53,6 +54,8 @@ These are series and asymptotic expansions. In float32 the accuracy figures belo
 **`jax.grad(zeta)` is only meaningful for `n > 1`.** The negative line is evaluated from a Bernoulli table, so the derivative reported there is finite but is not `ζ'`. It will not warn you.
 
 **`gamma` returns `nan` at the negative integers.** It delegates to `jax.scipy.special.gamma`, so `x = 0` gives `inf` but every negative integer gives `nan` — the two-sided limit does not exist, and this matches JAX and scipy from 1.18. Complex input works on jax >= 0.10.2. Accuracy is ~`4e-13` throughout, including close to the poles.
+
+**`sech` is real-only.** A complex argument raises `ValueError`. Its gradient is finite for every real `x` and accurate until it underflows (above about 709 in float64), where `1 / jnp.cosh(x)` has a `nan` gradient from about 710.
 
 **`polylog` broadcasts over `z`.** Call it directly on an array; `jax.vmap` also works and agrees exactly:
 
@@ -88,4 +91,5 @@ Everything below assumes x64. Full detail, including how each was measured, is a
 | `k0`/`k1`/`k2` | `0 < z < 705.3` (float64; 85.3 in float32, 16.2 in float16) | `2.0e-7` |
 | `k0e`/`k1e`/`k2e` | `z > 0`, no upper limit | `2.0e-7` |
 | `polylog` | `n >= 1` | `7.7e-12` |
+| `sech` | real `x`; the value is normal to `\|x\| < 709` (88 in float32, 10.4 in float16) | `1.1e-15` (float64), `4.4e-7` (float32) |
 | `zeta` | `n > 1`, or negative integer `> -60` | `7e-16` |

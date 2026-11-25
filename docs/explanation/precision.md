@@ -6,7 +6,7 @@ JAX defaults to 32-bit floats, and for the workload JAX was built for — traini
 
 ## Where the digits go
 
-A float32 number carries about seven decimal digits. That sounds like plenty until you look at how these functions are actually evaluated. None of them has a closed form you can just apply; each is a sum, a recurrence, or a reflection:
+A float32 number carries about seven decimal digits. That sounds like plenty until you look at how these functions are actually evaluated. Most of them have no closed form you can just apply; each is a sum, a recurrence, or a reflection:
 
 - `k0` sums thirty terms of an ascending series below $z = 9$, and ten terms of an asymptotic expansion above it.
 - `gamma` evaluates a Lanczos series, and for $x < 1/2$ divides by $\sin(\pi x)$ first.
@@ -14,7 +14,7 @@ A float32 number carries about seven decimal digits. That sounds like plenty unt
 
 Every one of those operations is an opportunity to lose low-order bits, and the losses accumulate rather than cancel. A thirty-term sum whose terms alternate in sign can shed several digits to cancellation alone. Start with seven and you may finish with three — and you will not be told. That is the part that makes float32 dangerous here rather than merely imprecise: the answer comes back looking exactly like a good answer.
 
-The accuracy figures in [Accuracy and domains](../reference/accuracy-and-domains.md) are all measured in double precision. In float32 they do not merely degrade proportionally; they stop meaning anything, because the error is dominated by the arithmetic rather than by the algorithm the figure describes.
+The accuracy figures in [Accuracy and domains](../reference/accuracy-and-domains.md) are all measured in double precision. In float32 they do not merely degrade proportionally; they stop meaning anything, because the error is dominated by the arithmetic rather than by the algorithm the figure describes. The exception is `sech`, a closed form with nothing to accumulate, which meets its stated figures in float32 too.
 
 ## Why it is a global switch and not an argument
 

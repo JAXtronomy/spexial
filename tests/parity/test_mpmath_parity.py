@@ -5,8 +5,8 @@ SciPy and `spexial` are both float64 implementations of the same formulae, and
 where they agree it is sometimes because they agree on the same approximation
 rather than on the truth. `mpmath` is arbitrary-precision and independent, so
 it is ground truth rather than a second opinion -- and it is the only reference
-available at all for `polylog`, and the only usable one in the tails, where SciPy's
-own `kn` underflows to zero while the true value is still finite.
+available at all for `polylog` and `sech`, and the only usable one in the tails,
+where SciPy's own `kn` underflows to zero while the true value is still finite.
 
 The tolerances below are therefore not the same numbers as in the SciPy suite:
 they are `spexial`'s *actual* accuracy, measured against the truth. Two of them
@@ -334,3 +334,19 @@ def test_eval_gegenbauers(n, alpha, x):
         rtol=1e-10,
         atol=max(1e-11, 1e-13 * _recurrence_scale(n, alpha, x)),
     )
+
+
+# ---------------------------------------------------------------------------
+# sech
+#
+# Not a `scipy.special` function. Value only, for |x| < 700; the unit tests reach
+# the underflow edge at ~709.
+# The gradient is in `tests/unit/test_sech.py`, which reaches 1e-12 where a draw
+# over this range almost never does.
+
+
+@_SLOW
+@given(x=floats(-700.0, 700.0))
+def test_sech_value(x):
+    """Worst found 4.1e-16 relative."""
+    np.testing.assert_allclose(sp.sech(x), _ref(mp.sech, x), rtol=4e-15)
