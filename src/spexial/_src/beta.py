@@ -319,10 +319,7 @@ def _expand_parts(
     if w0_factor is not None:
         near = w0_factor * near
     near_at_0 = near_coeff * near_w0_m / jnp.where(near_s == 0, 1.0, near_s)
-    scaled = total + jnp.where(at_0, near_at_0, near)
-    # At w = w0 the integral is exactly 0, but the sum leaves a rounding residue
-    # (3e-28 at a = 50, b = -250), which the scale (e^814 there) overflowed.
-    return log_scale, jnp.where(w == w0, 0.0, scaled)
+    return log_scale, total + jnp.where(at_0, near_at_0, near)
 
 
 _CF_FROM = 10.0
@@ -488,12 +485,9 @@ def _large_b(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
 
 def _series(a: ScalarLike, b: ScalarLike, z: AnyArray, /) -> AnyArray:
     """$B(a, b, z)$ by `_small_z` and `_large_z`, switched at $z = 1/2$."""
-    # For b <= 0 the integral diverges at z = 1: a genuine pole, +inf (GH-67).
-    # `_large_z` cannot see it -- at w = 1 - z = 0 its expansion is `inf - inf`
-    # -- so the pole is returned directly, and the series is handed a harmless
-    # z there, so that its `nan` cannot reach a cotangent through the `where`.
+    # For b <= 0 the integral diverges at z = 1, a genuine pole (GH-67), and is
+    # returned as inf directly.
     pole = (z == 1.0) & (b <= 0)
-    z = jnp.where(pole, 0.5, z)
     # Both branches are evaluated, so clamp each one's input to the range where
     # it is well behaved; `where` then discards the unused value. Clamped by
     # `where`, not `minimum`/`maximum`: those split the derivative at a tie,
@@ -1051,11 +1045,11 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
     :math:`b < -5`).
 
     The tests check those three methods against mpmath in float64: to rtol
-    :math:`10^{-12}` for :math:`b \in (10, 100]` and for :math:`a \in (8, 50]`
+    :math:`10^{-12}` for :math:`b \in (10, 100]` and for :math:`a \in [12, 50]`
     with :math:`b \ge 0.1`, :math:`5 \times 10^{-13}` for
     :math:`a \in [12, 100]` with :math:`b \in [-50, 0.1)`,
     :math:`2 \times 10^{-12}` for :math:`a \le 8` with
-    :math:`b \in [-1100, -5)`, and :math:`10^{-11}` for :math:`b` up to
+    :math:`b \in [-1100, -5.5]`, and :math:`10^{-11}` for :math:`b` up to
     :math:`10^4`, beyond which rounding grows like :math:`b\,\epsilon`. In the
     series regime they assert :math:`10^{-11}`, about how closely the two
     series meet at :math:`z = 1/2`. The full table is in the
@@ -1122,13 +1116,15 @@ def incomplete_beta(a: ScalarLike, b: ScalarLike, z: AnyArrayLike, /) -> AnyArra
             raise TypeError(msg)
         # Promoted as on the other paths, so a strong lower-precision `b` is
         # cast up rather than running the closed form in its precision.
-        _, b, z = _promote(a, b, z)
+        a, b, z = _promote(a, b, z)
+        if not isinstance(a, float) and not a.weak_type:
+            z = z.astype(z.dtype)  # a strong `a` makes the result strong, as elsewhere
         out_dtype = z.dtype
         if jnp.dtype(out_dtype).itemsize < 4:
             # Half precision in float32, rounded once, as on the other paths:
             # in bfloat16 the closed form was 4% off at (-10, 0.6).
             f32 = jnp.float32
-            b32 = b if isinstance(b, int | float) else jnp.asarray(b, f32)
+            b32 = b if isinstance(b, float) else jnp.asarray(b, f32)
             return _a_eq_1_core(b32, z.astype(f32)).astype(out_dtype)
         return _a_eq_1_core(b, z)
     # The branch is chosen from the arguments as given -- before the promotion

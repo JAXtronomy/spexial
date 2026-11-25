@@ -125,9 +125,9 @@ def test_large_b_parameter_derivatives(a, b, z):
 def test_vmap_over_b_across_the_switch_has_finite_gradients():
     """Under `vmap` the `switch` becomes a `select` and every branch runs.
 
-    Each is handed a ``b`` it is safe for, so the unselected one -- the series
-    at ``b = 1e4``, or the reflection at ``b <= 0`` -- cannot put a non-finite
-    value where autodiff multiplies it by a zero cotangent.
+    The batched `switch` selects each lane's cotangent after the branches'
+    transposes, so an unselected branch's `nan` -- the series at ``b = 1e4``,
+    or the reflection at ``b <= 0`` -- must not reach the gradients.
     """
     bs = jnp.asarray([-2.0, 0.0, 5.0, 10.0, 10.5, 300.0, 1e4])
     f = lambda b: sp.incomplete_beta(2.0, b, jnp.asarray(0.3))
@@ -136,7 +136,7 @@ def test_vmap_over_b_across_the_switch_has_finite_gradients():
     # statically, a different compilation of the same arithmetic, and the two
     # differ by more than either errs -- at b = 1e4, 2.1e-14 under jax 0.10 and
     # 8.2e-14 under 0.12, with each within 1e-13 of the truth. Here the
-    # masking must leave the selected branch's value exact.
+    # selected branch's value must be exact.
     with mp.workdps(30):
         expect = [float(_mp_incomplete_beta(2.0, float(b), 0.3)) for b in bs]
     np.testing.assert_allclose(np.asarray(batched), expect, rtol=1e-12)
@@ -1175,3 +1175,16 @@ def test_a_eq_1_casts_a_lower_precision_b_up(b):
     got = sp.incomplete_beta(1.0, b, jnp.asarray(0.5, jnp.float64))
     assert got.dtype == jnp.float64
     np.testing.assert_allclose(float(got), 7 / 3, rtol=1e-15)
+
+
+def test_a_eq_1_keeps_a_strong_a_strong():
+    """REGRESSION: a strong ``a == 1`` with weak ``b``, ``z`` gave a weak result.
+
+    The closed form dropped ``a`` after promotion, so its result was weak where
+    the branch dispatch (any other ``a`` of the same type) returns a strong one.
+    """
+    a = jnp.asarray(1.0, jnp.float64)
+    near = jnp.nextafter(a, 2.0)
+    got = sp.incomplete_beta(a, -8.0, 0.5)
+    assert not got.weak_type
+    assert got.dtype == sp.incomplete_beta(near, -8.0, 0.5).dtype
