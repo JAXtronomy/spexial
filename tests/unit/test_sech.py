@@ -357,10 +357,10 @@ def test_float16_overflow_edge():
 
 
 def test_float64_moderate_range():
-    """The range between the small-argument and the grid points, both signs.
+    """The float64 range from 1e-8 to 3, both signs.
 
     The grid and the explicit points leave (2e-8, 1) and (1, 3.4) almost empty,
-    which is where a series for small |x| with too wide a cut-off would hide.
+    which is where a branch for moderate |x| that is slightly wrong would hide.
     """
     pos = np.geomspace(1e-8, 3.0, 150)
     xj = jnp.asarray(np.concatenate([pos, -pos]))

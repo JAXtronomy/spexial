@@ -43,7 +43,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 ```
 
-These are series and asymptotic expansions. In float32 the accuracy figures below are meaningless — you will lose most of your digits to the accumulation, not the algorithm. Set this at program start, before any array is created.
+Most of these are series and asymptotic expansions. In float32 the accuracy figures below are meaningless — you will lose most of your digits to the accumulation, not the algorithm. (`sech` is the exception: it is a closed form and meets its figures in float32.) Set this at program start, before any array is created.
 
 ## The traps
 
@@ -91,4 +91,5 @@ Everything below assumes x64. Full detail, including how each was measured, is a
 | `k0`/`k1`/`k2` | `0 < z < 705.3` (float64; 85.3 in float32, 16.2 in float16) | `2.0e-7` |
 | `k0e`/`k1e`/`k2e` | `z > 0`, no upper limit | `2.0e-7` |
 | `polylog` | `n >= 1` | `7.7e-12` |
+| `sech` | real `x`; the value is normal to `\|x\| < 709` (88 in float32, 10.4 in float16) | `1.1e-15` (float64), `4.4e-7` (float32) |
 | `zeta` | `n > 1`, or negative integer `> -60` | `7e-16` |

@@ -6,7 +6,7 @@ JAX defaults to 32-bit floats, and for the workload JAX was built for — traini
 
 ## Where the digits go
 
-A float32 number carries about seven decimal digits. That sounds like plenty until you look at how these functions are actually evaluated. None of them has a closed form you can just apply; each is a sum, a recurrence, or a reflection:
+A float32 number carries about seven decimal digits. That sounds like plenty until you look at how these functions are actually evaluated. Most of them have no closed form you can just apply; each is a sum, a recurrence, or a reflection:
 
 - `k0` sums thirty terms of an ascending series below $z = 9$, and ten terms of an asymptotic expansion above it.
 - `gamma` evaluates a Lanczos series, and for $x < 1/2$ divides by $\sin(\pi x)$ first.
