@@ -1,0 +1,1190 @@
+"""Unit tests for `spexial.incomplete_beta` outside the binomial series' range.
+
+Large ``b`` and large ``a`` take a continued fraction (GH-64) or `_large_a`;
+these tests cover those regimes, the switches between them, and the
+regressions fixed alongside (GH-66, GH-67, GH-68). Split from `test_beta.py`
+so the two files run on separate workers under ``--dist=loadfile``: together
+they were one serialized ~20-minute file.
+"""
+
+import jax
+import jax.numpy as jnp
+import mpmath as mp
+import numpy as np
+import pytest
+
+import spexial as sp
+from spexial._src.beta import _CF_FROM, _branch, _branch_index
+
+# `a > 0` always. `b` is any real: the negative and zero values are the reason
+# this exists, and come up as ordinary slopes in double power-law profiles.
+AS = [0.25, 0.5, 1.0, 1.31, 2.0, 4.5]
+BS = [-2.5, -1.0, -0.1, 0.0, 0.3, 1.31, 4.0]
+# Straddles the z = 1/2 branch switch deliberately, and both endpoints.
+ZS = [1e-6, 1e-3, 0.1, 0.3, 0.5, 0.5 + 1e-7, 0.7, 0.9, 0.99, 1 - 1e-6]
+# XLA's CPU `log1p` is off by up to 2.7e-14 on (-0.42, -0.3), and a front factor
+# (1-z)^b formed from it multiplies that by |b|: 1.2e-11 at b = -1100 here.
+LOG1P_BAND = 0.41
+
+
+def _mp_incomplete_beta(a, b, z):
+    """Unregularized ``B(a, b, z)`` by mpmath, robust for large ``b > 0``.
+
+    ``mp.betainc`` sums a hypergeometric series that converges too slowly for
+    large ``b`` above the switch point -- mpmath 1.3.0, the supported floor,
+    raises `NoConvergence` at ``a = 0.1, b = 1e5``. There the complement
+    ``B(a, b) - B(b, a, 1 - z)`` converges fast, as it does for the code under
+    test.
+    """
+    a, b, z = mp.mpf(a), mp.mpf(b), mp.mpf(z)
+    if b > 0 and z >= (a + 1) / (a + b + 2):
+        return mp.beta(a, b) - mp.betainc(b, a, 0, 1 - z)
+    return mp.betainc(a, b, 0, z)
+
+
+# ============================================================================
+# Large b: the continued fraction (GH-64)
+
+LARGE_BS = [np.nextafter(10.0, 99), 20.0, 50.0, 100.0, 300.0, 1e3, 1e4]
+
+
+@pytest.mark.parametrize("a", [*AS, 8.0, 50.0])
+@pytest.mark.parametrize("b", LARGE_BS)
+def test_large_b_matches_mpmath(a, b):
+    """REGRESSION: the series lost every digit above ``b ~ 50`` (GH-64).
+
+    Its coefficients ``(1-b)_k / k!`` alternate and grow like ``b^k / k!``: at
+    ``b = 300, z = 1/2`` it returned ``-1.1e44`` for ``1.1e-5``. Above
+    `_CF_FROM` the continued fraction takes over.
+
+    The reference is mpmath, not ``beta * betainc``: SciPy's regularized form
+    is itself only good to ~1e-11 at ``b = 1e4``.
+
+    ``a`` reaches 50, the top of the documented range for the continued
+    fraction and a regime where the series fails even at small ``b``.
+
+    The looser tolerance above ``b = 100`` allows for rounding, which grows like
+    ``b * eps`` out to ``b = 1e4``; the fraction itself has converged by then
+    (`_CF_STEPS`).
+    """
+    z = np.array([1e-8, *ZS[1:], LOG1P_BAND, 1.0])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    with mp.workdps(40):
+        expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=1e-12 if b <= 100 else 1e-11)
+
+
+@pytest.mark.parametrize(
+    ("a", "b"), [(6.0, 12.0), (15.0, 35.0), (20.0, 40.0), (30.0, 70.0)]
+)
+def test_large_a_and_large_b_matches_mpmath(a, b):
+    """REGRESSION: ``a`` and ``b`` both large, as in a Zhao (1996) profile.
+
+    galax calls this with ``a = alpha (3 - gamma)`` and ``b = alpha (beta - 3)``,
+    so ``(alpha, beta, gamma) = (5, 10, 0)`` is ``(15, 35)``. At ``z = 1/2``
+    the series was 2.9e-4 off there and 6e10 off at ``(30, 70)``.
+    """
+    z = np.array([*ZS, LOG1P_BAND, 1.0])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    with mp.workdps(40):
+        expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=1e-13)
+
+
+@pytest.mark.parametrize("a", [0.5, 2.0, 8.0])
+def test_continuous_across_the_large_b_switch(a):
+    """Series below `_CF_FROM`, continued fraction above: they must meet."""
+    z = jnp.asarray([0.05, 0.5, 0.95])
+    below = sp.incomplete_beta(a, np.nextafter(_CF_FROM, 0), z)
+    above = sp.incomplete_beta(a, np.nextafter(_CF_FROM, 99), z)
+    np.testing.assert_allclose(np.asarray(below), np.asarray(above), rtol=1e-13)
+
+
+@pytest.mark.parametrize(("a", "b", "z"), [(2.0, 50.0, 0.01), (0.5, 300.0, 0.5)])
+def test_large_b_parameter_derivatives(a, b, z):
+    """``a``/``b`` tangents through the continued fraction, in both modes.
+
+    Against mpmath's derivative, not a finite difference: the ``b``-derivative
+    here is ~1e-4 of the value, so a difference quotient's own rounding is
+    already a 1e-6 relative error, where autodiff passes the 1e-12 asserted
+    here.
+    """
+    zz = jnp.asarray(z)
+    refs = (
+        lambda t: _mp_incomplete_beta(t, b, z),
+        lambda t: _mp_incomplete_beta(a, t, z),
+    )
+    for argnum, ref in enumerate(refs):
+        with mp.workdps(40):
+            expect = float(mp.diff(ref, (a, b)[argnum]))
+        for mode in (jax.jacfwd, jax.jacrev):
+            got = mode(sp.incomplete_beta, argnum)(a, b, zz)
+            np.testing.assert_allclose(float(got), expect, rtol=1e-12)
+
+
+def test_vmap_over_b_across_the_switch_has_finite_gradients():
+    """Under `vmap` the `switch` becomes a `select` and every branch runs.
+
+    The batched `switch` selects each lane's cotangent after the branches'
+    transposes, so an unselected branch's `nan` -- the series at ``b = 1e4``,
+    or the reflection at ``b <= 0`` -- must not reach the gradients.
+    """
+    bs = jnp.asarray([-2.0, 0.0, 5.0, 10.0, 10.5, 300.0, 1e4])
+    f = lambda b: sp.incomplete_beta(2.0, b, jnp.asarray(0.3))
+    batched = jax.vmap(f)(bs)
+    # Against mpmath, not against `f` one `b` at a time: that takes its branch
+    # statically, a different compilation of the same arithmetic, and the two
+    # differ by more than either errs -- at b = 1e4, 2.1e-14 under jax 0.10 and
+    # 8.2e-14 under 0.12, with each within 1e-13 of the truth. Here the
+    # selected branch's value must be exact.
+    with mp.workdps(30):
+        expect = [float(_mp_incomplete_beta(2.0, float(b), 0.3)) for b in bs]
+    np.testing.assert_allclose(np.asarray(batched), expect, rtol=1e-12)
+    assert bool(jnp.all(jnp.isfinite(jax.vmap(jax.grad(f))(bs))))
+
+
+@pytest.mark.parametrize(
+    ("wrt", "bs", "z"),
+    [
+        # One lane per branch: series, continued fraction, large a, negative b.
+        (0, [1.5, 20.0, 0.05, -6.0], 0.3),
+        (1, [1.5, 20.0, 0.05, -6.0], 0.3),
+        # At z = 1 the unselected large-a and negative-b branches, run on their
+        # substitute b <= 0, have an infinite z-derivative (1-z)^(b-1), which
+        # must not reach the selected lanes.
+        (2, [1.5, 20.0, 1.0, 2.0], 1.0),
+    ],
+)
+def test_reverse_mode_through_vmap_across_the_switch(wrt, bs, z):
+    """REGRESSION: ``grad(sum(vmap(f)))`` equals ``vmap(grad(f))``.
+
+    With the `switch` inside the custom JVP, the rule's `jvp` of it, once
+    batched, left a `stop_gradient` in the linearized program that JAX cannot
+    transpose, so reverse mode through `vmap` raised.
+    """
+    args = [jnp.asarray([0.5, 2.0, 9.0, 2.0]), jnp.asarray(bs), jnp.full(4, z)]
+
+    def total(x):
+        return jax.vmap(sp.incomplete_beta)(*args[:wrt], x, *args[wrt + 1 :]).sum()
+
+    batched = jax.grad(total)(args[wrt])
+    single = jax.vmap(jax.grad(sp.incomplete_beta, argnums=wrt))(*args)
+    assert bool(jnp.all(jnp.isfinite(batched)))
+    np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=1e-14)
+
+
+@pytest.mark.parametrize("z", [1e-8, 1e-12])
+@pytest.mark.parametrize("b", [1.5, 20.0])
+def test_mixed_partial_at_small_z(z, b):
+    """REGRESSION (GH-68): ``d/db d/dz B`` to full precision as ``z -> 0``.
+
+    ``d/dz B = z^(a-1) (1-z)^(b-1)``, so ``d/db`` of it is that times
+    ``log(1-z)``. The z-rule's power must carry ``log1p(-z)`` when ``b`` is
+    traced; ``log`` of a rounded ``1 - z`` kept only ~1e-16 / z of it: 5e-9
+    relative at ``z = 1e-8`` and 2e-5 at ``1e-12``. Both the series and the
+    continued-fraction regimes share the rule, hence both ``b``.
+    """
+    a = 2.0
+    got = jax.grad(jax.grad(lambda bb, zz: sp.incomplete_beta(a, bb, zz), 1), 0)
+    expect = z ** (a - 1) * np.log1p(-z) * np.exp((b - 1) * np.log1p(-z))
+    np.testing.assert_allclose(float(got(b, jnp.asarray(z))), expect, rtol=1e-14)
+
+
+def test_z_derivative_with_traced_b_at_z_eq_1():
+    """With ``b`` traced, the z-rule keeps ``(1-z)^(b-1)`` exact at z = 1."""
+    one = jnp.asarray(1.0)
+    dz = jax.jit(jax.grad(lambda zz, bb: sp.incomplete_beta(2.0, bb, zz)))
+    assert float(dz(one, 1.0)) == 1.0
+    assert float(dz(one, 2.0)) == 0.0
+    assert float(dz(one, 0.5)) == np.inf
+
+
+# ============================================================================
+# Large a
+
+
+@pytest.mark.parametrize("a", [12.0, 16.0, 24.0, 50.0])
+@pytest.mark.parametrize("b", [0.1, 0.5, 4.0, 10.0])
+def test_large_a_matches_mpmath(a, b):
+    """Above ``a = 8`` with ``b >= 0.1`` the continued fraction takes over.
+
+    `_large_z` expands ``(1-u)^(a-1)``, whose coefficients cancel just as
+    ``(1-b)_k`` does for large ``b``: the series was about 1e-8 off at
+    ``a = 16``, about 1e-4 at ``24`` (just above ``z = 1/2``), and wrong from
+    about 50.
+    """
+    z = np.array([1e-6, 0.01, 0.3, 0.7, 0.9, 0.99, 1 - 1e-6])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    with mp.workdps(40):
+        expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize("b", [0.1, 1.0, 5.0])
+def test_continuous_across_the_large_a_switch(b):
+    """Series at or below ``a = 8``, continued fraction above: they must meet."""
+    z = jnp.asarray([0.05, 0.5, 0.95])
+    below = sp.incomplete_beta(8.0, b, z)
+    above = sp.incomplete_beta(np.nextafter(8.0, 99), b, z)
+    np.testing.assert_allclose(np.asarray(below), np.asarray(above), rtol=1e-13)
+
+
+def _mp_hyp2f1_beta(a, b, z):
+    """``B(a, b, z)`` by DLMF 8.17.7 at 40 digits: valid for any real ``b``."""
+    with mp.workdps(40):
+        return float(mp.mpf(z) ** a / a * mp.hyp2f1(a, 1 - b, a + 1, z))
+
+
+@pytest.mark.parametrize("a", [12.0, 24.0, 50.0, 100.0])
+@pytest.mark.parametrize("b", [-50.0, -2.5, -1.0, -0.3, -1e-4, 0.0, 0.05, 0.099])
+def test_large_a_small_b(a, b):
+    """Large ``a`` with ``b < 0.1``, including ``b <= 0``: `_large_a`.
+
+    The series was about 9% off at ``(24, -50, 1/2)`` and had no correct digits
+    by 50; the continued fraction's reflection needs ``B(a, b)``, which
+    diverges at ``b <= 0``.
+    """
+    z = np.array(
+        [0.01, 0.3, LOG1P_BAND, 0.5, 0.7, 0.9, 0.95, 0.99, 1 - 1e-6, 1 - 1e-12]
+    )
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    expect = np.array([_mp_hyp2f1_beta(a, b, zi) for zi in z])
+    ok = np.isfinite(expect) & (expect != 0)
+    np.testing.assert_allclose(got[ok], expect[ok], rtol=5e-13)
+
+
+@pytest.mark.parametrize("b", [-2.5, -0.3, 0.0, 0.05])
+def test_continuous_across_the_large_a_switch_small_b(b):
+    """Series at or below ``a = 8``, `_large_a` above: they must meet."""
+    z = jnp.asarray([0.05, 0.5, 0.95, 0.999])
+    below = sp.incomplete_beta(8.0, b, z)
+    above = sp.incomplete_beta(np.nextafter(8.0, 99), b, z)
+    np.testing.assert_allclose(np.asarray(below), np.asarray(above), rtol=1e-13)
+
+
+@pytest.mark.parametrize("a", [2.0, 24.0])
+def test_pole_at_z_eq_1_large_and_small_a(a):
+    """``+inf`` at ``z = 1`` for ``b <= 0`` on the series and on `_large_a`."""
+    for b in (-2.5, -0.5, 0.0):
+        assert float(sp.incomplete_beta(a, b, jnp.asarray(1.0))) == np.inf
+
+
+@pytest.mark.parametrize("a", [2.0, 24.0])
+@pytest.mark.parametrize("b", [1e-6, 1e-4, 5e-4])
+def test_z_eq_1_with_tiny_positive_b(a, b):
+    """REGRESSION: ``B(a, b, 1)`` for ``0 < b < 1e-3`` was ``nan``.
+
+    ``b`` sits in the near-pole band, whose expansion carries ``log(1 - z)``;
+    at ``z = 1`` that is ``-inf``, though there is nothing to cancel there --
+    ``(1 - z)^b`` is 0 -- so the direct form is used.
+    """
+    with mp.workdps(40):
+        expect = float(mp.beta(a, b))
+    got = float(sp.incomplete_beta(a, b, jnp.asarray(1.0)))
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize("b", [-1e-4, -1 + 5e-4, 2e-4])
+def test_near_pole_expansion_close_to_z_eq_1(b):
+    """REGRESSION: the near-pole expansion truncates like ``s^K L^(K+1)``.
+
+    With 4 terms, ``b = -1e-4`` at ``z = 1 - 1e-15`` (``L ~ -35``) was 1.2e-12
+    off; that step is now evaluated in a form with no truncation at all.
+    """
+    z = np.array([0.9, 1 - 1e-8, 1 - 1e-15])
+    got = np.asarray(sp.incomplete_beta(2.0, b, jnp.asarray(z)))
+    expect = np.array([_mp_hyp2f1_beta(2.0, b, zi) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=5e-14)
+
+
+def test_vmap_over_a_through_large_a_has_finite_gradients():
+    """Under `vmap` over ``a`` the `switch` runs every branch, on safe values."""
+    a_s = jnp.asarray([0.5, 4.0, 8.0, 8.5, 16.0, 50.0])
+    f = lambda a: sp.incomplete_beta(a, -0.5, jnp.asarray(0.97))
+    batched = jax.vmap(f)(a_s)
+    single = jnp.stack([f(a) for a in a_s])
+    np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=5e-14)
+    assert bool(jnp.all(jnp.isfinite(jax.vmap(jax.grad(f))(a_s))))
+
+
+def test_vmap_over_a_across_the_switch_has_finite_gradients():
+    """As for ``b``: under `vmap` over ``a`` every branch runs, on safe values."""
+    a_s = jnp.asarray([0.5, 4.0, 8.0, 8.5, 16.0, 50.0])
+    f = lambda a: sp.incomplete_beta(a, 0.5, jnp.asarray(0.3))
+    batched = jax.vmap(f)(a_s)
+    single = jnp.stack([f(a) for a in a_s])
+    np.testing.assert_allclose(np.asarray(batched), np.asarray(single), rtol=1e-14)
+    assert bool(jnp.all(jnp.isfinite(jax.vmap(jax.grad(f))(a_s))))
+
+
+@pytest.mark.parametrize("b", [2.5, 3.0, 4.0])
+def test_higher_z_derivatives_at_z_eq_1_with_traced_b(b):
+    """Traced and concrete ``b`` agree at ``z = 1`` to the third z-derivative.
+
+    The traced path writes ``(1-z)^(b-1)`` through ``log(1-z)`` (GH-68), which
+    is ``-inf`` at ``z = 1``. A clamp there differentiated as ``0 * -inf`` and
+    made the second and third derivatives ``nan``; a double ``where`` now hands
+    the endpoint to `pow`.
+    """
+    one = jnp.asarray(1.0)
+    f = lambda bb, zz: sp.incomplete_beta(2.0, bb, zz)
+    d1 = jax.grad(f, 1)
+    d2 = jax.grad(d1, 1)
+    d3 = jax.grad(d2, 1)
+    for d in (d1, d2, d3):
+        traced, concrete = float(jax.jit(d)(b, one)), float(d(b, one))
+        assert traced == concrete, (b, traced, concrete)
+        assert not np.isnan(traced)
+
+
+def _mp_integrand_derivative(a, b, z, order):
+    """``d^order/dz^order`` of ``z^(a-1) (1-z)^(b-1)``, by mpmath."""
+    with mp.workdps(30):
+        return float(mp.diff(lambda t: t ** (a - 1) * (1 - t) ** (b - 1), z, order))
+
+
+@pytest.mark.parametrize("traced", [False, True])
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [
+        (9.0, 1.0, 1.0),
+        (2.0, 2.0, 1.0),
+        (2.0, 3.0, 1.0),
+        (1.0, 3.0, 0.0),
+        (2.0, 3.0, 0.0),
+        (2.0, 1.5, 0.0),
+        # a == 1 takes the closed form, with its own z-rule.
+        (1.0, 1.0, 1.0),
+        (1.0, 2.0, 1.0),
+        (1.0, 3.0, 1.0),
+    ],
+)
+def test_z_derivatives_at_an_integer_exponent_endpoint(a, b, z, traced):
+    """REGRESSION (GH-73): z-derivatives at an integer-exponent endpoint.
+
+    Every z-derivative at ``z = 0`` or ``1`` is finite where the integrand's
+    exponent there, ``a - 1`` or ``b - 1``, is an integer ``n >= 0``. JAX
+    differentiates a float-exponent ``x ** y`` as ``y x^(y-1)``, which is
+    ``0 * inf`` at ``x = 0`` once differentiation has brought ``y`` to 0, so
+    the derivatives from order ``n + 2`` on were ``nan`` (jax-ml/jax#14397).
+    """
+    d = lambda bb, zz: sp.incomplete_beta(a, bb, zz)
+    for order in range(1, 6):
+        d = jax.grad(d, 1)
+        got = float(jax.jit(d)(b, z) if traced else d(b, z))  # jit traces b
+        want = _mp_integrand_derivative(a, b, z, order - 1)
+        np.testing.assert_allclose(
+            got, want, rtol=1e-12, atol=1e-12, err_msg=f"{order=}"
+        )
+
+
+def test_a_derivative_of_z_derivatives_at_a_eq_1():
+    """``d/da d^2/dz^2 B`` at ``a = 1``, ``z > 0``.
+
+    The GH-73 guard is only at ``z = 0``. Guarding ``a = 1`` everywhere would
+    zero this, as the ``y == 0`` special case once did in JAX's own rule
+    (jax-ml/jax#12033). ``z^(a-1)`` is the factor to test: it is `_pow` at every
+    ``z``, while a traced ``b`` goes through ``log1p`` inside the interval.
+    """
+    b, z = 2.0, 0.3
+    d2z = lambda aa: jax.grad(jax.grad(lambda zz: sp.incomplete_beta(aa, b, zz)))(z)
+    got = float(jax.grad(d2z)(jnp.asarray(1.0)))
+    with mp.workdps(30):
+        want = float(
+            mp.diff(
+                lambda aa: mp.diff(lambda t: t ** (aa - 1) * (1 - t) ** (b - 1), z),
+                1.0,
+            )
+        )
+    np.testing.assert_allclose(got, want, rtol=1e-12)
+
+
+@pytest.mark.parametrize("b", [1e3, 1e4, 1e5])
+def test_large_b_small_a(b):
+    """``a = 0.1``: the complete beta's second fraction converges slowest here.
+
+    At 32 steps it was 1e-11 off; `_CF_STEPS` is now 64.
+    """
+    a = 0.1
+    z = np.array(
+        [1e-6, 0.5 * (a + 1) / (a + b + 2), 2 * (a + 1) / (a + b + 2), 0.5, 1.0]
+    )
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    with mp.workdps(40):
+        expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize(("a", "b"), [(301.0, 1000.0), (300.0, 1000.0), (50.0, 2000.0)])
+def test_large_b_no_premature_underflow(a, b):
+    """A tiny front factor must not flush to zero while the value is normal.
+
+    ``B(301, 1000) ~ 3.9e-307``: the front factor alone underflows, and was
+    multiplied by the fraction after the fact, so this returned 0.
+    """
+    with mp.workdps(40):
+        expect = float(mp.beta(a, b))
+    got = float(sp.incomplete_beta(a, b, jnp.asarray(1.0)))
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [(301.0, 1000.0, 0.255), (300.0, 1000.0, 0.26), (300.0, 1000.0, 0.3)],
+)
+def test_large_b_reflection_with_a_subnormal_subtrahend(a, b, z):
+    """``B(a, b) - B(b, a, 1-z)`` with ``B(a, b)`` near the smallest normal.
+
+    The subtrahend is then subnormal, which XLA flushes to zero, so a result
+    that is itself normal came back as ``B(a, b)``: 2.4% off at (301, 1000,
+    0.255). The difference is taken in logarithms instead.
+    """
+    with mp.workdps(80):
+        expect = float(mp.beta(a, b) - mp.betainc(b, a, 0, 1 - mp.mpf(z)))
+    got = float(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
+@pytest.mark.parametrize("z", [0.0, 1.0])
+def test_large_b_parameter_gradients_at_the_endpoints(z):
+    """``a``/``b`` gradients at ``z = 0`` and ``z = 1``, with ``b > 10``.
+
+    The endpoint term is a genuine zero; evaluated, ``log(0)`` puts
+    ``0 * -inf = nan`` into its parameter derivatives.
+    """
+    a, b = 2.0, 50.0
+    zz = jnp.asarray(z)
+    refs = (lambda t: mp.beta(t, b), lambda t: mp.beta(a, t))
+    for argnum, ref in enumerate(refs):
+        got = float(jax.grad(sp.incomplete_beta, argnum)(a, b, zz))
+        if z == 0.0:
+            expect = 0.0
+        else:
+            with mp.workdps(40):
+                expect = float(mp.diff(ref, (a, b)[argnum]))
+        np.testing.assert_allclose(got, expect, rtol=1e-11, atol=1e-300)
+
+
+def test_large_b_float32():
+    """The continued fraction in float32: about float32 precision, still float32."""
+    z = jnp.asarray([1e-3, 0.01, 0.3, 0.9], jnp.float32)
+    for b in (50.0, 1e4):
+        got = sp.incomplete_beta(2.0, b, z)
+        assert got.dtype == jnp.float32
+        with mp.workdps(40):
+            expect = np.array([float(_mp_incomplete_beta(2, b, float(zi))) for zi in z])
+        np.testing.assert_allclose(np.asarray(got, np.float64), expect, rtol=5e-6)
+
+
+@pytest.mark.parametrize("b", [1.5, 50.0])
+@pytest.mark.parametrize("wrap", [np.float64, jnp.float64], ids=["numpy", "jax"])
+def test_float32_z_with_strong_float64_b(b, wrap):
+    """REGRESSION (GH-66): float32 ``z`` with a strong float64 ``b``.
+
+    The `scan` carry started in float32 and the first step promoted it to
+    float64, which `scan` rejects with a `TypeError`. ``z`` now promotes to the
+    common type, as in any elementwise op -- on both the series (b = 1.5) and
+    the continued fraction (b = 50).
+    """
+    z = jnp.asarray([0.3, 0.9], jnp.float32)
+    eager = sp.incomplete_beta(2.0, wrap(b), z)
+    jitted = jax.jit(lambda bb: sp.incomplete_beta(2.0, bb, z))(wrap(b))
+    expect = sp.incomplete_beta(2.0, b, jnp.asarray(z, jnp.float64))
+    for got in (eager, jitted):
+        assert got.dtype == jnp.float64
+        np.testing.assert_allclose(np.asarray(got), np.asarray(expect), rtol=1e-14)
+    # A weak (Python) b does not promote.
+    assert sp.incomplete_beta(2.0, b, z).dtype == jnp.float32
+
+
+# Two values -- one negative, and zero -- because each compiles the a- and
+# b-Jacobians afresh (~35 s apiece); `test_pole_at_z_eq_1_large_and_small_a`
+# covers more `b` for the value alone.
+@pytest.mark.parametrize("b", [-1.0, 0.0])
+def test_pole_at_z_eq_1_for_non_positive_b(b):
+    """REGRESSION (GH-67): ``B(a, b, 1) = +inf`` for ``b <= 0``, not ``nan``.
+
+    And the series must not leak its ``nan`` there into the gradients of the
+    other points through the `where` that picks the pole.
+    """
+    z = jnp.asarray([0.3, 0.9, 1.0])
+    got = np.asarray(sp.incomplete_beta(2.0, b, z))
+    assert got[-1] == np.inf
+    assert np.all(np.isfinite(got[:-1]))
+    for argnum in (0, 1):
+        jac = np.asarray(
+            jax.jacrev(lambda *ab: sp.incomplete_beta(*ab, z), argnum)(2.0, b)
+        )
+        assert np.all(np.isfinite(jac[:-1])), jac
+
+
+@pytest.mark.parametrize("a", [0.5, 8.0, np.nextafter(8.0, 99), 50.0])
+@pytest.mark.parametrize(
+    "b",
+    [
+        -6.0,
+        -5.0,
+        -1.0,
+        0.0,
+        np.nextafter(0.1, 0),
+        0.1,
+        5.0,
+        10.0,
+        np.nextafter(10.0, 99),
+    ],
+)
+def test_static_and_traced_branch_choice_agree(a, b):
+    """`_branch` (concrete, plain Python) mirrors `_branch_index` (traced)."""
+    assert _branch(a, b) == int(_branch_index(a, b))
+
+
+# ============================================================================
+# Second audit
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z", "dtype"),
+    [
+        (np.float64(2), jnp.float32(1.5), [0.3, 0.9], jnp.float64),
+        (2, 1.5, np.float32([0.3, 0.9]), jnp.float32),
+        (jnp.float32(2), np.float64(-1), [0.3, 0.9], jnp.float64),
+        (jnp.float32(12), np.float64(-1), [0.3, 0.9], jnp.float64),
+        (12, -1.0, np.float32([0.3, 0.9]), jnp.float32),
+        (2, 50, np.float32([0.01, 0.3]), jnp.float32),
+    ],
+)
+def test_mixed_precision_parameters(a, b, z, dtype):
+    """``a``, ``b`` and ``z`` share one dtype, on every path (GH-66, completed).
+
+    A `scan` carry seeded from one and updated with another changed type: an
+    integer ``a`` with float32 ``z``, float32 ``a`` with float64 ``b`` -- and,
+    new in this PR, the near-pole carry seeded from ``b`` but updated from
+    ``a``. Values are checked against the all-float64 call.
+    """
+    got = sp.incomplete_beta(a, b, jnp.asarray(z))
+    assert got.dtype == dtype
+    expect = sp.incomplete_beta(float(a), float(b), jnp.asarray(z, jnp.float64))
+    rtol = 1e-13 if dtype == jnp.float64 else 1e-5
+    np.testing.assert_allclose(
+        np.asarray(got, np.float64), np.asarray(expect), rtol=rtol
+    )
+
+
+def test_gradient_with_an_integer_parameter():
+    """An integer ``a`` (or ``b``) no longer breaks the gradient in the other.
+
+    Its tangent in the custom JVP was a zero of its own integer dtype, which
+    `jax.jvp` rejects; parameters are now promoted to floating first.
+    """
+    z = jnp.asarray(0.3)
+    np.testing.assert_allclose(
+        float(jax.grad(lambda b: sp.incomplete_beta(2, b, z))(1.5)),
+        float(jax.grad(lambda b: sp.incomplete_beta(2.0, b, z))(1.5)),
+        rtol=1e-14,
+    )
+    np.testing.assert_allclose(
+        float(jax.grad(lambda a: sp.incomplete_beta(a, 2, z))(1.5)),
+        float(jax.grad(lambda a: sp.incomplete_beta(a, 2.0, z))(1.5)),
+        rtol=1e-14,
+    )
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [
+        (50.0, -0.999, 0.9635),
+        (8.5, -0.999, 0.8097),
+        (4.5, -1e-3, 0.6),
+        (4.5, -0.03, 0.75),
+    ],
+)
+def test_just_outside_the_old_pole_band(a, b, z):
+    """``b + m`` a little way from zero: the direct quotient cancelled there.
+
+    With a 1e-3 band, ``1e-3 <= |s| < ~0.1`` was left to ``(w0^s - w^s) / s``:
+    5.8e-12 at ``a = 50, b = -0.999``. The one step with ``|s| < 1/2`` is now
+    evaluated apart, relative to ``w0^b``, as
+    ``w0^m delta expm1(-s delta) / (-s delta)``.
+    """
+    got = float(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    np.testing.assert_allclose(got, _mp_hyp2f1_beta(a, b, z), rtol=5e-14)
+
+
+@pytest.mark.parametrize("n", [1, 2, 3])
+def test_b_derivatives_just_outside_the_old_pole_band(n):
+    """1st-3rd ``b``-derivatives there: they were 3e-10, 5e-7, 1.5e-3 off."""
+    a, b, z = 4.5, -1 + 1.001e-3, 0.7
+    d = lambda bb: sp.incomplete_beta(a, bb, jnp.asarray(z))
+    for _ in range(n):
+        d = jax.grad(d)
+    with mp.workdps(40):
+        expect = float(
+            mp.diff(lambda t: mp.mpf(z) ** a / a * mp.hyp2f1(a, 1 - t, a + 1, z), b, n)
+        )
+    np.testing.assert_allclose(float(d(b)), expect, rtol=1e-13)
+
+
+def test_near_pole_float32():
+    """The near-pole step in float32: about float32 precision (it was 3.5e-4)."""
+    z = jnp.asarray([0.6, 0.9], jnp.float32)
+    for b in (-1e-3, -0.999):
+        got = np.asarray(sp.incomplete_beta(4.5, b, z), np.float64)
+        expect = np.array([_mp_hyp2f1_beta(4.5, b, float(zi)) for zi in z])
+        np.testing.assert_allclose(got, expect, rtol=1e-5)
+
+
+def test_no_intermediate_overflow_for_very_negative_b():
+    """A representable result must not come back ``nan`` or raise.
+
+    ``w0^b`` overflowed inside the expansion at ``a = 1e4, b = -84`` (true value
+    8.3e307); a concrete ``b = -1100`` made Python float arithmetic raise
+    `OverflowError` even at ``z = 0.3``, below the branch that needed it.
+    """
+    a = 1e4
+    split = a / (a + 2)
+    with mp.workdps(40):
+        expect = float(mp.betainc(a, -84, 0, split))
+    np.testing.assert_allclose(
+        float(sp.incomplete_beta(a, -84.0, jnp.asarray(split))), expect, rtol=1e-11
+    )
+    np.testing.assert_allclose(
+        float(sp.incomplete_beta(2.0, -1100.0, jnp.asarray(0.3))),
+        _mp_hyp2f1_beta(2.0, -1100.0, 0.3),
+        rtol=1e-12,
+    )
+
+
+def test_overflow_past_the_float_range_is_inf():
+    """A true value beyond the float range is ``+inf``, not ``nan``."""
+    assert float(sp.incomplete_beta(12.0, -400.0, jnp.asarray(0.86))) == np.inf
+    assert float(sp.incomplete_beta(2.0, -400.0, jnp.asarray(0.9))) == np.inf
+
+
+@pytest.mark.parametrize("jit", [False, True])
+@pytest.mark.parametrize(
+    ("b", "z"), [(-200.0, 0.998), (-200.0, 1 - 1e-9), (-50.0, 1 - 1e-9)]
+)
+def test_large_a_overflow_is_inf(b, z, jit):
+    """REGRESSION: `_large_a` returned ``nan`` past the float range.
+
+    Its expansion's ``(w / w0)^b`` overflowed, and the alternating sum made that
+    ``inf - inf``. The true values here are 1e540 and up; at ``a = 8`` the
+    `_negative_b` branch already returned ``inf``.
+    """
+    f = jax.jit(sp.incomplete_beta) if jit else sp.incomplete_beta
+    assert float(f(12.0, b, jnp.asarray(z))) == np.inf
+
+
+def test_z_derivative_with_traced_b_in_the_log1p_band():
+    """REGRESSION: the z-rule's ``(1-z)^(b-1)`` took `log1p`'s band error x |b|."""
+    a, b, z = 2.0, -1000.0, LOG1P_BAND
+    got = float(jax.jit(jax.grad(sp.incomplete_beta, 2))(a, b, z))
+    with mp.workdps(40):
+        expect = float(mp.mpf(z) ** (a - 1) * (1 - mp.mpf(z)) ** (b - 1))
+    np.testing.assert_allclose(got, expect, rtol=1e-12)
+
+
+def test_mixed_partial_at_z_one_half_is_symmetric():
+    """``d/dz d/db`` at exactly ``z = 1/2`` was halved: `minimum` split the tie."""
+    half = jnp.asarray(0.5)
+    bz = float(jax.grad(jax.grad(sp.incomplete_beta, 1), 2)(2.0, 1.5, half))
+    zb = float(jax.grad(jax.grad(sp.incomplete_beta, 2), 1)(2.0, 1.5, half))
+    np.testing.assert_allclose(bz, zb, rtol=1e-14)
+
+
+@pytest.mark.parametrize(("dtype", "rtol"), [(jnp.bfloat16, 2e-2), (jnp.float16, 2e-3)])
+@pytest.mark.parametrize(
+    ("a", "b"), [(2.0, 50.0), (24.0, -0.5), (4.0, 9.5), (2.0, -5.0), (2.0, -20.0)]
+)
+def test_half_precision(dtype, rtol, a, b):
+    """bfloat16/float16 on every method: each evaluates in float32, rounds once.
+
+    Lentz's recurrence in bfloat16 was 6% off at ``b = 20``; the series in half
+    precision was 33% off at (4, 9.5, 0.9) in bfloat16 and ``nan`` at (2, -5).
+    """
+    # Points whose values are representable in both dtypes; the reference is
+    # the float64 value rounded to `dtype` (below its range that is 0).
+    z = jnp.asarray([0.3, 0.9] if b > 0 else [0.9, 0.97], dtype)
+    got = sp.incomplete_beta(a, b, z)
+    assert got.dtype == dtype
+    full = sp.incomplete_beta(a, b, jnp.asarray(z, jnp.float64))
+    expect = np.asarray(full.astype(dtype), np.float64)
+    np.testing.assert_allclose(np.asarray(got, np.float64), expect, rtol=rtol)
+
+
+@pytest.mark.parametrize(("a", "b"), [(2.0, 1e17), (0.5, 1e20)])
+def test_nan_past_one_over_eps(a, b):
+    """Past ``b ~ 1/eps`` the switch point rounds to 0: ``nan``, by design.
+
+    Without the explicit ``nan`` the arithmetic does not reliably say so: at
+    ``a = 2, b = 1e17`` it returned a finite 8.0e-35 (truth ~1e-34), at
+    ``a = 0.5, b = 1e20`` ``inf`` (truth ~1.8e-10). ``a = 1`` is exempt: its
+    closed form has no switch point to round away, and stays exact.
+    """
+    assert np.isnan(float(sp.incomplete_beta(a, b, jnp.asarray(0.5))))
+
+
+def test_large_a_endpoint_gradients():
+    """`_large_a`'s z = 0 guard and its z = 1 pole guard keep gradients finite."""
+    for k in (0, 1):
+        assert (
+            float(jax.grad(sp.incomplete_beta, k)(24.0, -0.5, jnp.asarray(0.0))) == 0.0
+        )
+    jac = jax.jacrev(
+        lambda b: sp.incomplete_beta(24.0, b, jnp.asarray([0.3, 0.9, 1.0]))
+    )
+    assert bool(jnp.all(jnp.isfinite(jac(-0.5)[:2])))
+
+
+def test_continued_fraction_converged_near_x0():
+    """64 steps: the slowest fraction, just above ``x0`` at small ``a``.
+
+    64 steps pass the 2e-14 asserted here; 48 left 5e-14.
+    """
+    a, b = 0.1, 1e3
+    x0 = (a + 1) / (a + b + 2)
+    z = np.array([x0 * (1 + 1e-9), x0 * 1.05])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    expect = np.array([float(_mp_incomplete_beta(a, b, zi)) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=2e-14)
+
+
+def test_large_a_takes_large_a_below_b_one_tenth():
+    """Just below ``b = 0.1``, large ``a`` goes to `_large_a`, not the reflection.
+
+    At ``a = 50, b = 0.07`` the reflection is 6.4e-14 off (it loses digits as
+    ``b -> 0``); `_large_a` passes the 2e-14 asserted here.
+    """
+    z = np.array([0.5, 0.9, 50 / 52 * 0.999, 0.99])
+    got = np.asarray(sp.incomplete_beta(50.0, 0.07, jnp.asarray(z)))
+    expect = np.array([_mp_hyp2f1_beta(50.0, 0.07, zi) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=2e-14)
+
+
+@pytest.mark.parametrize("a", [0.01, 0.5, 2.0, 8.0])
+@pytest.mark.parametrize("b", [-5.5, -10.0, -50.0, -200.0, -1100.0])
+def test_very_negative_b(a, b):
+    """``b < -5`` (``a <= 8``): the continued fraction, no reflection.
+
+    The series' ``(1-b)_k / k!`` grows like ``(|b| z)^k / k!`` before it
+    decays, so 64 terms were around 1e-11 off at ``b = -10``, wrong by
+    percents at -50, and had no correct digits by -200.
+    """
+    z = np.array([1e-6, 0.01, 0.1, 0.3, LOG1P_BAND, 0.5, 0.7, 0.9, 0.999])
+    got = np.asarray(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    expect = np.array([_mp_hyp2f1_beta(a, b, zi) for zi in z])
+    ok = np.isfinite(expect) & (np.abs(expect) < 1e300) & (expect != 0)
+    np.testing.assert_allclose(got[ok], expect[ok], rtol=2e-12)
+
+
+@pytest.mark.parametrize("a", [0.5, 2.0, 8.0])
+def test_continuous_across_the_negative_b_switch(a):
+    """Series at ``b = -5``, continued fraction just below: they must meet."""
+    z = jnp.asarray([0.05, 0.5, 0.95])
+    at = sp.incomplete_beta(a, -5.0, z)
+    below = sp.incomplete_beta(a, np.nextafter(-5.0, -99), z)
+    np.testing.assert_allclose(np.asarray(at), np.asarray(below), rtol=1e-13)
+
+
+def test_half_precision_series_overflow_is_inf():
+    """Past float16's range the series gives ``inf``, not ``nan`` (2.5e8 here)."""
+    got = sp.incomplete_beta(0.5, -4.5, jnp.asarray([0.99], jnp.float16))
+    assert np.isposinf(np.asarray(got, np.float64)).all()
+
+
+def test_large_a_float32_near_its_overflow():
+    """`_large_a` in float32 up to float32's range, not float64's threshold.
+
+    ``w0^b`` here is ``e^89.5``, past float32's largest value, while the result
+    is 1.5e37; the log-space rescale used to wait for ``b log w0 > 700``.
+    """
+    z = np.array([0.86, 0.862])
+    got = np.asarray(sp.incomplete_beta(12.0, -46.0, jnp.asarray(z, jnp.float32)))
+    expect = np.array([_mp_hyp2f1_beta(12.0, -46.0, zi) for zi in z])
+    np.testing.assert_allclose(got, expect, rtol=3e-5)
+
+
+def _mp_parameter_derivatives(a, b, z):
+    """``(d/da, d/db) B(a, b, z)`` by mpmath, at 50 digits."""
+
+    def f(aa, bb):
+        return mp.mpf(z) ** aa / aa * mp.hyp2f1(aa, 1 - bb, aa + 1, z)
+
+    with mp.workdps(50):
+        da = mp.diff(lambda t: f(t, b), a)
+        db = mp.diff(lambda t: f(a, t), b)
+        return float(da), float(db)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [
+        # `_large_a`: B(a, b, s) at the split is past the float range, so a
+        # shared scalar for it put 0 * inf into the lanes below.
+        (50.0, -250.0, 0.01),
+        (50.0, -1000.0, 0.3),
+        # `_large_a` near z = 1: differentiated through the split point, the two
+        # pieces cancelled at the size of the value (3e-5 at (21.16, -5)).
+        (12.0, -2.5, 1 - 1e-12),
+        (21.16, -5.0, 1 - 1e-12),
+        (20.0, -10.0, 1 - 1e-9),
+        # `_negative_b` near z = 1: the fraction's d/da is a small remainder of
+        # 1/a, and lost 1.6e-5 of it at (0.16, -8.716).
+        (0.1, -5.01, 1 - 1e-9),
+        (0.16, -8.716, 1 - 1e-9),
+        (2.0, -6.0, 1 - 1e-9),
+    ],
+)
+def test_parameter_gradients_large_a_and_negative_b(a, b, z):
+    """Reverse-mode a- and b-gradients against mpmath."""
+    grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
+    got = [float(g) for g in grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
+    np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        (2.0, 1000.0),
+        (0.1, 80.0),
+        (30.0, 100.0),
+        (30.0, -300.0),
+        (50.0, -250.0),
+        (8.01, -500.0),
+        (2.0, -50.0),
+    ],
+)
+def test_parameter_gradients_at_z_eq_0_are_zero(a, b):
+    """``B(a, b, 0) = 0`` for every a, b, so its a- and b-gradients are 0.
+
+    A substitute z of 1/2 ran `_large_b`'s fraction far above its switch point
+    (``h = -27.9`` at (2, 1000), and its `log` was `nan`), and `_split_at`'s
+    substitute at the split overflowed ``(1 - s)^b``: both masked, both `nan`
+    in reverse mode.
+    """
+    grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
+    got = grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(0.0))
+    assert [float(g) for g in got] == [0.0, 0.0]
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [(8.01, -1000.0, 0.51), (50.0, -1000.0, 0.525), (30.0, -500.0, 0.75)],
+)
+def test_parameter_gradients_near_the_top_of_the_float_range(a, b, z):
+    """Values from 5e294 to 6e304: reverse mode as accurate as forward mode.
+
+    The cotangent of ``exp(L)`` is the value itself, which the fraction's
+    recurrence amplified past the float range from about 1e305.
+    """
+    grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
+    got = [float(g) for g in grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
+    np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [
+        (8.0, -700.0, 0.6414),  # `_negative_b`'s tail, 3.8e307
+        (4.0, -1000.0, 0.51261),  # 1.78e308
+        (3.0, -1000.0, 0.512277),
+        (30.0, -250.0, 0.9376),  # `_large_a`'s tail, 9.8e297
+        (30.0, -250.0, 0.941189),  # 3.0e304
+        (50.0, -215.0, 0.96),
+    ],
+)
+def test_reverse_mode_in_the_tail_up_to_dbl_max(a, b, z):
+    """Reverse mode as accurate as forward mode up to the top of the range.
+
+    Scaled by ``w0^b`` alone, ``(w / w0)^b`` overflowed in the sum, and reverse
+    mode multiplied the sum's intermediates by ``w0^b`` first: ``nan`` from
+    about 1e297.
+    """
+    grad = jax.jit(jax.grad(sp.incomplete_beta, (0, 1)))
+    got = [float(g) for g in grad(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
+    np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
+
+
+def test_forward_mode_in_the_negative_b_tail_near_dbl_max():
+    """The same at 3.8e307 by `jax.jacfwd`."""
+    a, b, z = 8.0, -700.0, 0.6414
+    jac = jax.jacfwd(sp.incomplete_beta, (0, 1))
+    got = [float(g) for g in jac(jnp.asarray(a), jnp.asarray(b), jnp.asarray(z))]
+    np.testing.assert_allclose(got, _mp_parameter_derivatives(a, b, z), rtol=2e-13)
+
+
+def test_a_lane_past_the_range_leaves_the_others_finite():
+    """``(50, -400, 0.99)`` is past the float range; ``z = 0.3`` beside it is not.
+
+    The shared ``a`` and ``b`` sum every lane's cotangent, and the masked lane's
+    ``0 * inf`` made the finite lane's gradient ``nan``.
+    """
+    z = jnp.array([0.3, 0.99])
+    got = float(jax.grad(lambda a: sp.incomplete_beta(a, -400.0, z)[0])(50.0))
+    np.testing.assert_allclose(
+        got, _mp_parameter_derivatives(50.0, -400.0, 0.3)[0], rtol=2e-13
+    )
+    rows = np.asarray(
+        jax.jacrev(lambda a: sp.incomplete_beta(a, -1000.0, jnp.array([0.3, 1.0])))(
+            50.0
+        )
+    )
+    np.testing.assert_allclose(
+        rows[0], _mp_parameter_derivatives(50.0, -1000.0, 0.3)[0], rtol=2e-13
+    )
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [
+        (2.0, -20.0, 0.5),  # _negative_b, at its split z = 1/2
+        (20.0, -5.0, 20.0 / 22.0),  # _large_a, at its split a/(a+2)
+        (9.0, -1.0, 9.0 / 11.0),
+        (30.0, -2.0, 30.0 / 32.0),  # 1 - split == w0 exactly
+        # An ulp or two above the split, where the tail's sum rounds to <= 0.
+        (12.0, -0.5, 0.8571428571428572),
+        (9.0, -1.0, 0.8181818181818185),
+    ],
+)
+def test_mixed_partials_at_the_split(a, b, z):
+    """``d/dz d/da B`` and ``d/dz d/db B`` exactly at `_split_at`'s split.
+
+    There the tail has zero (or one ulp of negative) length, so its tangent
+    was 0, and the fraction was held at the split: both partials came out 0,
+    where they are ``log(z) I`` and ``log(1-z) I``, ``I`` the integrand.
+    """
+    d_a = float(jax.grad(jax.grad(sp.incomplete_beta, 0), 2)(a, b, z))
+    d_b = float(jax.grad(jax.grad(sp.incomplete_beta, 1), 2)(a, b, z))
+    with mp.workdps(30):
+        zz = mp.mpf(z)
+        integrand = zz ** (a - 1) * (1 - zz) ** (b - 1)
+        want_a, want_b = float(mp.log(zz) * integrand), float(mp.log1p(-zz) * integrand)
+    np.testing.assert_allclose([d_a, d_b], [want_a, want_b], rtol=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z"),
+    [(1100.0, -1100.0, 0.5), (1e4, -400.0, 0.9), (2000.0, -1500.0, 0.4)],
+)
+def test_z_derivative_where_its_factors_overflow(a, b, z):
+    """``dB/dz = z^(a-1) (1-z)^(b-1)`` where one factor alone underflows.
+
+    Formed separately, ``0.5^1099`` underflows and ``0.5^-1101`` overflows, and
+    their product was ``0 * inf = nan`` where the derivative is 4.0. Both the
+    reverse and forward z-derivative, and the forward a/b entries the `nan` met.
+    """
+    with mp.workdps(50):
+        zz = mp.mpf(z)
+        expect = float(zz ** (a - 1) * (1 - zz) ** (b - 1))
+    rev = float(jax.grad(sp.incomplete_beta, 2)(a, b, z))
+    np.testing.assert_allclose(rev, expect, rtol=1e-11)
+    fwd = jax.jacfwd(sp.incomplete_beta, (0, 1, 2))(a, b, z)
+    assert all(bool(jnp.isfinite(g)) for g in fwd), fwd
+    np.testing.assert_allclose(float(fwd[2]), expect, rtol=1e-11)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z", "dtype"),
+    [
+        (1024.0, -1022.0, 0.502, jnp.float64),
+        (1024.0, -1022.0, 0.5007, jnp.float64),
+        (100.0, -120.0, 0.52, jnp.float32),
+        (128.0, -126.0, 0.502, jnp.float32),
+    ],
+)
+def test_z_derivative_with_concrete_parameters_near_a_factor_s_limit(a, b, z, dtype):
+    """Concrete ``a`` and ``b`` that keep the plain product of powers must be safe.
+
+    Below an exponent of ``log(max) / log 2`` a factor could still leave the
+    float range while the derivative is moderate: ``(1-z)^-1023`` overflows at
+    ``z = 0.502`` while ``z^1023`` does not bring it back, so the z-gradient was
+    ``inf`` where it is 3583; in float32, ``0.502^127`` flushed to 0.
+    """
+    zz = jnp.asarray(z, dtype)
+    with mp.workdps(50):
+        zm = mp.mpf(float(zz))
+        expect = float(zm ** (a - 1) * (1 - zm) ** (b - 1))
+    got = float(jax.jit(jax.grad(lambda t: sp.incomplete_beta(a, b, t)))(zz))
+    np.testing.assert_allclose(
+        got, expect, rtol=1e-11 if dtype == jnp.float64 else 1e-4
+    )
+
+
+@pytest.mark.parametrize("dtype", [jnp.float64, jnp.float32])
+@pytest.mark.parametrize("side", [-1, 1])
+def test_z_derivative_at_the_product_bound(dtype, side):
+    """Mixed-sign exponents just inside and just past ``maxexp / (nmant + 1)``.
+
+    Inside, concrete ``a`` and ``b`` take the plain product of powers, which
+    must hold even one ulp from ``z = 1``; past it, the exponential. Either way
+    the z-derivative matches the integrand wherever that is in range, and is
+    ``inf`` or 0 only where it is not.
+    """
+    info = jnp.finfo(dtype)
+    bound = info.maxexp / (info.nmant + 1)
+    e = bound * (1 + side * 1e-3)
+    a, b = 1.0 + e, 1.0 - e
+    one_ulp = 1.0 - 2.0 ** -(info.nmant + 1)
+    grad = jax.jit(jax.grad(lambda t: sp.incomplete_beta(a, b, t)))
+    for z in (one_ulp, 0.999, 0.9, 0.5, 0.1, 2.0 ** -(info.nmant + 1)):
+        zz = jnp.asarray(z, dtype)
+        got = float(grad(zz))
+        with mp.workdps(50):
+            zm = mp.mpf(float(zz))
+            want = zm ** (a - 1) * (1 - zm) ** (b - 1)
+        if want > float(info.max):
+            assert got == np.inf, (z, got)
+        elif want < float(info.tiny):
+            assert got < float(info.tiny), (z, got)
+        else:
+            np.testing.assert_allclose(
+                got, float(want), rtol=1e-10 if dtype == jnp.float64 else 1e-3
+            )
+
+
+@pytest.mark.parametrize("strong", [False, True])
+def test_large_b_past_one_over_eps_in_float32(strong):
+    """Past ``b ~ 1/eps`` of ``z``'s dtype the result is `nan`, not a wrong number.
+
+    The guard looked at the switch point in float64 when ``a`` and ``b`` were
+    Python floats, so float32 at ``b = 1e8`` returned -1.5e-16 (truth 8.4e-17).
+    """
+    b = jnp.asarray(1e8, jnp.float32) if strong else 1e8
+    got = sp.incomplete_beta(2.0, b, jnp.asarray(3.3e-8, jnp.float32))
+    assert got.dtype == jnp.float32
+    assert bool(jnp.isnan(got))
+
+
+def test_z_derivative_in_half_precision_past_a_factor_s_range():
+    """float16: ``(1-z)^-4`` at ``z = 0.95`` is 1.6e5, past float16's range.
+
+    The derivative itself, 61569, is not; the rule now works in float32 and
+    rounds once.
+    """
+    z16 = jnp.asarray(0.95, jnp.float16)
+    zf = float(z16)
+    got = jax.grad(sp.incomplete_beta, 2)(20.0, -3.0, z16)
+    assert got.dtype == jnp.float16
+    expect = float(jnp.asarray(zf**19 * (1 - zf) ** -4, jnp.float16))
+    assert float(got) == expect
+
+
+@pytest.mark.parametrize(
+    ("a", "b"), [(100.0, -164.29), (100.0, -120.0), (12.0, -356.5), (9.0, -381.57)]
+)
+def test_large_a_just_above_the_split(a, b):
+    """``B(s) + int_{1-z}^{w0}`` needs ``w0 = 1 - s`` exactly.
+
+    Rounded separately, ``2/(a+2)`` and ``a/(a+2)`` miss by an ulp, and the
+    identity by about ``|b| (a+2)/2 * 5e-17`` relative: 3.7e-13 at (100,
+    -164.29), past the 2e-13 asserted here.
+    """
+    z = float(np.nextafter(a / (a + 2.0), 2.0))
+    with mp.workdps(50):
+        zz = mp.mpf(z)
+        expect = float(zz**a / a * mp.hyp2f1(a, 1 - b, a + 1, zz))
+    got = float(sp.incomplete_beta(a, b, jnp.asarray(z)))
+    np.testing.assert_allclose(got, expect, rtol=2e-13)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "z", "dtype"),
+    [
+        (2.0, -300.0, 0.999, jnp.float64),  # _negative_b, above its split
+        (2.0, -150.0, 0.999, jnp.float64),
+        (9.0, -300.0, 0.999, jnp.float64),  # _large_a, above its split
+        (2.0, -40.0, 0.99, jnp.float32),
+    ],
+)
+def test_parameter_gradients_are_zero_where_the_value_is_inf(a, b, z, dtype):
+    """Past the float range the a- and b-gradients are 0, as at the pole.
+
+    Above the split the value is B(a, b, s) plus the tail; only the tail's
+    tangent was zeroed past the range, so the gradients were those of the
+    finite B(a, b, s): -2.4e87 at (2, -300, 0.999), the gradient at z = 1/2.
+    """
+    zz = jnp.asarray(z, dtype)
+    f = lambda aa, bb: sp.incomplete_beta(aa, bb, zz)
+    assert bool(jnp.isinf(f(a, b)))
+    rev = jax.grad(f, argnums=(0, 1))(a, b)
+    fwd = jax.jacfwd(f, argnums=(0, 1))(a, b)
+    jit_rev = jax.jit(jax.grad(f, argnums=(0, 1)))(a, b)  # traced a, b: _dispatch
+    for g in (*rev, *fwd, *jit_rev):
+        assert float(g) == 0.0, (rev, fwd, jit_rev)
+
+
+@pytest.mark.parametrize(
+    ("b", "z", "dtype"), [(-10.0, 0.6, jnp.bfloat16), (-3.0, 0.9, jnp.float16)]
+)
+def test_a_eq_1_half_precision(b, z, dtype):
+    """The closed form at ``a == 1`` in float32, rounded once (4% off in bfloat16)."""
+    zz = jnp.asarray(z, dtype)
+    got = sp.incomplete_beta(1.0, b, zz)
+    assert got.dtype == dtype
+    exact = (1 - (1 - float(zz)) ** b) / b  # at the rounded z
+    assert float(got) == float(jnp.asarray(exact, jnp.float32).astype(dtype))
+
+
+@pytest.mark.parametrize(("a", "b"), [(2.0, 1.5), (20.0, -20.0), (3.0, -20.0)])
+def test_float32_parameter_with_a_python_float_differentiates(a, b):
+    """A float32 ``a`` traced against a Python-float ``b`` and ``z``.
+
+    Every branch is traced under `lax.switch`; the rule scaling the tangents of
+    `_large_a` and `_negative_b` formed them in float32 against a float64 primal
+    and `jax.jvp` raised `TypeError`, in every regime.
+    """
+    f32 = jnp.float32
+    got = jax.grad(lambda aa: sp.incomplete_beta(aa, b, 0.4))(f32(a))
+    assert got.dtype == f32
+    expect = jax.grad(lambda aa: sp.incomplete_beta(aa, b, 0.4))(a)
+    np.testing.assert_allclose(float(got), float(expect), rtol=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("a", "z"),
+    [(jnp.float64(1.0), jnp.float32(0.5)), (jnp.float32(1.0), jnp.bfloat16(0.5))],
+)
+def test_a_eq_1_dtype_includes_a_strong_a(a, z):
+    """``result_type(a, b, z)`` at ``a == 1`` too, as at ``a = 1.0001``."""
+    got = sp.incomplete_beta(a, -10.0, z)
+    other = sp.incomplete_beta(a + np.asarray(1e-4, a.dtype), -10.0, z)
+    assert got.dtype == other.dtype == jnp.result_type(a, -10.0, z)
+
+
+@pytest.mark.parametrize(("a", "b"), [(2.0, 50.0), (2.0, 200.0), (12.0, -5.0)])
+def test_closed_over_concrete_array_parameters_under_jit(a, b):
+    """REGRESSION: concrete jax-array ``a``, ``b`` closed over in `jit` raised.
+
+    The static branch choice compared them with `>`, which an enclosing `jit`
+    stages into a tracer, so the comparison raised `TracerBoolConversionError`.
+    """
+    z = jnp.asarray([0.3, 0.7])
+    aa, bb = jnp.asarray(a), jnp.asarray(b)
+    got = jax.jit(lambda zz: sp.incomplete_beta(aa, bb, zz))(z)
+    np.testing.assert_allclose(got, sp.incomplete_beta(a, b, z), rtol=1e-14)
+
+
+@pytest.mark.parametrize("b", [np.float32(-3), jnp.asarray(-3.0, jnp.float16)])
+def test_a_eq_1_casts_a_lower_precision_b_up(b):
+    """REGRESSION: at ``a == 1`` a strong low-precision ``b`` set the precision.
+
+    The closed form ran ``log|b|`` and ``1/|b|`` in ``b``'s dtype, 1e-5 off in
+    float16, while the other paths cast ``b`` to the common dtype. ``b = -3`` is
+    exact in every dtype, and ``B(1, -3, 1/2) = 7/3``.
+    """
+    got = sp.incomplete_beta(1.0, b, jnp.asarray(0.5, jnp.float64))
+    assert got.dtype == jnp.float64
+    np.testing.assert_allclose(float(got), 7 / 3, rtol=1e-15)
+
+
+def test_a_eq_1_keeps_a_strong_a_strong():
+    """REGRESSION: a strong ``a == 1`` with weak ``b``, ``z`` gave a weak result.
+
+    The closed form dropped ``a`` after promotion, so its result was weak where
+    the branch dispatch (any other ``a`` of the same type) returns a strong one.
+    """
+    a = jnp.asarray(1.0, jnp.float64)
+    near = jnp.nextafter(a, 2.0)
+    got = sp.incomplete_beta(a, -8.0, 0.5)
+    assert not got.weak_type
+    assert got.dtype == sp.incomplete_beta(near, -8.0, 0.5).dtype

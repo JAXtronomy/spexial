@@ -18,7 +18,12 @@ from scipy.integrate import quad
 from scipy.special import beta as scipy_beta, betainc as scipy_betainc, hyp2f1
 
 import spexial as sp
-from spexial._src.beta import _EXPRL_BAND, _incomplete_beta_core, _is_static_one
+from spexial._src.beta import (
+    _EXPRL_BAND,
+    _SERIES,
+    _incomplete_beta_core,
+    _is_static_one,
+)
 
 # `a > 0` always. `b` is any real: the negative and zero values are the reason
 # this exists, and come up as ordinary slopes in double power-law profiles.
@@ -99,11 +104,8 @@ def test_branch_switch_is_continuous(a, b):
     them, so a step here would be invisible to every other test -- they sample
     both sides but never the seam.
 
-    The tolerance is the *measured* step, not machine precision: the two
-    series truncate differently, so they meet to about 1e-11 relative rather
-    than exactly. Worst over this grid is 2.9e-11, at ``a = 4.5, b = -2.5``,
-    which is comfortably inside the 1e-11 rtol the reference tests assert
-    against `hyp2f1` -- the seam is not the accuracy-limiting feature.
+    The tolerance is looser than machine precision: the two series truncate
+    differently, so they meet to about 1e-11 relative rather than exactly.
     """
     below = float(sp.incomplete_beta(a, b, jnp.asarray(0.5 - 1e-12)))
     above = float(sp.incomplete_beta(a, b, jnp.asarray(0.5 + 1e-12)))
@@ -223,11 +225,16 @@ def test_jit_and_vmap_compose():
     np.testing.assert_allclose(np.asarray(mapped), np.asarray(direct), rtol=1e-14)
 
 
-def test_integer_arguments_are_promoted():
-    """Integer ``a``/``b``/``z`` promote to float, as everywhere else here."""
-    got = sp.incomplete_beta(2, 1, jnp.asarray(1))
+@pytest.mark.parametrize("b", [1, 20])
+def test_integer_arguments_are_promoted(b):
+    """Integer ``a``/``b``/``z`` promote to float, as everywhere else here.
+
+    ``b = 20`` takes the continued fraction, where an integer ``z`` once carried
+    its dtype into the switch point and truncated it to zero: the answer was 0.
+    """
+    got = sp.incomplete_beta(2, b, jnp.asarray(1))
     assert jnp.issubdtype(got.dtype, jnp.floating)
-    np.testing.assert_allclose(float(got), scipy_beta(2.0, 1.0), rtol=1e-12)
+    np.testing.assert_allclose(float(got), scipy_beta(2.0, b), rtol=1e-12)
 
 
 # ============================================================================
@@ -240,7 +247,7 @@ def test_a_eq_1_closed_form_matches_the_series(b):
     z = jnp.asarray(ZS)
     np.testing.assert_allclose(
         np.asarray(sp.incomplete_beta(1.0, b, z)),
-        np.asarray(_incomplete_beta_core(1.0, b, z)),
+        np.asarray(_incomplete_beta_core(1.0, b, z, _SERIES)),
         rtol=1e-11,
     )
 
@@ -350,7 +357,8 @@ def test_a_eq_1_keeps_the_input_dtype(z):
 
     Otherwise the output dtype would depend on whether ``a`` happens to be 1.
     """
-    got, series = sp.incomplete_beta(1.0, 0.5, z), _incomplete_beta_core(1.0, 0.5, z)
+    got = sp.incomplete_beta(1.0, 0.5, z)
+    series = _incomplete_beta_core(1.0, 0.5, z, _SERIES)
     assert (got.dtype, got.weak_type) == (series.dtype, series.weak_type)
 
 
@@ -412,7 +420,7 @@ def test_a_eq_1_higher_b_derivatives_across_the_series_band(side, n):
     """The 2nd and 3rd ``b``-derivatives are right on both sides of the band.
 
     The direct quotient's derivatives cancel as ``|x| -> 0``; `_EXPRL_BAND` is
-    where they are still accurate (3e-15 / 8e-14 at ``|x| = 1/2``). Narrowed to
+    where they are still accurate, within the 1e-12 asserted here. Narrowed to
     0.05 they were 2e-12 / 2e-10, which the first derivative alone did not show.
     """
     z = 0.9
@@ -449,7 +457,8 @@ def test_a_eq_1_in_the_log1p_band(b):
     The closed form multiplies that by ``|bL|``: 7e-12 at ``b = -500``. `_log1m`
     switches to ``log(1 - z)`` there, with the rounding of ``1 - z`` added back:
     without it the worst is 1.1e-13, and 1.5e-13 under jax 0.12's `log`. With
-    it, 8.0e-14 on both. A 25-point grid missed the worst point, so the grid is
+    it, both pass the 1e-13 asserted here. A 25-point grid missed the worst
+    point, so the grid is
     fine enough to find it.
     """
     z = np.linspace(0.3, 0.42, 401)
